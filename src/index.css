@@ -1,0 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-serif: 'Source Serif 4', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+    
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    --color-bg-base: #FFFFFF;
+    --color-bg-sidebar: #F2EFEB;
+    --color-bg-card: #FFFFFF;
+    
+    --color-border-color: #E6E4DF;
+    --color-text-primary: #121212;
+    --color-text-secondary: #6B6965;
+    
+    --color-accent-primary: #D97757;
+    --color-accent-success: #2A7E4F;
+    --color-accent-error: #B93026;
+    --color-button-main: #1A1918;
+    
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: #FFFFFF;
+    --foreground: #121212;
+    --card: #FFFFFF;
+    --card-foreground: #121212;
+    --popover: #FFFFFF;
+    --popover-foreground: #121212;
+    --primary: #1A1918;
+    --primary-foreground: #FFFFFF;
+    --secondary: #F2EFEB;
+    --secondary-foreground: #121212;
+    --muted: #F2EFEB;
+    --muted-foreground: #6B6965;
+    --accent: #F2EFEB;
+    --accent-foreground: #121212;
+    --destructive: #B93026;
+    --destructive-foreground: #FFFFFF;
+    --border: #E6E4DF;
+    --input: #E6E4DF;
+    --ring: #1A1918;
+    --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans text-[14px] leading-relaxed tracking-[-0.01em];
+  }
+  .claude-shadow {
+    box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05), 0 2px 8px -1px rgba(0, 0, 0, 0.03);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif tracking-tight;
+  }
+}
