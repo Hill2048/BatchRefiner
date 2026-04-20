@@ -80,6 +80,8 @@ export default function App() {
                </span>
                <span className="w-px h-3 bg-border" />
                <span className={`font-medium ${isBatchRunning ? 'text-button-main' : ''}`}>{isBatchRunning ? '处理中...' : '准备就绪'}</span>
+               <span className="w-px h-3 bg-border/70" />
+               <span className="text-[10px] tracking-[0.12em] text-black/30 select-none">V1.1</span>
              </div>
           </div>
         </main>
