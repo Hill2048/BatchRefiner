@@ -1,0 +1,52 @@
+export type TaskStatus = 'Idle' | 'Waiting' | 'Prompting' | 'Rendering' | 'Running' | 'Success' | 'Error';
+export type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4' | '2:3' | '3:2' | string;
+export type Resolution = '1K' | '2K' | '4K' | string;
+export type PlatformPreset = 'openai-compatible' | 'gemini-native' | 'comfly-chat' | 'yunwu' | 'custom';
+
+export interface ErrorLog {
+  message: string;
+  time: number;
+  stage?: string;
+}
+
+export interface Task {
+  id: string;
+  index: number;
+  title: string;
+  description: string;
+  sourceImage?: string;
+  referenceImages: string[];
+  promptText?: string;
+  resultImage?: string;
+  resultImagePreview?: string;
+  resultImageOriginal?: string;
+  resultImageSourceType?: 'preview' | 'original' | 'base64';
+  promptSource?: 'auto' | 'manual';
+  lastUsedImageModel?: string;
+  resultImageWidth?: number;
+  resultImageHeight?: number;
+  status: TaskStatus;
+  errorLog?: ErrorLog;
+  exported?: boolean;
+  aspectRatio?: AspectRatio;
+  resolution?: Resolution;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectData {
+  projectId: string;
+  projectName: string;
+  platformPreset: PlatformPreset;
+  globalSkillText: string;
+  globalTargetText: string;
+  globalReferenceImages: string[];
+  skillFileName: string;
+  imageModel: string;
+  textModel: string;
+  globalAspectRatio?: AspectRatio;
+  globalResolution?: Resolution;
+  createdAt: number;
+  updatedAt: number;
+  tasks: Task[];
+}

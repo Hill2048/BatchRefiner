@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-serif: 'Source Serif 4', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+    
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-border: var(--border);
+
+    --color-bg-base: #F9F8F6;
+    --color-bg-sidebar: #F9F8F6;
+    --color-bg-workspace: #FFFFFF;
+    
+    --color-border-color: #EAE9E5;
+    --color-text-primary: #1A1918;
+    --color-text-secondary: #6B6965;
+    --color-button-main: #D97757;
+    
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: #F9F8F6;
+    --foreground: #1A1918;
+    --card: #FFFFFF;
+    --card-foreground: #1A1918;
+    --popover: #FFFFFF;
+    --popover-foreground: #1A1918;
+    --primary: #D97757;
+    --primary-foreground: #FFFFFF;
+    --secondary: #F0EFEA;
+    --secondary-foreground: #1A1918;
+    --muted: #F0EFEA;
+    --muted-foreground: #6B6965;
+    --accent: #F0EFEA;
+    --accent-foreground: #1A1918;
+    --border: #EAE9E5;
+    --input: #EAE9E5;
+    --ring: #D97757;
+    --button-main: #D97757;
+    --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans text-[14.7px] leading-relaxed tracking-[-0.01em];
+  }
+  .claude-shadow {
+    box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.04), 0 4px 12px -2px rgba(0, 0, 0, 0.02);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif tracking-tight;
+  }
+}
