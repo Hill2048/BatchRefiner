@@ -38,6 +38,7 @@ export interface ProjectData {
   projectId: string;
   projectName: string;
   platformPreset: PlatformPreset;
+  downloadDirectoryName?: string;
   globalSkillText: string;
   globalTargetText: string;
   globalReferenceImages: string[];

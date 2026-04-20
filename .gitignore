@@ -1,6 +1,8 @@
 node_modules/
 build/
 dist/
+dev-dist/
+BatchRefiner-dist.zip
 coverage/
 .DS_Store
 *.log

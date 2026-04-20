@@ -1,4 +1,4 @@
-import { FileUp, Table, Folder, Plus, Trash2, Check } from 'lucide-react';
+import { Download, Folder, Plus, Trash2, Check } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useAppStore } from '@/store';
 import * as React from 'react';
@@ -12,6 +12,25 @@ export function Topbar() {
   const [localProjectName, setLocalProjectName] = React.useState(projectName || '');
   const [projects, setProjects] = React.useState<ProjectMeta[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = React.useState(false);
+  const [installPromptEvent, setInstallPromptEvent] = React.useState<BeforeInstallPromptEvent | null>(null);
+
+  React.useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPromptEvent(event as BeforeInstallPromptEvent);
+    };
+
+    const handleAppInstalled = () => {
+      setInstallPromptEvent(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
 
   React.useEffect(() => {
      setLocalProjectName(projectName || '');
@@ -47,6 +66,13 @@ export function Topbar() {
     if (id === projectId) return;
     await switchProject(id);
     setIsPopoverOpen(false);
+  };
+
+  const handleInstallApp = async () => {
+    if (!installPromptEvent) return;
+    await installPromptEvent.prompt();
+    await installPromptEvent.userChoice;
+    setInstallPromptEvent(null);
   };
 
   return (
@@ -120,6 +146,20 @@ export function Topbar() {
           </Popover>
 
         </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {installPromptEvent && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-xl bg-white/70"
+            onClick={handleInstallApp}
+          >
+            <Download className="w-3.5 h-3.5 mr-1" />
+            安装应用
+          </Button>
+        )}
       </div>
     </header>
   );

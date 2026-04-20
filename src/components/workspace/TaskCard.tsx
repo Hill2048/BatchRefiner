@@ -46,6 +46,8 @@ export const TaskCard = React.memo(function TaskCard({
   const isSelected = useAppStore(state => state.selectedTaskIds.includes(taskId));
   const toggleTaskSelection = useAppStore(state => state.toggleTaskSelection);
   const globalReferenceImages = useAppStore(state => state.globalReferenceImages);
+  const globalAspectRatio = useAppStore(state => state.globalAspectRatio);
+  const globalResolution = useAppStore(state => state.globalResolution);
 
   if (!task) return null;
 
@@ -105,17 +107,24 @@ export const TaskCard = React.memo(function TaskCard({
 
   const idStr = `#${task.index.toString().padStart(3, '0')}`;
 
-  const getResolutionBadge = () => {
-    if (!task.resultImageWidth || !task.resultImageHeight) return null;
-    const longestEdge = Math.max(task.resultImageWidth, task.resultImageHeight);
-    if (longestEdge > 2560) return '4K';
-    if (longestEdge > 1280) return '2K';
-    return '1K';
-  };
-
   const getOutputSizeLabel = () => {
     if (!task.resultImageWidth || !task.resultImageHeight) return null;
     return `${task.resultImageWidth} × ${task.resultImageHeight}`;
+  };
+
+  const hasTaskReferenceImages = (task.referenceImages?.length || 0) > 0;
+  const hasCustomAspectRatio = Boolean(task.aspectRatio && task.aspectRatio !== globalAspectRatio);
+  const hasCustomResolution = Boolean(task.resolution && task.resolution !== globalResolution);
+
+  const getCompactParamsLabel = () => {
+    const parts: string[] = [];
+    if (hasCustomAspectRatio && task.aspectRatio) {
+      parts.push(task.aspectRatio === 'auto' ? '??' : task.aspectRatio);
+    }
+    if (hasCustomResolution && task.resolution) {
+      parts.push(task.resolution);
+    }
+    return parts.join(' ? ');
   };
 
   const handleRunTask = (e: React.MouseEvent) => {
@@ -194,7 +203,8 @@ export const TaskCard = React.memo(function TaskCard({
       return (
         <div className="w-full h-full rounded-none overflow-hidden relative group/source">
           <img src={task.sourceImage} alt="Source" loading="lazy" decoding="async" className="w-full h-full object-contain drop-shadow-sm" referrerPolicy="no-referrer" draggable={false} onDragStart={preventNativeImageDrag} />
-          {isActive && (
+
+        {isActive && (
             <div
               className="absolute inset-0 bg-black/40 opacity-0 group-hover/source:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
               onClick={(e) => {
@@ -301,9 +311,8 @@ export const TaskCard = React.memo(function TaskCard({
 
         {task.resultImageWidth && task.resultImageHeight && (
           <div className="absolute left-3 bottom-3 z-20 pointer-events-none">
-            <div className="inline-flex items-center gap-1.5 rounded-md border border-black/8 bg-white/72 px-2 py-1 text-[10.5px] text-black/45 backdrop-blur-sm shadow-sm">
+            <div className="inline-flex items-center rounded-md border border-black/10 bg-white/68 px-2 py-1 text-[10.5px] text-black/45 backdrop-blur-sm">
               <span className="font-mono">{getOutputSizeLabel()}</span>
-              <span>{getResolutionBadge()}</span>
             </div>
           </div>
         )}
@@ -353,6 +362,41 @@ export const TaskCard = React.memo(function TaskCard({
         </div>
 
         {!isActive && task.description && <div className="text-[11.55px] text-text-secondary truncate mt-1">{task.description}</div>}
+
+        {!isActive && (hasTaskReferenceImages || hasCustomAspectRatio || hasCustomResolution) && (
+          <div className="mt-2 flex items-center gap-2 min-h-[28px]">
+            {hasTaskReferenceImages && (
+              <div className="flex items-center gap-1.5">
+                {task.referenceImages.slice(0, 2).map((img, i) => (
+                  <div
+                    key={`${task.id}-compact-ref-${i}`}
+                    className="w-7 h-7 rounded-md overflow-hidden border border-black/10 bg-white shadow-sm"
+                    title="任务参考图"
+                  >
+                    <img
+                      src={img}
+                      className="w-full h-full object-cover"
+                      alt="Task reference"
+                      draggable={false}
+                      onDragStart={preventNativeImageDrag}
+                    />
+                  </div>
+                ))}
+                {(task.referenceImages?.length || 0) > 2 && (
+                  <div className="h-7 min-w-7 px-1.5 rounded-md border border-black/8 bg-black/[0.03] text-[10.5px] text-black/45 flex items-center justify-center shadow-sm">
+                    +{(task.referenceImages?.length || 0) - 2}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {(hasCustomAspectRatio || hasCustomResolution) && (
+              <div className="inline-flex items-center rounded-md border border-black/10 bg-black/[0.025] px-2 py-1 text-[10.5px] text-black/55">
+                {getCompactParamsLabel()}
+              </div>
+            )}
+          </div>
+        )}
 
         {isActive && (
           <div className="mt-3 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300 w-full min-w-0">
@@ -437,10 +481,10 @@ export const TaskCard = React.memo(function TaskCard({
               <div className="flex flex-col justify-between gap-2 px-4 py-3 min-w-[152px]">
                 <span className="text-[9.45px] font-bold text-black/45 uppercase tracking-wider">专属参数</span>
                 <GenerateParamsSelector
-                  aspectRatio={task.aspectRatio || useAppStore.getState().globalAspectRatio}
-                  resolution={task.resolution || useAppStore.getState().globalResolution}
-                  onAspectRatioChange={(ar) => updateTask(task.id, { aspectRatio: ar === useAppStore.getState().globalAspectRatio ? undefined : ar })}
-                  onResolutionChange={(res) => updateTask(task.id, { resolution: res === useAppStore.getState().globalResolution ? undefined : res })}
+                  aspectRatio={task.aspectRatio || globalAspectRatio}
+                  resolution={task.resolution || globalResolution}
+                  onAspectRatioChange={(ar) => updateTask(task.id, { aspectRatio: ar === globalAspectRatio ? undefined : ar })}
+                  onResolutionChange={(res) => updateTask(task.id, { resolution: res === globalResolution ? undefined : res })}
                   triggerClassName="w-fit h-9 text-[10.5px] px-3 bg-white shadow-sm border-black/10 hover:border-black/20"
                 />
               </div>

@@ -1,10 +1,12 @@
 import * as React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useAppStore } from '@/store';
 import { PlatformPreset } from '@/types';
 import { toast } from 'sonner';
+import { clearDownloadDirectory, pickDownloadDirectory, supportsDirectoryDownload } from '@/lib/downloadDirectory';
 
 const PLATFORM_PRESETS: Array<{
   value: PlatformPreset;
@@ -14,16 +16,16 @@ const PLATFORM_PRESETS: Array<{
   defaultImageModel: string;
 }> = [
   {
-    value: 'comfly-chat',
-    label: 'comfly.chat',
-    defaultBaseUrl: 'https://ai.comfly.chat',
+    value: 'yunwu',
+    label: '云雾',
+    defaultBaseUrl: 'https://yunwu.ai',
     defaultTextModel: 'gemini-3.1-flash-lite-preview',
     defaultImageModel: 'gemini-3.1-flash-image-preview',
   },
   {
-    value: 'yunwu',
-    label: '云雾',
-    defaultBaseUrl: 'https://yunwu.ai',
+    value: 'comfly-chat',
+    label: 'comfly.chat',
+    defaultBaseUrl: 'https://ai.comfly.chat',
     defaultTextModel: 'gemini-3.1-flash-lite-preview',
     defaultImageModel: 'gemini-3.1-flash-image-preview',
   },
@@ -51,42 +53,43 @@ const PLATFORM_PRESETS: Array<{
 ];
 
 function getPresetConfig(preset: PlatformPreset) {
-  return PLATFORM_PRESETS.find(item => item.value === preset) || PLATFORM_PRESETS[0];
+  return PLATFORM_PRESETS.find((item) => item.value === preset) || PLATFORM_PRESETS[0];
 }
 
-export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
+export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const store = useAppStore();
-  const [platformPreset, setPlatformPreset] = React.useState<PlatformPreset>(store.platformPreset || 'comfly-chat');
+  const [platformPreset, setPlatformPreset] = React.useState<PlatformPreset>(store.platformPreset || 'yunwu');
   const [apiKey, setApiKey] = React.useState(store.apiKey);
   const [apiBaseUrl, setApiBaseUrl] = React.useState(store.apiBaseUrl);
-  const [maxConcurrency, setMaxConcurrency] = React.useState(store.maxConcurrency.toString());
+  const [maxConcurrency, setMaxConcurrency] = React.useState(String(store.maxConcurrency));
   const [localTextModel, setLocalTextModel] = React.useState(store.textModel || 'gemini-3.1-flash-lite-preview');
   const [localImageModel, setLocalImageModel] = React.useState(store.imageModel || 'gemini-3.1-flash-image-preview');
+  const [downloadDirectoryName, setDownloadDirectoryName] = React.useState(store.downloadDirectoryName || '');
+  const [isPickingDirectory, setIsPickingDirectory] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
-  const [testResult, setTestResult] = React.useState<{ status: 'idle' | 'success' | 'error'; msg: string }>({ status: 'idle', msg: '' });
+  const [testResult, setTestResult] = React.useState<{ status: 'idle' | 'success' | 'error'; msg: string }>({
+    status: 'idle',
+    msg: '',
+  });
 
   React.useEffect(() => {
-    setPlatformPreset(store.platformPreset || 'comfly-chat');
+    setPlatformPreset(store.platformPreset || 'yunwu');
     setApiKey(store.apiKey);
     setApiBaseUrl(store.apiBaseUrl);
-    setMaxConcurrency(store.maxConcurrency.toString());
+    setMaxConcurrency(String(store.maxConcurrency));
     setLocalTextModel(store.textModel || 'gemini-3.1-flash-lite-preview');
     setLocalImageModel(store.imageModel || 'gemini-3.1-flash-image-preview');
-  }, [open, store.apiKey, store.apiBaseUrl, store.imageModel, store.maxConcurrency, store.platformPreset, store.textModel]);
+    setDownloadDirectoryName(store.downloadDirectoryName || '');
+    setTestResult({ status: 'idle', msg: '' });
+    setIsPickingDirectory(false);
+  }, [open, store.apiKey, store.apiBaseUrl, store.downloadDirectoryName, store.imageModel, store.maxConcurrency, store.platformPreset, store.textModel]);
 
   const applyPreset = (preset: PlatformPreset) => {
     setPlatformPreset(preset);
     const presetConfig = getPresetConfig(preset);
-
-    if (presetConfig.defaultBaseUrl) {
-      setApiBaseUrl(presetConfig.defaultBaseUrl);
-    }
-    if (presetConfig.defaultTextModel) {
-      setLocalTextModel(presetConfig.defaultTextModel);
-    }
-    if (presetConfig.defaultImageModel) {
-      setLocalImageModel(presetConfig.defaultImageModel);
-    }
+    if (presetConfig.defaultBaseUrl) setApiBaseUrl(presetConfig.defaultBaseUrl);
+    if (presetConfig.defaultTextModel) setLocalTextModel(presetConfig.defaultTextModel);
+    if (presetConfig.defaultImageModel) setLocalImageModel(presetConfig.defaultImageModel);
   };
 
   const testConnection = async () => {
@@ -99,44 +102,35 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       let body = JSON.stringify({ contents: [{ parts: [{ text: 'Say hello' }] }] });
 
-      if (platformPreset === 'yunwu' && apiBaseUrl && apiBaseUrl.trim() !== '') {
-        let baseUrl = apiBaseUrl.trim();
-        if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+      if (platformPreset === 'yunwu' && apiBaseUrl.trim()) {
+        let baseUrl = apiBaseUrl.trim().replace(/\/+$/, '');
         if (baseUrl.endsWith('/v1')) baseUrl = baseUrl.replace(/\/v1$/, '/v1beta');
         if (!baseUrl.endsWith('/v1beta') && !baseUrl.includes('/v1beta/')) baseUrl += '/v1beta';
-
         apiEndpoint = `${baseUrl}/models/${modelToTest}:generateContent`;
         headers.Authorization = `Bearer ${apiKey}`;
-        body = JSON.stringify({
-          contents: [{ parts: [{ text: 'Say hello' }] }]
-        });
-      } else if (apiBaseUrl && apiBaseUrl.trim() !== '') {
-        let baseUrl = apiBaseUrl.trim();
-        if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
-        if (baseUrl.endsWith('/v1beta') || baseUrl.endsWith('/v1alpha')) baseUrl = baseUrl.replace(/\/v1(beta|alpha)/, '/v1');
+      } else if (apiBaseUrl.trim()) {
+        let baseUrl = apiBaseUrl.trim().replace(/\/+$/, '');
+        if (baseUrl.endsWith('/v1beta') || baseUrl.endsWith('/v1alpha')) baseUrl = baseUrl.replace(/\/v1(beta|alpha)$/, '/v1');
         if (!baseUrl.endsWith('/v1') && !baseUrl.includes('/v1/')) baseUrl += '/v1';
-
         apiEndpoint = `${baseUrl}/chat/completions`;
         headers.Authorization = `Bearer ${apiKey}`;
         body = JSON.stringify({
           model: modelToTest,
-          messages: [{ role: 'user', content: 'Say hello' }]
+          messages: [{ role: 'user', content: 'Say hello' }],
         });
       }
 
-      const res = await fetch(apiEndpoint, {
-        method: 'POST',
-        headers,
-        body
-      });
-
+      const res = await fetch(apiEndpoint, { method: 'POST', headers, body });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error?.message || '连接验证被拒绝');
+      if (!res.ok || data.error) {
+        throw new Error(data.error?.message || '连接测试失败');
+      }
 
-      setTestResult({ status: 'success', msg: 'API 连通性测试成功' });
+      setTestResult({ status: 'success', msg: '连接正常' });
       toast.success('API 连接正常');
     } catch (e: any) {
-      setTestResult({ status: 'error', msg: e.message });
+      const message = e?.message || '连接失败';
+      setTestResult({ status: 'error', msg: message });
       toast.error('API 连接失败，请检查地址、密钥或网络');
     } finally {
       setIsTesting(false);
@@ -147,8 +141,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    input.onchange = (e: any) => {
-      const file = e.target.files?.[0];
+    input.onchange = (e: Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
 
       const reader = new FileReader();
@@ -159,9 +153,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
           if (data.platformPreset) setPlatformPreset(data.platformPreset);
           if (data.apiBaseUrl !== undefined) setApiBaseUrl(data.apiBaseUrl);
           if (data.apiKey !== undefined) setApiKey(data.apiKey);
+          if (data.downloadDirectoryName !== undefined) setDownloadDirectoryName(data.downloadDirectoryName);
           if (data.textModel) setLocalTextModel(data.textModel);
           if (data.imageModel) setLocalImageModel(data.imageModel);
-          if (data.maxConcurrency) setMaxConcurrency(data.maxConcurrency.toString());
+          if (data.maxConcurrency) setMaxConcurrency(String(data.maxConcurrency));
           toast.success('已导入配置文件');
         } catch {
           toast.error('配置文件解析失败，请确认 JSON 格式正确');
@@ -179,10 +174,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
         platformPreset,
         apiBaseUrl,
         apiKey,
+        downloadDirectoryName,
         maxConcurrency: parseInt(maxConcurrency, 10) || store.maxConcurrency,
         textModel: localTextModel,
         imageModel: localImageModel,
-        exportDate: new Date().toISOString()
+        exportDate: new Date().toISOString(),
       };
 
       const blob = new Blob([JSON.stringify(configToExport, null, 2)], { type: 'application/json;charset=utf-8' });
@@ -190,6 +186,34 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
       toast.success('配置已导出');
     } catch {
       toast.error('导出失败');
+    }
+  };
+
+  const handlePickDownloadDirectory = async () => {
+    if (isPickingDirectory) return;
+    setIsPickingDirectory(true);
+    try {
+      const { name } = await pickDownloadDirectory();
+      setDownloadDirectoryName(name);
+      store.setProjectFields({ downloadDirectoryName: name });
+      toast.success(`已设置结果图下载目录：${name}`);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        toast.error(e?.message || '选择下载目录失败');
+      }
+    } finally {
+      setIsPickingDirectory(false);
+    }
+  };
+
+  const handleClearDownloadDirectory = async () => {
+    try {
+      await clearDownloadDirectory();
+      setDownloadDirectoryName('');
+      store.setProjectFields({ downloadDirectoryName: '' });
+      toast.success('已清除结果图下载目录');
+    } catch {
+      toast.error('清除下载目录失败');
     }
   };
 
@@ -202,8 +226,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
     }
     store.setProjectFields({
       platformPreset,
+      downloadDirectoryName,
       textModel: localTextModel,
-      imageModel: localImageModel
+      imageModel: localImageModel,
     });
     toast.success('设置已保存');
     onOpenChange(false);
@@ -226,7 +251,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
             </div>
           </div>
           <DialogDescription className="text-[13.65px] text-text-secondary">
-            先选择中转平台预设，再配置 API Key、模型和并发数。
+            先选择平台预设，再配置 API、模型和下载目录。
           </DialogDescription>
         </DialogHeader>
 
@@ -234,17 +259,24 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
           <div className="flex flex-col gap-2">
             <h4 className="text-[15.44px] font-medium text-text-primary">平台预设</h4>
             <label className="text-[12.6px] text-text-secondary font-medium">中转平台</label>
-            <select
-              value={platformPreset}
-              onChange={(e) => applyPreset(e.target.value as PlatformPreset)}
-              className="h-11 rounded-xl border border-border bg-white px-3 text-[13.65px] shadow-sm focus:outline-none focus:ring-2 focus:ring-button-main/20"
-            >
-              {PLATFORM_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value}>{preset.label}</option>
-              ))}
-            </select>
+            <Select value={platformPreset} onValueChange={(value) => applyPreset(value as PlatformPreset)}>
+              <SelectTrigger className="h-11 w-full rounded-xl border-border bg-white px-3 text-[13.65px] shadow-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-2xl border border-border/80 bg-white p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.18)]">
+                {PLATFORM_PRESETS.map((preset) => (
+                  <SelectItem
+                    key={preset.value}
+                    value={preset.value}
+                    className="rounded-xl px-3 py-2 text-[13.65px] text-text-primary focus:bg-[#F5F4F0] focus:text-text-primary"
+                  >
+                    {preset.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <p className="text-[11.55px] text-text-secondary">
-              `comfly.chat` 会启用平台专属的分辨率模型映射和请求适配逻辑；`云雾` 会优先走 Gemini 原生 `generateContent`，并通过分辨率参数控制输出。
+              `云雾` 优先走 Gemini 原生 `generateContent`，`comfly.chat` 启用平台专属的模型映射和请求适配。
             </p>
           </div>
 
@@ -301,7 +333,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
               <label className="text-[13.65px] font-medium text-text-secondary">API Base URL</label>
               <Input
                 type="text"
-                placeholder="例如: https://ai.comfly.chat"
+                placeholder="例如: https://yunwu.ai"
                 value={apiBaseUrl}
                 onChange={(e) => setApiBaseUrl(e.target.value)}
                 className="text-[13.65px] rounded-xl border-border bg-white shadow-sm focus-visible:ring-button-main/30"
@@ -340,6 +372,41 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-border/80 pt-5">
+            <h4 className="text-[15.44px] font-medium text-text-primary">结果图下载</h4>
+            <div className="rounded-2xl border border-border/60 bg-white/70 px-4 py-3">
+              <div className="text-[12.6px] font-medium text-text-primary">当前目录</div>
+              <div className="mt-1 text-[12.6px] text-text-secondary break-all">
+                {downloadDirectoryName || '未设置，当前将回退为浏览器 ZIP 下载'}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handlePickDownloadDirectory}
+                disabled={!supportsDirectoryDownload() || isPickingDirectory}
+                className="text-[12.6px] h-9 rounded-xl bg-white"
+              >
+                {isPickingDirectory ? '选择中...' : downloadDirectoryName ? '重新选择目录' : '选择下载目录'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleClearDownloadDirectory}
+                disabled={!downloadDirectoryName}
+                className="text-[12.6px] h-9 rounded-xl"
+              >
+                清除目录
+              </Button>
+            </div>
+            {!supportsDirectoryDownload() && (
+              <p className="text-[11.55px] text-text-secondary">
+                当前环境不支持指定目录写入，请使用 Edge，或继续使用 ZIP 下载。
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-2 border-t border-border/80 pt-5">

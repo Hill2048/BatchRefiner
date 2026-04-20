@@ -26,6 +26,7 @@ import { SettingsDialog } from "../SettingsDialog";
 import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { AspectRatio, Resolution } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
 
 function SidebarProgress() {
   const tasksCount = useAppStore(state => state.tasks.length);
@@ -51,6 +52,19 @@ function SidebarProgress() {
       </span>
     </div>
   );
+}
+
+async function resultImageToBlob(resultImage: string) {
+  if (resultImage.startsWith("data:")) {
+    const response = await fetch(resultImage);
+    return response.blob();
+  }
+
+  const response = await fetch(resultImage);
+  if (!response.ok) {
+    throw new Error(`下载结果图失败：HTTP ${response.status}`);
+  }
+  return response.blob();
 }
 
 export function Sidebar({ className = "", style }: { className?: string, style?: React.CSSProperties }) {
@@ -303,63 +317,83 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
   };
 
   const handleExportZip = async () => {
-    // Collect success tasks that haven't been exported
     const currentTasks = useAppStore.getState().tasks;
-    const tasksToExport = currentTasks.filter(
-      (t) => t.status === "Success" && t.resultImage && !t.exported,
-    );
+    const useSelected = selectedTaskIds.length > 0;
+    const matchingTasks = currentTasks.filter((task) => {
+      if (useSelected && !selectedTaskIds.includes(task.id)) return false;
+      return task.status === "Success" && !!task.resultImage;
+    });
 
-    if (tasksToExport.length === 0) {
-      toast.info("没有可导出的全新成功任务或所有任务已导出。");
+    if (matchingTasks.length === 0) {
+      toast.info(useSelected ? "所选任务中没有可导出的结果图。" : "当前没有可导出的结果图。");
       return;
     }
 
-    toast.info("正在打包，请稍候...");
-    const JSZip = (await import('jszip')).default;
-    const { saveAs } = await import('file-saver');
+    const tasksToExport = matchingTasks.filter((task) => !task.exported);
+    const finalTasksToExport = tasksToExport.length > 0 ? tasksToExport : matchingTasks;
+    const isReExport = tasksToExport.length === 0;
 
-    const zip = new JSZip();
-    let csvContent = "Task ID,Title,Prompt\n";
+    const getFilename = (task: (typeof tasksToExport)[number]) => {
+      let filename = exportTemplate || "{task_id}_{title}";
+      filename = filename.replace("{task_id}", task.index.toString().padStart(3, "0"));
+      filename = filename.replace("{title}", task.title.substring(0, 30).replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, ""));
+      return filename || `task_${task.index.toString().padStart(3, "0")}`;
+    };
 
-    for (const task of tasksToExport) {
-      if (!task.resultImage) continue;
-
-      // Custom template
-      let filename = exportTemplate || "taskId_title";
-      filename = filename.replace(
-        "{task_id}",
-        task.index.toString().padStart(3, "0"),
-      );
-      filename = filename.replace(
-        "{title}",
-        task.title.substring(0, 20).replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, ""),
-      );
-
-      if (task.resultImage.startsWith('http')) {
-        try {
-          const res = await fetch(task.resultImage);
-          const blob = await res.blob();
-          zip.file(`${filename}.jpg`, blob);
-        } catch(e) {
-          console.error("Fetch image error", e);
+    const downloadDirectoryHandle = await getDownloadDirectoryHandle();
+    if (downloadDirectoryHandle) {
+      try {
+        const hasPermission = await ensureDownloadDirectoryPermission(downloadDirectoryHandle);
+        if (!hasPermission) {
+          throw new Error("下载目录权限已失效，请重新选择目录。");
         }
-      } else {
-        const base64Data = task.resultImage.split(",")[1];
-        if (base64Data) {
-          zip.file(`${filename}.jpg`, base64Data, { base64: true });
+
+        let successCount = 0;
+        for (const task of finalTasksToExport) {
+          if (!task.resultImage) continue;
+          const blob = await resultImageToBlob(task.resultImage);
+          await writeBlobToDirectory(downloadDirectoryHandle, `${getFilename(task)}.jpg`, blob);
+          store.updateTask(task.id, { exported: true });
+          successCount++;
         }
+
+        toast.success(
+          useSelected
+            ? `${isReExport ? "已重新导出" : "已导出"}所选任务中的 ${successCount} 张结果图到指定目录`
+            : `${isReExport ? "已重新导出" : "已写入"} ${successCount} 张结果图到指定目录`
+        );
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "写入指定目录失败，已回退为 ZIP 下载。";
+        toast.error(message);
       }
-
-      csvContent += `"${task.index}","${task.title.replace(/"/g, '""')}","${(task.promptText || "").replace(/"/g, '""')}"\n`;
-
-      // Mark as exported
-      store.updateTask(task.id, { exported: true });
     }
 
-    zip.file("result_metadata.csv", csvContent);
+    toast.info(useSelected ? "正在打包所选结果图，请稍候..." : "正在打包结果图，请稍候...");
+    const JSZip = (await import("jszip")).default;
+    const { saveAs } = await import("file-saver");
+    const zip = new JSZip();
+
+    let exportedCount = 0;
+    for (const task of finalTasksToExport) {
+      if (!task.resultImage) continue;
+      try {
+        const blob = await resultImageToBlob(task.resultImage);
+        zip.file(`${getFilename(task)}.jpg`, blob);
+        store.updateTask(task.id, { exported: true });
+        exportedCount++;
+      } catch (error) {
+        console.error("Export image error", error);
+      }
+    }
+
     const blob = await zip.generateAsync({ type: "blob" });
-    saveAs(blob, `Batch_${projectName}_Incremental.zip`);
-    toast.success(`成功导出 ${tasksToExport.length} 个任务的 ZIP 包`);
+    saveAs(blob, `Batch_${projectName}_Results.zip`);
+    toast.success(
+      useSelected
+        ? `${isReExport ? "已重新导出" : "成功导出"}所选任务中的 ${exportedCount} 张结果图`
+        : `${isReExport ? "已重新导出" : "成功导出"} ${exportedCount} 张结果图`
+    );
   };
 
   const handleExportProject = async () => {
@@ -638,8 +672,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
             size="icon"
             className="h-10 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-2xl"
             onClick={handleExportZip}
-            title="增量解压打包 (未导出的成功任务)"
-          >
+            title="?????????????????????">
             <Download className="w-4 h-4" strokeWidth={1.5} />
           </Button>
         </div>

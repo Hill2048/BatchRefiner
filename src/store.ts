@@ -3,6 +3,7 @@ import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
 import { get, set, del } from 'idb-keyval';
 import { ProjectData, Task } from './types';
+import { DEFAULT_SKILL_FILE_NAME, DEFAULT_SKILL_TEXT } from './lib/defaultSkillText';
 
 // Storage Debouncer for disk I/O perf
 let persistTimeout: ReturnType<typeof setTimeout>;
@@ -66,17 +67,44 @@ interface AppState extends ProjectData {
 const initialState: ProjectData = {
   projectId: uuidv4(),
   projectName: '未命名项目',
-  platformPreset: 'comfly-chat',
-  globalSkillText: '',
+  platformPreset: 'yunwu',
+  downloadDirectoryName: '',
+  globalSkillText: DEFAULT_SKILL_TEXT,
   globalTargetText: '',
   globalReferenceImages: [],
-  skillFileName: '',
+  skillFileName: DEFAULT_SKILL_FILE_NAME,
   imageModel: 'gemini-3.1-flash-image-preview',
   textModel: 'gemini-3.1-flash-lite-preview',
   createdAt: Date.now(),
   updatedAt: Date.now(),
   tasks: [],
 };
+
+function recoverInterruptedTasks(tasks: Task[] = []) {
+  return tasks.map((task) => {
+    if (task.status === 'Prompting' || task.status === 'Rendering' || task.status === 'Running' || task.status === 'Waiting') {
+      return {
+        ...task,
+        status: 'Error' as const,
+        errorLog: {
+          message: '请求已中断或页面已刷新，任务已自动恢复为失败状态，请重新执行。',
+          time: Date.now(),
+          stage: task.status,
+        },
+        updatedAt: Date.now(),
+      };
+    }
+    return task;
+  });
+}
+
+function withDefaultSkill<T extends Partial<ProjectData>>(state: T) {
+  return {
+    ...state,
+    globalSkillText: state.globalSkillText?.trim() ? state.globalSkillText : DEFAULT_SKILL_TEXT,
+    skillFileName: state.skillFileName?.trim() ? state.skillFileName : DEFAULT_SKILL_FILE_NAME,
+  };
+}
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -90,7 +118,7 @@ export const useAppStore = create<AppState>()(
       exportTemplate: '{task_id}_{title}',
       selectedTaskIds: [],
       apiKey: '',
-      apiBaseUrl: 'https://ai.comfly.chat',
+      apiBaseUrl: 'https://yunwu.ai',
 
       setProjectFields: (fields) => set((state) => ({ ...state, ...fields, updatedAt: Date.now() })),
       
@@ -143,7 +171,7 @@ export const useAppStore = create<AppState>()(
          try {
              const data = JSON.parse(jsonString);
              if (data.projectId && data.tasks) {
-                 set((state) => ({ ...state, ...data, isBatchRunning: false, activeTaskId: null, lightboxTaskId: null, selectedTaskIds: [] }));
+                 set((state) => ({ ...state, ...withDefaultSkill(data), isBatchRunning: false, activeTaskId: null, lightboxTaskId: null, selectedTaskIds: [] }));
              }
          } catch(e) {}
       },
@@ -174,10 +202,21 @@ export const useAppStore = create<AppState>()(
     {
       name: 'batch-refiner-idb',
       storage: createJSONStorage(() => idbStorage),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        state.setBatchRunning(false);
+        state.setProjectFields({
+          ...withDefaultSkill(state),
+          tasks: recoverInterruptedTasks(state.tasks),
+          activeTaskId: null,
+          lightboxTaskId: null,
+        });
+      },
       partialize: (state) => ({ 
          projectId: state.projectId,
          projectName: state.projectName,
          platformPreset: state.platformPreset,
+         downloadDirectoryName: state.downloadDirectoryName,
          globalSkillText: state.globalSkillText,
          globalTargetText: state.globalTargetText,
          globalReferenceImages: state.globalReferenceImages,

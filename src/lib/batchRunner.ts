@@ -4,6 +4,8 @@ import pLimit from "p-limit";
 import { toast } from "sonner";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const PROMPT_REQUEST_TIMEOUT_MS = 90_000;
+const IMAGE_REQUEST_TIMEOUT_MS = 180_000;
 
 const GEMINI_NATIVE_IMAGE_INPUT_MODELS = [
   "gemini-2.0-flash-preview-image-generation",
@@ -38,6 +40,10 @@ interface GeneratedImageResult {
   sourceType: "preview" | "original" | "base64";
   previewSrc?: string;
   originalSrc?: string;
+}
+
+function getBuiltInGeminiApiKey() {
+  return import.meta.env.VITE_GEMINI_API_KEY?.trim() || "";
 }
 
 function createStageError(message: string, stage: string) {
@@ -408,6 +414,25 @@ function buildComflyResolutionFields(modelName: string, resolution: string, aspe
   return payload;
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function retryWrap<T>(fn: () => Promise<T>, maxRetries = 2, delay = 1500): Promise<T> {
   let attempt = 0;
   while (attempt <= maxRetries) {
@@ -577,7 +602,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
   try {
     if (isGeminiGateway) {
       const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
-      const res = await fetch(`${geminiBaseUrl}/models/${store.textModel}:generateContent`, {
+      const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${store.textModel}:generateContent`, {
         method: "POST",
         headers: buildGeminiGatewayHeaders(store.apiKey),
         body: JSON.stringify({
@@ -586,7 +611,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
             temperature: 0.4
           }
         })
-      });
+      }, PROMPT_REQUEST_TIMEOUT_MS);
 
       if (!res.ok) {
         const errText = await res.text();
@@ -601,7 +626,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const res = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -614,7 +639,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
             { role: "user", content: contentMsg }
           ]
         })
-      });
+      }, PROMPT_REQUEST_TIMEOUT_MS);
 
       if (!res.ok) {
         const errText = await res.text();
@@ -625,17 +650,19 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       return json.choices?.[0]?.message?.content?.trim() || "Generated prompt fallback";
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Missing built-in Gemini API Key");
+    const apiKey = getBuiltInGeminiApiKey();
+    if (!apiKey) {
+      throw new Error("Missing built-in Gemini API Key. For public deployments, use the in-app API settings instead of bundling a key into the frontend.");
+    }
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${store.textModel || "gemini-2.0-flash"}:generateContent?key=${apiKey}`, {
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${store.textModel || "gemini-2.0-flash"}:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [{ parts: [{ text: contentMsg }] }]
       })
-    });
+    }, PROMPT_REQUEST_TIMEOUT_MS);
 
     if (!res.ok) {
       const errText = await res.text();
@@ -708,14 +735,14 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
         (generationConfig.imageConfig as Record<string, unknown>).aspectRatio = geminiAspectRatio;
       }
 
-      const res = await fetch(`${geminiBaseUrl}/models/${resolvedModel.actualModel}:generateContent`, {
+      const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${resolvedModel.actualModel}:generateContent`, {
         method: "POST",
         headers: buildGeminiGatewayHeaders(store.apiKey),
         body: JSON.stringify({
           contents: [{ role: "user", parts }],
           generationConfig
         })
-      });
+      }, IMAGE_REQUEST_TIMEOUT_MS);
 
       if (!res.ok) {
         const errText = await res.text();
@@ -757,14 +784,14 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
           Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, aspectRatio));
         }
 
-        const res = await fetch(`${baseUrl}/chat/completions`, {
+        const res = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${store.apiKey}`
           },
           body: JSON.stringify(requestBody)
-        });
+        }, IMAGE_REQUEST_TIMEOUT_MS);
 
         if (!res.ok) {
           const errText = await res.text();
@@ -790,14 +817,14 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
         requestBody.quality = getOpenAIImageQuality(resolution);
       }
 
-      const res = await fetch(`${baseUrl}/images/generations`, {
+      const res = await fetchWithTimeout(`${baseUrl}/images/generations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${store.apiKey}`
         },
         body: JSON.stringify(requestBody)
-      });
+      }, IMAGE_REQUEST_TIMEOUT_MS);
 
       if (!res.ok) {
         const errText = await res.text();
@@ -816,8 +843,10 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
       };
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Missing built-in Gemini API Key for image generation");
+    const apiKey = getBuiltInGeminiApiKey();
+    if (!apiKey) {
+      throw new Error("Missing built-in Gemini API Key for image generation. For public deployments, use the in-app API settings instead of bundling a key into the frontend.");
+    }
 
     if (hasImageInputs) {
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
@@ -834,7 +863,7 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
         });
       });
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel.actualModel}:generateContent?key=${apiKey}`, {
+      const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel.actualModel}:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -843,7 +872,7 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
             responseModalities: ["TEXT", "IMAGE"]
           }
         })
-      });
+      }, IMAGE_REQUEST_TIMEOUT_MS);
 
       if (!res.ok) {
         const errText = await res.text();
@@ -876,14 +905,14 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
       if (geminiAspectRatio) params.aspectRatio = geminiAspectRatio;
     }
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel.actualModel}:predict?key=${apiKey}`, {
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel.actualModel}:predict?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         instances: [{ prompt: promptForGeneration }],
         parameters: params
       })
-    });
+    }, IMAGE_REQUEST_TIMEOUT_MS);
 
     if (!res.ok) {
       const errText = await res.text();

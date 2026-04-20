@@ -68,6 +68,8 @@
 @layer base {
   * {
     @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: #d7d3cc transparent;
   }
   body {
     @apply bg-background text-foreground font-sans text-[14.7px] leading-relaxed tracking-[-0.01em];
@@ -77,5 +79,27 @@
   }
   h1, h2, h3, h4, h5, h6 {
     @apply font-serif tracking-tight;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: rgba(173, 166, 154, 0.72);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(152, 145, 134, 0.86);
+    border: 3px solid transparent;
+    background-clip: padding-box;
   }
 }
