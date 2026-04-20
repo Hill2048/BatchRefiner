@@ -20,7 +20,7 @@ import { Textarea } from "../ui/textarea";
 import { ScrollArea } from "../ui/scroll-area";
 import { useAppStore } from "@/store";
 import { useState, useRef } from "react";
-import { processBatch, generateTaskPrompt } from "@/lib/batchRunner";
+import { processBatch, generateTaskPrompt, haltBatch } from "@/lib/batchRunner";
 import { toast } from "sonner";
 import { SettingsDialog } from "../SettingsDialog";
 import { GenerateParamsSelector } from "../GenerateParamsSelector";
@@ -36,17 +36,17 @@ function SidebarProgress() {
     <div className="flex flex-col gap-2 mb-1">
       <div className="flex justify-between items-center text-[12px] font-medium text-foreground">
         <span>处理进度</span>
-        <span className="font-serif italic text-text-primary">
+        <span className="font-serif italic text-foreground">
           {progressPercent}%
         </span>
       </div>
-      <div className="h-1.5 bg-[#E8E5DF] rounded-full overflow-hidden">
+      <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
         <div
-          className="h-full bg-button-main transition-all duration-500 ease-out rounded-full"
+          className="h-full bg-primary transition-all duration-500 ease-out rounded-full"
           style={{ width: `${progressPercent}%` }}
         ></div>
       </div>
-      <span className="text-[11px] text-text-secondary">
+      <span className="text-[11px] text-muted-foreground">
         {completedCount} / {tasksCount} 已完成
       </span>
     </div>
@@ -94,7 +94,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
 
   const handleRunBatch = (mode: 'all' | 'prompts' | 'images' = 'all') => {
     if (isBatchRunning) {
-      setBatchRunning(false);
+      haltBatch();
     } else {
       processBatch(mode);
     }
@@ -412,10 +412,10 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
       
       {/* 1. Quick Add (Moved to top) */}
       <div className="shrink-0 flex flex-col gap-2">
-         <h3 className="text-[12px] font-medium text-text-secondary">任务快捷导入</h3>
-         <div className="relative flex items-end bg-card rounded-xl border border-border/80 focus-within:border-button-main transition-colors p-1.5 gap-1 claude-shadow">
+         <h3 className="text-[12px] font-medium text-muted-foreground">任务快捷导入</h3>
+         <div className="relative flex items-end bg-card rounded-xl border border-border/80 focus-within:border-primary transition-colors p-1.5 gap-1 claude-shadow">
              <button 
-               className="p-1.5 hover:bg-black/5 rounded-lg text-text-secondary mb-0.5" 
+               className="p-1.5 hover:bg-black/5 rounded-lg text-muted-foreground mb-0.5" 
                onClick={() => chatFileRef.current?.click()}
                title="上传文件 (图片、文档或表格)"
             >
@@ -424,7 +424,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
             <input type="file" ref={chatFileRef} multiple accept="image/*,.csv,.txt" className="hidden" onChange={handleChatFileAdd} />
             
             <button 
-               className="p-1.5 hover:bg-black/5 rounded-lg text-text-secondary mb-0.5" 
+               className="p-1.5 hover:bg-black/5 rounded-lg text-muted-foreground mb-0.5" 
                onClick={() => {
                   const input = document.createElement('input');
                   input.type = 'file';
@@ -459,7 +459,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
             <button 
                onClick={handleChatSubmit}
                disabled={!chatInput.trim()}
-               className={`p-1.5 rounded-lg mb-0.5 transition-colors ${chatInput.trim() ? 'bg-button-main text-white' : 'bg-[#E8E5DF] text-text-secondary cursor-not-allowed'}`}
+               className={`p-1.5 rounded-lg mb-0.5 transition-colors ${chatInput.trim() ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground cursor-not-allowed'}`}
                title="发送并解析任务"
             >
                <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
@@ -469,31 +469,31 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
 
       {/* 2. Scrollable Body */}
       <ScrollArea className="flex-1 -mx-6 px-6">
-        <div className="flex flex-col gap-6 pt-2 pb-6">
+        <div className="flex flex-col gap-8 pt-4 pb-8">
           {/* Global Skill / Style */}
           <div className="flex flex-col perspective-1000 relative">
-            <h3 className="text-[12px] font-medium text-text-secondary mb-3">
+            <h3 className="text-[12px] font-medium text-foreground opacity-80 tracking-wide mb-3">
               全局设定风格
             </h3>
             
             {skillFileName && !isSkillEditing ? (
                <div 
-                 className="flex flex-col items-center justify-center gap-2 p-6 border border-border/60 rounded-xl bg-[#F5F4F0] relative group cursor-pointer hover:border-button-main transition-all duration-500 ease-out transform-gpu animate-in fade-in"
+                 className="flex flex-col items-center justify-center gap-2 p-6 border border-border/60 rounded-xl bg-background relative group cursor-pointer hover:border-primary transition-all duration-500 ease-out transform-gpu animate-in fade-in"
                  onDoubleClick={() => setIsSkillEditing(true)}
                  title="双击进行详细编辑"
                >
-                  <FileText className="w-10 h-10 text-button-main" strokeWidth={1.5} />
+                  <FileText className="w-10 h-10 text-primary" strokeWidth={1.5} />
                   <span className="text-[13px] font-medium text-foreground truncate max-w-full px-4">{skillFileName}</span>
                   <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                     <button className="p-1 hover:bg-black/5 rounded-full" onClick={(e) => { e.stopPropagation(); setProjectFields({ skillFileName: '', globalSkillText: '' }); }} title="移除预设"><X className="w-4 h-4 text-text-secondary" /></button>
+                     <button className="p-1 hover:bg-black/5 rounded-full" onClick={(e) => { e.stopPropagation(); setProjectFields({ skillFileName: '', globalSkillText: '' }); }} title="移除预设"><X className="w-4 h-4 text-muted-foreground" /></button>
                   </div>
-                  <div className="text-[10px] text-text-secondary absolute bottom-2">双击进入编辑</div>
+                  <div className="text-[10px] text-muted-foreground absolute bottom-2">双击进入编辑</div>
                </div>
             ) : (
                <div className="relative transition-all duration-500 ease-out transform-gpu animate-in fade-in zoom-in-95">
                   <Textarea
                     placeholder="例如：保持极简风格，使用清新的色调，4K高清摄影机..."
-                    className={`h-[120px] bg-card border-border rounded-xl p-3 pb-8 text-[13px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:ring-button-main transition-colors ${skillFileName ? 'ring-2 ring-button-main' : ''}`}
+                    className={`h-[120px] bg-card border-border rounded-xl p-3 pb-8 text-[13px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:ring-primary transition-colors ${skillFileName ? 'ring-2 ring-primary' : ''}`}
                     value={localSkillText}
                     onChange={(e) => setLocalSkillText(e.target.value)}
                     onBlur={() => setProjectFields({ globalSkillText: localSkillText })}
@@ -501,11 +501,11 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
                   {skillFileName && isSkillEditing ? (
                     <div className="absolute bottom-2 right-2 flex gap-2">
                        <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2 rounded-md hover:bg-black/5" onClick={() => setIsSkillEditing(false)}>取消</Button>
-                       <Button size="sm" className="h-6 text-[11px] px-2 rounded-md bg-button-main text-white" onClick={() => { setProjectFields({ globalSkillText: localSkillText }); setIsSkillEditing(false) }}>完成</Button>
+                       <Button size="sm" className="h-6 text-[11px] px-2 rounded-md bg-primary text-white" onClick={() => { setProjectFields({ globalSkillText: localSkillText }); setIsSkillEditing(false) }}>完成</Button>
                     </div>
                   ) : (
                     <div 
-                      className="absolute bottom-2 right-2 flex items-center gap-1 text-[11px] text-text-secondary cursor-pointer hover:bg-black/5 px-2 py-1 rounded-md transition-colors"
+                      className="absolute bottom-2 right-2 flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer hover:bg-black/5 px-2 py-1 rounded-md transition-colors"
                       onClick={() => mdInputRef.current?.click()}
                     >
                        <Upload className="w-3.5 h-3.5" /> 上传 .md 技能预设
@@ -520,13 +520,13 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           </div>
 
           <div className="flex flex-col">
-            <h3 className="text-[12px] font-medium text-text-secondary mb-3">
+            <h3 className="text-[12px] font-medium text-foreground opacity-80 tracking-wide mb-3">
               全局目标指令
             </h3>
             <div className="relative">
               <Textarea
                 placeholder="例如：将背景替换为纯白色的摄影布板..."
-                className="min-h-[80px] bg-card border-border rounded-xl p-3 pb-8 text-[13px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:ring-button-main transition-colors"
+                className="min-h-[80px] bg-card border-border rounded-xl p-3 pb-8 text-[13px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:ring-primary transition-colors"
                 value={localTargetText}
                 onChange={(e) => setLocalTargetText(e.target.value)}
                 onBlur={() => setProjectFields({ globalTargetText: localTargetText })}
@@ -534,7 +534,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
               <button 
                   onClick={handleGlobalTargetSend}
                   title="应用指令并为任务生成提示词"
-                  className="absolute bottom-2 right-2 bg-[#E8E5DF] hover:bg-button-main hover:text-white text-text-secondary p-1.5 rounded-lg transition-colors group"
+                  className="absolute bottom-2 right-2 bg-secondary hover:bg-primary hover:text-white text-muted-foreground p-1.5 rounded-lg transition-colors group"
                 >
                   <ArrowUp className="w-4 h-4" strokeWidth={2} />
               </button>
@@ -542,7 +542,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           </div>
 
           <div className="flex flex-col">
-            <h3 className="text-[12px] font-medium text-text-secondary mb-3 flex items-center justify-between">
+            <h3 className="text-[12px] font-medium text-foreground opacity-80 tracking-wide mb-3 flex items-center justify-between">
               <span>全局参数 <span>(Banana 2/Pro)</span></span>
             </h3>
             <GenerateParamsSelector 
@@ -550,12 +550,12 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
               resolution={globalResolution}
               onAspectRatioChange={(ar) => setProjectFields({ globalAspectRatio: ar })}
               onResolutionChange={(res) => setProjectFields({ globalResolution: res })}
-              triggerClassName="w-full justify-start py-4 h-auto bg-[#F5F4F0] border-transparent"
+              triggerClassName="w-full justify-start py-4 h-auto bg-background border-transparent"
             />
           </div>
           
           <div className="flex flex-col">
-            <h3 className="text-[12px] font-medium text-text-secondary mb-3">
+            <h3 className="text-[12px] font-medium text-foreground opacity-80 tracking-wide mb-3">
               全局参考图
             </h3>
             <div className="grid grid-cols-3 gap-2">
@@ -584,7 +584,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
                 </div>
               ))}
               <div
-                className="aspect-square flex items-center justify-center border border-dashed border-[#D4D2CD] rounded-xl text-text-secondary cursor-pointer hover:bg-black/5 bg-transparent transition-colors"
+                className="aspect-square flex items-center justify-center border border-dashed border-muted-foreground/30 rounded-xl text-muted-foreground cursor-pointer hover:bg-black/5 bg-transparent transition-colors"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Upload className="w-4 h-4 opacity-70" strokeWidth={1.5} />
@@ -609,7 +609,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           <Button
             variant="outline"
             size="icon"
-            className="h-9 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-xl"
+            className="h-9 w-full shadow-none bg-background border-transparent hover:border-border text-muted-foreground hover:text-foreground rounded-xl"
             onClick={() => setIsSettingsOpen(true)}
             title="系统设置与API配置"
           >
@@ -618,7 +618,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           <Button
             variant="outline"
             size="icon"
-            className="h-9 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-xl"
+            className="h-9 w-full shadow-none bg-background border-transparent hover:border-border text-muted-foreground hover:text-foreground rounded-xl"
             onClick={handleExportProject}
             title="存储当前项目空间"
           >
@@ -627,7 +627,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           <Button
             variant="outline"
             size="icon"
-            className="h-9 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-xl"
+            className="h-9 w-full shadow-none bg-background border-transparent hover:border-border text-muted-foreground hover:text-foreground rounded-xl"
             onClick={handleImportProject}
             title="读取历史项目配置"
           >
@@ -636,7 +636,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           <Button
             variant="outline"
             size="icon"
-            className="h-9 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-xl"
+            className="h-9 w-full shadow-none bg-background border-transparent hover:border-border text-muted-foreground hover:text-foreground rounded-xl"
             onClick={handleExportZip}
             title="增量解压打包 (未导出的成功任务)"
           >
@@ -644,7 +644,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           </Button>
         </div>
 
-        <div className="flex w-full group relative p-[3px] rounded-[14px] bg-[#2C2B29] shadow-md border border-black/10 items-center transition-all">
+        <div className="flex w-full group relative p-[3px] rounded-[14px] bg-foreground shadow-md border border-black/10 items-center transition-all">
           <Button
             onClick={() => handleRunBatch('all')}
             disabled={useAppStore.getState().tasks.length === 0}
@@ -666,26 +666,43 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
              <div className="flex items-center">
                 <div className="w-px h-4 bg-white/10 mx-0.5" />
                 <Popover>
-                  <PopoverTrigger render={
+                  <PopoverTrigger asChild>
                     <Button
                       disabled={useAppStore.getState().tasks.length === 0}
-                      className="h-9 w-8 px-0 flex items-center shadow-none justify-center bg-transparent hover:bg-white/10 text-white rounded-[10px] border-none transition-colors"
+                      className="h-9 w-8 px-0 flex items-center shadow-none justify-center bg-transparent hover:bg-white/10 text-white rounded-[10px] border-none transition-colors group"
                     >
                       <ChevronDown className="w-4 h-4 opacity-60 group-hover:opacity-100" />
                     </Button>
-                  } />
+                  </PopoverTrigger>
                   <PopoverContent align="end" sideOffset={12} className="w-[180px] p-2 flex flex-col gap-1 rounded-[14px] bg-card border border-border/80 shadow-xl">
                      <div 
-                        className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium text-text-primary hover:bg-black/5 rounded-lg cursor-pointer transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium text-foreground hover:bg-black/5 rounded-lg cursor-pointer transition-colors"
                         onClick={() => handleRunBatch('prompts')}
                      >
                        <MessageSquare className="w-3.5 h-3.5 opacity-70" /> 仅生成提示词
                      </div>
                      <div 
-                        className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium text-text-primary hover:bg-black/5 rounded-lg cursor-pointer transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium text-foreground hover:bg-black/5 rounded-lg cursor-pointer transition-colors"
                         onClick={() => handleRunBatch('images')}
                      >
                        <ImageIcon className="w-3.5 h-3.5 opacity-70" /> 仅执行生图
+                     </div>
+                     <div className="h-px bg-border/60 my-0.5 mx-1"></div>
+                     <div 
+                        className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] font-medium text-destructive hover:bg-destructive/10 rounded-lg cursor-pointer transition-colors"
+                        onClick={() => {
+                           const store = useAppStore.getState();
+                           const errorTasks = store.tasks.filter(t => t.status === 'Error');
+                           if (errorTasks.length === 0) {
+                              toast.info('没有需要重试的失败任务');
+                              return;
+                           }
+                           store.setProjectFields({ selectedTaskIds: errorTasks.map(t => t.id) });
+                           setTimeout(() => handleRunBatch('all'), 50);
+                        }}
+                     >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        重试失败任务
                      </div>
                   </PopoverContent>
                 </Popover>

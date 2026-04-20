@@ -32,10 +32,28 @@ export function TaskList() {
   // 2. Just let React.memo handle it since Zustand replaces only the mutated task ref.
   // Actually, wait, Zustand returns a new `tasks` array every time ANY task updates.
   // We'll safely rely on `React.memo` inside TaskCard which we just added. 
-  const taskIds = useAppStore(useShallow(state => state.tasks.map(t => t.id)));
-  const tasksCount = useAppStore(state => state.tasks.length);
+  const rawTaskIds = useAppStore(useShallow(state => state.tasks.map(t => t.id)));
+  const tasksCount = rawTaskIds.length;
   const viewMode = useAppStore(state => state.viewMode);
   
+  // Local state for rendering filters
+  const [filterStatus, setFilterStatus] = React.useState<'All' | 'Success' | 'Error' | 'Idle' | 'Pending'>('All');
+  
+  const allTasks = useAppStore(state => state.tasks);
+  
+  const taskIds = React.useMemo(() => {
+    if (filterStatus === 'All') return rawTaskIds;
+    return allTasks
+      .filter(t => {
+        if (filterStatus === 'Success') return t.status === 'Success';
+        if (filterStatus === 'Error') return t.status === 'Error';
+        if (filterStatus === 'Idle') return t.status === 'Idle';
+        if (filterStatus === 'Pending') return t.status === 'Waiting' || t.status === 'Rendering' || t.status === 'Prompting';
+        return true;
+      })
+      .map(t => t.id);
+  }, [allTasks, filterStatus, rawTaskIds]);
+
   // To avoid re-rendering entire list when a single task checks its selected box:
   const selectedTaskIds = useAppStore(state => state.selectedTaskIds);
   const allSelectedCount = selectedTaskIds.length;
@@ -157,12 +175,12 @@ export function TaskList() {
       <input {...getInputProps()} />
 
       {isDragActive && (
-        <div className="absolute inset-0 z-50 bg-[#F2EFEB]/90 backdrop-blur-sm border-2 border-dashed border-[#D97757] rounded-3xl m-4 flex flex-col items-center justify-center animate-in fade-in duration-200">
-          <Upload className="w-12 h-12 text-[#D97757] mb-4" strokeWidth={1.5} />
-          <p className="text-[18px] font-serif font-medium text-[#D97757]">
+        <div className="absolute inset-0 z-50 bg-muted/90 backdrop-blur-sm border-2 border-dashed border-primary rounded-3xl m-4 flex flex-col items-center justify-center animate-in fade-in duration-200">
+          <Upload className="w-12 h-12 text-primary mb-4" strokeWidth={1.5} />
+          <p className="text-[18px] font-serif font-medium text-primary">
             松开鼠标，导入图片
           </p>
-          <p className="text-[13px] text-text-secondary mt-2">
+          <p className="text-[13px] text-muted-foreground mt-2">
             将自动为每张图片创建独立的编辑任务
           </p>
         </div>
@@ -172,16 +190,16 @@ export function TaskList() {
         <div className="flex items-center gap-4">
           <h2 className="text-[18px] font-serif font-medium text-foreground tracking-tight">
             当前任务{" "}
-            <span className="font-sans text-[12px] text-text-secondary ml-2 font-normal">
+            <span className="font-sans text-[12px] text-muted-foreground ml-2 font-normal">
               共 {tasksCount} 项
             </span>
           </h2>
           {tasksCount > 0 && (
             <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-[13px] cursor-pointer text-text-secondary">
+              <label className="flex items-center gap-2 text-[13px] cursor-pointer text-muted-foreground">
                 <input
                   type="checkbox"
-                  className="w-4 h-4 rounded appearance-none border border-black/30 checked:bg-button-main checked:border-button-main flex items-center justify-center relative bg-white transition-all checked:after:content-['✓'] checked:after:absolute checked:after:text-white checked:after:text-[10px]"
+                  className="w-4 h-4 rounded appearance-none border border-black/30 checked:bg-primary checked:border-primary flex items-center justify-center relative bg-white transition-all checked:after:content-['✓'] checked:after:absolute checked:after:text-white checked:after:text-[10px]"
                   checked={allSelected}
                   onChange={() => {
                     if (allSelected) clearTaskSelection();
@@ -191,42 +209,81 @@ export function TaskList() {
                 全选
               </label>
               
-              {selectedTaskIds.length > 0 && (
+              {selectedTaskIds.length > 0 ? (
                  <button 
                    onClick={() => setProjectFields({ 
                       tasks: useAppStore.getState().tasks.filter(t => !selectedTaskIds.includes(t.id)),
                       selectedTaskIds: []
                    })}
-                   className="flex items-center gap-1 text-[13px] text-red-600 hover:bg-red-50 px-2 py-1 rounded-md transition-colors animate-in fade-in zoom-in"
+                   className="flex items-center gap-1 text-[13px] text-destructive hover:bg-destructive/10 px-2 py-1 rounded-md transition-colors animate-in fade-in zoom-in"
                    title="删除选中的任务"
                  >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                    删除
+                    删除选中
                  </button>
+              ) : (
+                 filterStatus !== 'All' && taskIds.length > 0 && (
+                   <button 
+                     onClick={() => {
+                        if (confirm(`确定要清空所有 "${filterStatus === 'Success' ? '成功' : filterStatus === 'Error' ? '失败' : filterStatus === 'Pending' ? '排队/进行中' : '空闲'}" 的任务吗？`)) {
+                           let allTasksNow = useAppStore.getState().tasks;
+                           const idsToRemove = new Set(taskIds);
+                           setProjectFields({
+                              tasks: allTasksNow.filter(t => !idsToRemove.has(t.id))
+                           });
+                        }
+                     }}
+                     className="flex items-center gap-1 text-[13px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2 py-1 rounded-md transition-colors animate-in fade-in"
+                     title="清空当前筛选项下的所有任务"
+                   >
+                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                     清空当前列表
+                   </button>
+                 )
               )}
             </div>
           )}
         </div>
 
-        <div className="flex bg-[#F2EFEB] p-1 rounded-full border border-border/60">
-          <button
-            onClick={() => setProjectFields({ viewMode: "grid" })}
-            className={`px-3 py-1 text-[12px] font-medium rounded-full transition-colors ${viewMode === "grid" ? "bg-white shadow-sm text-foreground" : "text-text-secondary hover:text-foreground"}`}
-          >
-            网格
-          </button>
-          <button
-            onClick={() => setProjectFields({ viewMode: "list" })}
-            className={`px-3 py-1 text-[12px] font-medium rounded-full transition-colors ${viewMode === "list" ? "bg-white shadow-sm text-foreground" : "text-text-secondary hover:text-foreground"}`}
-          >
-            列表
-          </button>
+        <div className="flex items-center flex-wrap gap-3">
+          <div className="flex bg-muted p-1 rounded-full border border-border/60">
+            <button
+              onClick={() => setProjectFields({ viewMode: "grid" })}
+              className={`px-3 py-1 text-[12px] font-medium rounded-full transition-colors flex items-center ${viewMode === "grid" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              网格
+            </button>
+            <button
+              onClick={() => setProjectFields({ viewMode: "list" })}
+              className={`px-3 py-1 text-[12px] font-medium rounded-full transition-colors flex items-center ${viewMode === "list" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              列表
+            </button>
+          </div>
+          
+          <div className="flex bg-muted p-1 rounded-full border border-border/60">
+             {(['All', 'Success', 'Error', 'Pending', 'Idle'] as const).map(status => (
+               <button
+                  key={status}
+                  onClick={() => setFilterStatus(status)}
+                  className={`px-3 py-1 text-[12px] font-medium rounded-full transition-colors ${filterStatus === status ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+               >
+                  {status === 'All' ? '全部' : status === 'Success' ? '成功' : status === 'Error' ? '失败' : status === 'Pending' ? '排队/进行中' : '空闲'}
+               </button>
+             ))}
+          </div>
         </div>
       </div>
 
       {tasksCount === 0 ? (
-        <div className="h-64 flex flex-col items-center justify-center border border-dashed border-[#D4D2CD] rounded-2xl bg-transparent text-text-secondary text-[14px]">
-          <p>暂无任务，请从左侧栏导入或直接拖拽图片到此处</p>
+        <div className="h-[400px] flex flex-col items-center justify-center border border-dashed border-border/80 rounded-[24px] bg-background/50 text-center animate-in fade-in duration-500">
+          <div className="w-16 h-16 mb-6 rounded-2xl bg-card border border-border shadow-whisper flex items-center justify-center">
+            <Upload className="w-6 h-6 text-primary/60" strokeWidth={1.5} />
+          </div>
+          <h3 className="font-serif text-[18px] font-medium text-foreground tracking-tight">在这里编排您的工作流</h3>
+          <p className="mt-2 text-[13px] text-muted-foreground max-w-[280px] leading-relaxed">
+            您可以直接拖拽图片到此区域，或从左侧导入 CSV 与文本列表来批量建立任务。
+          </p>
         </div>
       ) : (
         <DndContext
@@ -244,7 +301,7 @@ export function TaskList() {
             }
           >
             <div
-              className="grid gap-6 pb-12 transition-all duration-300"
+              className="grid gap-8 pb-12 transition-all duration-300"
               style={{
                 gridTemplateColumns:
                   viewMode === "grid"

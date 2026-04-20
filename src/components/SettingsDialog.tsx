@@ -105,7 +105,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
         <DialogHeader>
           <div className="flex items-center justify-between">
              <DialogTitle>系统设置 (Settings)</DialogTitle>
-             <Button variant="ghost" size="sm" onClick={handleImportConfig} className="text-button-main hover:bg-button-main/10 text-[12px] h-7 px-2">
+             <Button variant="ghost" size="sm" onClick={handleImportConfig} className="text-primary hover:bg-primary/10 text-[12px] h-7 px-2">
                导入 JSON 配置文件
              </Button>
           </div>
@@ -113,18 +113,18 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
             配置您的 API Key 以及相关底层参数。设置将会被加密存储在浏览器本地 IndexedDB 中。
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-6 py-4">
-          <div className="flex flex-col gap-2">
-             <h4 className="text-sm font-medium">默认模型选择</h4>
+        <div className="grid gap-8 py-4">
+          <div className="flex flex-col gap-4">
+             <h4 className="text-sm font-serif font-medium tracking-wide text-foreground">默认模型选择</h4>
              
-             <div className="flex flex-col gap-1 mt-2">
-               <label className="text-[12px] text-text-secondary">文本理解 / 提示词生成模型</label>
+             <div className="flex flex-col gap-1.5 mt-1">
+               <label className="text-[12px] font-medium text-muted-foreground">文本理解 / 提示词生成模型</label>
                <Input 
                  type="text"
                  list="text-model-list"
                  value={localTextModel} 
                  onChange={(e) => setLocalTextModel(e.target.value)}
-                 className="text-[13px]"
+                 className="text-[13px] bg-background"
                  placeholder="gemini-2.5-flash"
                />
                <datalist id="text-model-list">
@@ -137,14 +137,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
                </datalist>
              </div>
 
-             <div className="flex flex-col gap-1 mt-2">
-               <label className="text-[12px] text-text-secondary">图像生成模型</label>
+             <div className="flex flex-col gap-1.5 mt-2">
+               <label className="text-[12px] font-medium text-muted-foreground">图像生成模型</label>
                <Input 
                  type="text"
                  list="image-model-list"
                  value={localImageModel} 
                  onChange={(e) => setLocalImageModel(e.target.value)}
-                 className="text-[13px]"
+                 className="text-[13px] bg-background"
                  placeholder="imagen-3.0-generate-001"
                />
                <datalist id="image-model-list">
@@ -155,20 +155,20 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
              </div>
           </div>
 
-          <div className="flex flex-col gap-2 border-t border-border pt-4">
-            <h4 className="text-sm font-medium">高级配置</h4>
-            <div className="flex flex-col gap-1 mt-1">
-               <label className="text-sm font-medium">接口地址 (API Base URL)</label>
+          <div className="flex flex-col gap-4 border-t border-border pt-6">
+            <h4 className="text-sm font-serif font-medium tracking-wide text-foreground">高级配置</h4>
+            <div className="flex flex-col gap-1.5 mt-1">
+               <label className="text-sm font-medium text-foreground/80">接口地址 (API Base URL)</label>
                <Input
                  type="text"
                  placeholder="例如: https://gpt-best.apifox.cn"
                  value={apiBaseUrl}
                  onChange={(e) => setApiBaseUrl(e.target.value)}
-                 className="text-[13px]"
+                 className="text-[13px] bg-background"
                />
-               <p className="text-[11px] text-text-secondary mt-1 mb-2">可配置代理或第三方中转地址，例如 <code className="bg-black/5 px-1 rounded">https://gpt-best.apifox.cn</code>。为空使用官方默认地址。</p>
+               <p className="text-[11.5px] text-muted-foreground mt-1 mb-3">可配置代理或第三方中转地址，例如 <code className="bg-black/5 text-foreground px-1.5 py-0.5 rounded font-mono">https://gpt-best.apifox.cn</code>。为空使用默认源。</p>
 
-               <label className="text-sm font-medium">
+               <label className="text-sm font-medium text-foreground/80 mt-2">
                  Google Gemini / Imagen API Key
                </label>
                <Input
@@ -176,18 +176,18 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
                  placeholder="AIzaSy..."
                  value={apiKey}
                  onChange={(e) => setApiKey(e.target.value)}
-                 className="font-mono text-[13px]"
+                 className="font-mono text-[13px] bg-background"
                />
-               <div className="flex flex-col gap-2 mt-3 p-3 bg-black/5 rounded-xl border border-black/10">
+               <div className="flex flex-col gap-3 mt-4 p-4 bg-background/50 rounded-xl border border-border">
                  <div className="flex items-center gap-3">
                    <Button 
                      variant="outline" 
                      size="sm" 
                      onClick={testConnection} 
                      disabled={isTesting}
-                     className="text-[12px] h-8 rounded-lg shadow-sm bg-white"
+                     className="text-[12px] h-8 rounded-lg shadow-sm"
                    >
-                     🔌 测试 API 连接
+                     {isTesting ? '验证中...' : '🔌 验证 API 连通性'}
                    </Button>
                    {testResult.status !== 'idle' && (
                       <span className={`text-[12px] font-medium ${testResult.status === 'success' ? 'text-green-600' : 'text-red-600'}`}>
@@ -201,7 +201,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
                     </div>
                  )}
                </div>
-               <p className="text-[11px] text-text-secondary mt-1">若不填写则默认使用部署时的环境变量。</p>
+               <p className="text-[11px] text-muted-foreground mt-1">若不填写则默认使用部署时的环境变量。</p>
             </div>
           </div>
           
@@ -217,11 +217,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean, onOpenCh
               onChange={(e) => setMaxConcurrency(e.target.value)}
               className="text-[13px]"
             />
-            <p className="text-[11px] text-text-secondary mt-1">控制同时生成的图片数量。过高可能遭遇 API Rate Limit。</p>
+            <p className="text-[11px] text-muted-foreground mt-1">控制同时生成的图片数量。过高可能遭遇 API Rate Limit。</p>
           </div>
         </div>
         <div className="flex justify-end">
-          <Button onClick={handleSave} className="bg-button-main hover:bg-[#333230] text-[#F2EFEB]">保存设置</Button>
+          <Button onClick={handleSave} className="bg-primary hover:bg-primary/90 text-primary-foreground">保存设置</Button>
         </div>
       </DialogContent>
     </Dialog>

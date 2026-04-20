@@ -57,7 +57,7 @@ export function GenerateParamsSelector({
         <Button 
           variant="outline" 
           size="sm" 
-          className={`h-8 bg-card border-border/80 text-[12px] font-mono text-text-primary hover:bg-black/5 ${triggerClassName}`}
+          className={`h-8 bg-card border-border/80 text-[12px] font-mono text-foreground hover:bg-black/5 ${triggerClassName}`}
         >
           {aspectRatio === 'auto' ? '' : <RectangleHorizontal className="w-3.5 h-3.5 mr-1.5 opacity-70" />}
           {aspectRatio === 'auto' ? '自动 (由模型决定)' : aspectRatio} · {resolution}
@@ -67,7 +67,7 @@ export function GenerateParamsSelector({
         <div className="flex flex-col gap-4">
           
           <div className="flex flex-col gap-2">
-            <span className="text-[12px] font-medium text-text-secondary">分辨率</span>
+            <span className="text-[12px] font-medium text-muted-foreground">分辨率</span>
             <div className="flex gap-2">
               {RESOLUTIONS.map(res => (
                 <button
@@ -75,8 +75,8 @@ export function GenerateParamsSelector({
                   onClick={() => onResolutionChange(res)}
                   className={`flex-1 py-1.5 rounded-lg text-[12px] font-mono transition-colors border
                     ${resolution === res 
-                      ? 'bg-button-main text-white border-button-main font-medium' 
-                      : 'bg-transparent text-text-secondary border-border/60 hover:border-button-main/50 hover:bg-black/5'}`}
+                      ? 'bg-primary text-white border-primary font-medium' 
+                      : 'bg-transparent text-muted-foreground border-border/60 hover:border-primary/50 hover:bg-black/5'}`}
                 >
                   {res}
                 </button>
@@ -85,7 +85,7 @@ export function GenerateParamsSelector({
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-[12px] font-medium text-text-secondary">比例</span>
+            <span className="text-[12px] font-medium text-muted-foreground">比例</span>
             <div className="grid grid-cols-5 gap-2">
               {ASPECT_RATIOS.map(ar => (
                 <button
@@ -93,8 +93,8 @@ export function GenerateParamsSelector({
                   onClick={() => onAspectRatioChange(ar)}
                   className={`flex flex-col items-center justify-center py-2 gap-1.5 rounded-xl border transition-all
                     ${aspectRatio === ar
-                      ? 'bg-button-main/[0.03] border-button-main text-button-main shadow-[0_0_0_1px_rgba(42,126,79,0.2)]'
-                      : 'bg-transparent border-border/40 text-text-primary hover:border-border hover:bg-black/5'}
+                      ? 'bg-primary/[0.03] border-primary text-primary shadow-[0_0_0_1px_rgba(42,126,79,0.2)]'
+                      : 'bg-transparent border-border/40 text-foreground hover:border-border hover:bg-black/5'}
                   `}
                 >
                   <div className="flex items-center justify-center h-5 w-5">

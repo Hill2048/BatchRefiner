@@ -148,3 +148,27 @@ export async function processBatch(mode: 'all' | 'prompts' | 'images' = 'all') {
 
   useAppStore.getState().setBatchRunning(false);
 }
+
+export function haltBatch() {
+  const store = useAppStore.getState();
+  store.setBatchRunning(false);
+  
+  // Also reset any Rendering/Prompting tasks back to Idle or Error
+  // so they don't appear stuck visually.
+  const tasks = store.tasks;
+  tasks.forEach(t => {
+    if (t.status === 'Rendering' || t.status === 'Prompting') {
+      store.updateTask(t.id, { 
+        status: 'Error',
+        errorLog: {
+          stage: 'Batch Cancelled',
+          message: '用户手动终止了队列执行',
+          createdAt: Date.now(),
+          retryCount: 0
+        }
+      });
+    }
+  });
+
+  toast.info("已终止正在执行的所有任务列队。");
+}

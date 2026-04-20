@@ -29,49 +29,56 @@
     --color-input: var(--input);
     --color-ring: var(--ring);
 
-    --color-bg-base: #FFFFFF;
-    --color-bg-sidebar: #F2EFEB;
-    --color-bg-card: #FFFFFF;
-    
-    --color-border-color: #E6E4DF;
-    --color-text-primary: #121212;
-    --color-text-secondary: #6B6965;
-    
-    --color-accent-primary: #D97757;
-    --color-accent-success: #2A7E4F;
-    --color-accent-error: #B93026;
-    --color-button-main: #1A1918;
-    
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    --color-parchment: #f5f4ed;
+    --color-ivory: #faf9f5;
+    --color-warm-sand: #e8e6dc;
+    --color-near-black: #141413;
+    --color-olive-gray: #5e5d59;
+    --color-stone-gray: #87867f;
+    --color-terracotta: #c96442;
+    --color-coral: #d97757;
+    --color-charcoal-warm: #4d4c48;
+    --color-border-cream: #f0eee6;
+    --color-border-warm: #e8e6dc;
+    --color-ring-warm: #d1cfc5;
+
+    --color-button-main: #c96442;
+
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-2xl: 24px;
+    --radius-3xl: 32px;
 }
 
 :root {
-    --background: #FFFFFF;
-    --foreground: #121212;
-    --card: #FFFFFF;
-    --card-foreground: #121212;
-    --popover: #FFFFFF;
-    --popover-foreground: #121212;
-    --primary: #1A1918;
-    --primary-foreground: #FFFFFF;
-    --secondary: #F2EFEB;
-    --secondary-foreground: #121212;
-    --muted: #F2EFEB;
-    --muted-foreground: #6B6965;
-    --accent: #F2EFEB;
-    --accent-foreground: #121212;
-    --destructive: #B93026;
-    --destructive-foreground: #FFFFFF;
-    --border: #E6E4DF;
-    --input: #E6E4DF;
-    --ring: #1A1918;
-    --radius: 0.5rem;
+    /* Claude specific palette */
+    --background: #f5f4ed; /* Parchment */
+    --foreground: #141413; /* Near Black */
+    --card: #faf9f5; /* Ivory */
+    --card-foreground: #141413; 
+    --popover: #faf9f5; /* Ivory */
+    --popover-foreground: #141413;
+    
+    --primary: #c96442; /* Terracotta Brand */
+    --primary-foreground: #faf9f5; /* Ivory */
+    
+    --secondary: #e8e6dc; /* Warm Sand */
+    --secondary-foreground: #4d4c48; /* Charcoal Warm */
+    
+    --muted: #f0eee6; 
+    --muted-foreground: #5e5d59; /* Olive Gray */
+    --accent: #f0eee6; /* Using Border Cream for subtle active/hover states */
+    --accent-foreground: #141413;
+    
+    --destructive: #b53333; /* Error Crimson */
+    --destructive-foreground: #faf9f5;
+    
+    --border: #f0eee6; /* Border Cream */
+    --input: #e8e6dc; /* Border Warm */
+    --ring: #d1cfc5; /* Ring Warm for outline shadows */
+    --radius: 0.5rem; /* 8px comfortably rounded defaults */
 }
 
 @layer base {
@@ -79,12 +86,51 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground font-sans text-[14px] leading-relaxed tracking-[-0.01em];
-  }
-  .claude-shadow {
-    box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05), 0 2px 8px -1px rgba(0, 0, 0, 0.03);
+    @apply bg-background text-foreground font-sans text-[16px] leading-[1.60];
   }
   h1, h2, h3, h4, h5, h6 {
-    @apply font-serif tracking-tight;
+    @apply font-serif font-medium text-foreground tracking-normal;
   }
+  .shadow-whisper {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05); /* Level 3 elevated float */
+  }
+  .shadow-ring {
+    box-shadow: 0 0 0 1px var(--ring); /* Level 2 ring outline */
+  }
+}
+
+/* Custom Webkit Scrollbars for Literary feel */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(20, 20, 19, 0.1); /* foreground with 10% opacity */
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(20, 20, 19, 0.2);
+}
+
+/* Focus Utility (Global Override) */
+*:focus-visible {
+  outline: 2px solid #3898ec !important; /* Focus Blue */
+  outline-offset: 2px !important;
+}
+
+/* Sonner Toasts overrides for Editorial look */
+[data-sonner-toast] {
+  background: var(--color-ivory) !important;
+  color: var(--color-foreground) !important;
+  border: 1px solid var(--color-border) !important;
+  font-family: var(--font-sans) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05) !important;
+}
+[data-sonner-toast] [data-title] {
+  font-family: var(--font-serif) !important;
+  font-weight: 500 !important;
 }

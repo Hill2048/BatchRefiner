@@ -66,15 +66,15 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
     switch (task.status) {
       case 'Waiting':
       case 'Idle':
-         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-black/[0.03] text-black/50 border border-black/[0.04]">待处理</span>;
+         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-black/[0.03] text-black/50 border border-border">待处理</span>;
       case 'Prompting':
-         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF8EB] text-[#C99130] border border-[#C99130]/20 flex items-center gap-1.5"><span className="relative flex h-1.5 w-1.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#C99130] opacity-75"></span><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#C99130]"></span></span>扩写中</span>;
+         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-primary/5 text-primary border-primary/20 flex items-center gap-1.5"><span className="relative flex h-1.5 w-1.5"><span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span></span>扩写中</span>;
       case 'Rendering':
-         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF5F2] text-[#D97757] border border-[#D97757]/20 flex items-center gap-1.5"><span className="relative flex h-1.5 w-1.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#D97757] opacity-75"></span><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#D97757]"></span></span>生成中</span>;
+         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-primary/10 text-primary border-primary/30 flex items-center gap-1.5"><span className="relative flex h-1.5 w-1.5"><span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span></span>生成中</span>;
       case 'Success':
-         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-[#F3F9F5] text-[#2D734C] border border-[#2D734C]/10">已完成</span>;
+         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-green-600/10 text-green-700 border-green-600/20">已完成</span>;
       case 'Error':
-         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-[#FEF4F4] text-[#BE3827] border border-[#BE3827]/10">失败</span>;
+         return <span className="text-[10px] px-2.5 py-[3px] rounded-full font-medium bg-destructive/10 text-destructive border-destructive/20">失败</span>;
     }
   };
 
@@ -116,17 +116,24 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
          if (node) cardRef.current = node;
       }}
       style={style}
-      className={`p-0 gap-0 bg-white flex overflow-hidden cursor-pointer transition-all duration-300 relative group
+      className={`p-0 gap-0 bg-card flex overflow-hidden cursor-pointer transition-all duration-300 relative group
       ${isListMode ? 'flex-row items-center h-[140px]' : 'flex-col'} 
-      ${isActive ? (isListMode ? 'border-black/10 shadow-md rounded-2xl h-auto items-stretch' : 'col-span-2 row-span-2 border-black/10 shadow-lg scale-[1.01] rounded-2xl z-40') : 'border border-black/[0.04] shadow-sm hover:shadow-md hover:border-black/10 rounded-2xl'}
-      ${isSelected ? 'ring-2 ring-button-main ring-offset-2' : ''}`}
+      ${isActive ? (isListMode ? 'border-border shadow-md rounded-2xl h-auto items-stretch' : 'col-span-2 row-span-2 border-border shadow-whisper scale-[1.01] rounded-2xl z-40') : 'border border-border shadow-sm hover:shadow-whisper hover:border-border rounded-2xl'}
+      ${isSelected ? 'ring-2 ring-primary ring-offset-2' : ''}`}
       onClick={(e) => {
          const target = e.target as HTMLElement;
          if (target.closest('button') || target.closest('.drag-handle') || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return;
          setActiveTask(isActive ? null : task.id);
       }}
+      onDoubleClick={(e) => {
+         const target = e.target as HTMLElement;
+         if (target.closest('button') || target.closest('.drag-handle') || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return;
+         if (task.resultImage || task.sourceImage) {
+            setLightboxTask(task.id);
+         }
+      }}
     >
-      <div className={`bg-[#F5F4F0] flex items-center justify-center relative isolate overflow-hidden min-h-0 shrink-0
+      <div className={`bg-background flex items-center justify-center relative isolate overflow-hidden min-h-0 shrink-0
         ${isListMode ? 'border-r border-black/5' : 'border-b border-black/5'}
         ${isListMode ? (isActive ? 'w-[280px]' : 'w-[180px] h-full') : (isActive ? 'h-[280px] w-full' : 'flex-1 w-full aspect-[4/3]')}`}
       >
@@ -169,7 +176,7 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
              <img src={task.sourceImage} alt="Source" loading="lazy" decoding="async" className="w-full h-full object-contain drop-shadow-sm" referrerPolicy="no-referrer" />
              {isActive && (
                 <div 
-                   className="absolute inset-0 bg-black/40 opacity-0 group-hover/source:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                   className="absolute inset-0 bg-foreground/10 backdrop-blur-md opacity-0 group-hover/source:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
                    onClick={(e) => {
                       e.stopPropagation();
                       const input = document.createElement('input');
@@ -185,12 +192,12 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
                       input.click();
                    }}
                 >
-                   <span className="text-white text-[11px] bg-black/60 px-3 py-1.5 rounded-full backdrop-blur-sm shadow-sm flex items-center gap-1"><Upload className="w-3 h-3"/> 替换原图</span>
+                   <span className="text-background text-[12px] bg-foreground/80 font-medium px-4 py-2 rounded-full backdrop-blur-sm shadow-sm flex items-center gap-1"><Upload className="w-3 h-3"/> 替换原图</span>
                 </div>
              )}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center text-text-secondary/50 gap-2">
+          <div className="flex flex-col items-center justify-center text-muted-foreground/50 gap-2">
              <ImageIcon className="w-6 h-6 opacity-30" strokeWidth={1} />
           </div>
         )}
@@ -202,7 +209,7 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
            </div>
            <input 
               type="checkbox" 
-              className={`w-4 h-4 rounded appearance-none border border-black/30 checked:bg-button-main checked:border-button-main flex items-center justify-center cursor-pointer relative bg-white/60 backdrop-blur-sm transition-all
+              className={`w-4 h-4 rounded appearance-none border border-black/30 checked:bg-primary checked:border-primary flex items-center justify-center cursor-pointer relative bg-white/60 backdrop-blur-sm transition-all
               ${isSelected ? 'opacity-100 after:content-["✓"] after:absolute after:text-white after:text-[10px]' : 'opacity-0 group-hover:opacity-100'}`}
               checked={isSelected}
               onChange={() => toggleTaskSelection(task.id)}
@@ -233,19 +240,19 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
         </button>
       </div>
       
-      <div className="p-4 shrink-0 bg-white flex flex-col flex-1 border-t border-transparent relative z-10 w-full">
-         <div className="flex justify-between items-center mb-1.5">
-           <span className="text-[10px] font-mono text-text-secondary">{idStr}</span>
+      <div className="p-5 shrink-0 bg-card flex flex-col flex-1 border-t border-transparent relative z-10 w-full">
+         <div className="flex justify-between items-center mb-2">
+           <span className="text-[10.5px] font-mono opacity-80 text-muted-foreground">{idStr}</span>
            {getStatusDisplay()}
          </div>
-         <div className="text-[13px] font-serif leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-foreground font-medium">
+         <div className="text-[14px] font-serif leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-foreground font-medium">
             {task.title}
          </div>
          
-         {!isActive && task.description && <div className="text-[11px] text-text-secondary truncate mt-1">{task.description}</div>}
+         {!isActive && task.description && <div className="text-[12px] text-muted-foreground truncate mt-1">{task.description}</div>}
 
          {isActive && (
-            <div className="mt-3 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300 w-full min-w-0">
+            <div className="mt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300 w-full min-w-0">
                
                {/* --- Top Metadata Row (References & Params) --- */}
                <div className="flex flex-wrap items-stretch gap-2.5 bg-black/[0.02] p-2 rounded-lg border border-black/5">
@@ -254,11 +261,11 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
                  {globalReferenceImages.length > 0 && (
                    <div className="flex flex-col gap-1.5 shrink-0 border-r border-black/5 pr-2.5">
                       <span className="text-[9px] font-bold text-black/50 uppercase tracking-wider flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-button-main/60 rounded-full"></span> 全局参考图 (已应用)
+                        <span className="w-1.5 h-1.5 bg-primary/60 rounded-full"></span> 全局参考图 (已应用)
                       </span>
                       <div className="flex gap-1.5 opacity-80 pointer-events-none">
                          {globalReferenceImages.map((img, i) => (
-                            <div key={i} className="w-7 h-7 rounded-sm overflow-hidden border border-black/10 shadow-sm">
+                            <div key={i} className="w-7 h-7 rounded-sm overflow-hidden border border-border shadow-sm">
                                <img src={img} className="w-full h-full object-cover" alt="Global Ref" />
                             </div>
                          ))}
@@ -271,7 +278,7 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
                     <span className="text-[9px] font-bold text-black/40 px-0.5 uppercase tracking-wider">独立参考图</span>
                     <div className="flex gap-1.5 flex-wrap">
                        {task.referenceImages?.map((img, i) => (
-                          <div key={i} className="w-7 h-7 rounded-sm overflow-hidden border border-black/10 shadow-sm relative group/ref">
+                          <div key={i} className="w-7 h-7 rounded-sm overflow-hidden border border-border shadow-sm relative group/ref">
                              <img src={img} className="w-full h-full object-cover" alt="Ref" />
                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/ref:opacity-100 flex flex-col items-center justify-center transition-opacity text-white backdrop-blur-sm">
                                 <div 
@@ -324,7 +331,7 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
                       resolution={task.resolution || useAppStore.getState().globalResolution}
                       onAspectRatioChange={(ar) => updateTask(task.id, { aspectRatio: ar === useAppStore.getState().globalAspectRatio ? undefined : ar })}
                       onResolutionChange={(res) => updateTask(task.id, { resolution: res === useAppStore.getState().globalResolution ? undefined : res })}
-                      triggerClassName="w-fit h-7 text-[10px] px-2 bg-white shadow-sm border-black/10 hover:border-black/20"
+                      triggerClassName="w-fit h-7 text-[10px] px-2 bg-white shadow-sm border-border hover:border-black/20"
                     />
                  </div>
                </div>
@@ -338,7 +345,7 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
                        onChange={(e) => setLocalDesc(e.target.value)}
                        onBlur={() => { if (localDesc !== task.description) updateTask(task.id, { description: localDesc }) }}
                        placeholder="输入简短的中/英文要求..."
-                       className="min-h-[30px] text-[12px] leading-relaxed text-text-secondary bg-transparent border border-black/5 hover:border-black/10 focus-visible:border-black/20 resize-none shadow-sm px-2.5 py-2 rounded-lg transition-colors"
+                       className="min-h-[30px] text-[12px] leading-relaxed text-muted-foreground bg-transparent border border-black/5 hover:border-border focus-visible:border-black/20 resize-none shadow-sm px-2.5 py-2 rounded-lg transition-colors"
                     />
                   </div>
                   
@@ -349,24 +356,69 @@ export const TaskCard = React.memo(function TaskCard({ taskId }: { taskId: strin
                            value={localPrompt}
                            onChange={(e) => setLocalPrompt(e.target.value)}
                            onBlur={() => { if (localPrompt !== task.promptText) updateTask(task.id, { promptText: localPrompt }) }}
-                           className="min-h-[60px] text-[11px] font-mono leading-relaxed text-black/70 bg-black/[0.03] border border-transparent hover:border-black/10 focus-visible:border-black/20 focus-visible:bg-white resize-y shadow-inner px-2.5 py-2 rounded-lg transition-all"
+                           className="min-h-[60px] text-[11px] font-mono leading-relaxed text-black/70 bg-white border text-foreground hover:border-border focus-visible:border-black/20 focus-visible:bg-white resize-y shadow-inner px-2.5 py-2 rounded-lg transition-all"
                         />
                      </div>
                   )}
                </div>
 
-               <div className="mt-1 pt-2.5 flex items-center justify-between gap-2">
-                   <Button variant="ghost" className="h-7 px-2.5 rounded-md text-[11px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
-                      <Eye className="w-3 h-3 mr-1 opacity-70" /> 预览提示词
-                   </Button>
-                   <Button className="h-7 px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11px] font-medium disabled:opacity-50" onClick={handleRunTask} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
+               <div className="mt-1 pt-2.5 flex items-center justify-between gap-1 flex-wrap">
+                   <div className="flex items-center gap-1">
+                      <Button variant="ghost" className="h-7 px-2 rounded-md text-[11px] font-medium hover:bg-black/5 text-muted-foreground disabled:opacity-50" onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
+                         <Eye className="w-3 h-3 mr-1 opacity-70" /> 预览提示词
+                      </Button>
+                      <Button variant="ghost" className="h-7 w-7 p-0 rounded-md text-muted-foreground hover:bg-black/5" onClick={(e) => {
+                         e.stopPropagation();
+                         const newTask = {
+                            ...task,
+                            index: useAppStore.getState().tasks.length + 1,
+                            title: task.title + ' (副本)',
+                            status: 'Idle' as const,
+                            resultImage: undefined,
+                            promptText: task.promptText,
+                         };
+                         useAppStore.getState().addTask(newTask);
+                         toast.success('已复制新任务');
+                      }} title="复制任务">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                      </Button>
+                      {task.promptText && (
+                         <Button variant="ghost" className="h-7 w-7 p-0 rounded-md text-muted-foreground hover:bg-black/5" onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(task.promptText || '');
+                            toast.success('已复制提示词至剪贴板');
+                         }} title="复制提示词至剪贴板">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                         </Button>
+                      )}
+                      {task.sourceImage && (
+                          <Button variant="ghost" className="h-7 w-7 p-0 rounded-md text-muted-foreground hover:bg-black/5" onClick={async (e) => {
+                             e.stopPropagation();
+                             try {
+                                const { saveAs } = await import('file-saver');
+                                if (task.sourceImage?.startsWith('http')) {
+                                   const res = await fetch(task.sourceImage);
+                                   const blob = await res.blob();
+                                   saveAs(blob, `Source_${task.title}.jpg`);
+                                } else {
+                                   saveAs(task.sourceImage! as string, `Source_${task.title}.jpg`);
+                                }
+                             } catch(err) {
+                                window.open(task.sourceImage, '_blank');
+                             }
+                          }} title="下载原图">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                          </Button>
+                      )}
+                   </div>
+                   <Button className="h-7 px-3.5 rounded-md shadow-sm bg-foreground hover:bg-foreground text-white text-[11px] font-medium disabled:opacity-50" onClick={handleRunTask} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
                       执行此项
                    </Button>
                </div>
                
                {task.status === 'Error' && task.errorLog && (
-                  <div className="mt-1 p-3 bg-[#FEF4F4] text-[#BE3827] text-[11.5px] rounded-xl border border-[#BE3827]/10 flex flex-col gap-1 leading-relaxed">
-                     <div className="font-semibold flex items-center gap-1.5 -ml-0.5"><div className="w-1.5 h-1.5 rounded-full bg-[#BE3827]"></div> {task.errorLog.stage === 'Prompt Generation' ? '提示词生成' : (task.errorLog.stage === 'Image Generation' ? '图像生成' : task.errorLog.stage)} 失败</div>
+                  <div className="mt-1 p-3 bg-red-100/50 text-destructive text-[11.5px] rounded-xl border border-destructive/10 flex flex-col gap-1 leading-relaxed">
+                     <div className="font-semibold flex items-center gap-1.5 -ml-0.5"><div className="w-1.5 h-1.5 rounded-full bg-destructive"></div> {task.errorLog.stage === 'Prompt Generation' ? '提示词生成' : (task.errorLog.stage === 'Image Generation' ? '图像生成' : task.errorLog.stage)} 失败</div>
                      <span className="opacity-80 break-words font-mono text-[10.5px]">{task.errorLog.message}</span>
                   </div>
                )}

@@ -70,25 +70,25 @@ export function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       <DialogContent className="sm:max-w-[700px] bg-card border border-border/60 rounded-[20px] claude-shadow p-0 overflow-hidden">
         <DialogHeader className="px-8 pt-8 pb-4">
           <DialogTitle className="font-serif text-[22px] font-medium text-foreground tracking-tight">导入任务</DialogTitle>
-          <div className="text-[13px] text-text-secondary mt-1">在下方粘贴数据以自动生成批量任务。</div>
+          <div className="text-[13px] text-muted-foreground mt-1">在下方粘贴数据以自动生成批量任务。</div>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="px-8 flex items-center justify-between border-b border-border/60">
             <TabsList className="bg-transparent h-12 p-0 border-none space-x-6">
-              <TabsTrigger value="csv" className="font-medium text-[13px] rounded-none border-b-2 border-transparent data-[state=active]:border-button-main data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground bg-transparent text-text-secondary w-auto px-0 h-12">从表格复制 (CSV/Excel)</TabsTrigger>
-              <TabsTrigger value="list" className="font-medium text-[13px] rounded-none border-b-2 border-transparent data-[state=active]:border-button-main data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground bg-transparent text-text-secondary w-auto px-0 h-12">纯文本列表</TabsTrigger>
+              <TabsTrigger value="csv" className="font-medium text-[13px] rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground bg-transparent text-muted-foreground w-auto px-0 h-12 transition-all">从表格复制 (CSV/Excel)</TabsTrigger>
+              <TabsTrigger value="list" className="font-medium text-[13px] rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground bg-transparent text-muted-foreground w-auto px-0 h-12 transition-all">纯文本列表</TabsTrigger>
             </TabsList>
             
-            <Badge variant="outline" className="font-mono text-[10px] bg-[#F5F4F0] border-none text-text-secondary uppercase">自动映射列名</Badge>
+            <Badge variant="outline" className="font-mono text-[10px] bg-background border-none text-muted-foreground uppercase shadow-none ring-1 ring-border/50">自动映射</Badge>
           </div>
 
           <div className="p-8">
             <TabsContent value="csv" className="mt-0 outline-none">
               <div className="flex flex-col gap-4">
                 <Textarea 
-                  placeholder="在此处粘贴包含表头的表格数据...&#10;自动提取【标题】和【提示词】"
-                  className="h-[250px] font-mono text-[13px] bg-[#F5F4F0] border border-border/60 rounded-xl resize-none shadow-none focus-visible:ring-1 focus-visible:ring-button-main p-4"
+                  placeholder="在此处粘贴包含表头的表格数据...&#10;自动提取【标题】和【提示词/描述】列"
+                  className="h-[250px] font-mono text-[13px] bg-background border border-border/60 rounded-xl resize-none shadow-none focus-visible:ring-1 focus-visible:ring-[#3898ec] p-4 transition-colors hover:border-black/20"
                   value={csvInput}
                   onChange={e => setCsvInput(e.target.value)}
                 />
@@ -98,7 +98,7 @@ export function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                <div className="flex flex-col gap-4">
                 <Textarea 
                   placeholder="在此处粘贴文本列表，每一行将作为独立的一个任务...&#10;例如：&#10;将背景改成红色&#10;添加赛博朋克特效"
-                  className="h-[250px] text-[13px] bg-[#F5F4F0] border border-border/60 rounded-xl resize-none shadow-none focus-visible:ring-1 focus-visible:ring-button-main p-4"
+                  className="h-[250px] text-[13px] bg-background border border-border/60 rounded-xl resize-none shadow-none focus-visible:ring-1 focus-visible:ring-[#3898ec] p-4 transition-colors hover:border-black/20"
                   value={listInput}
                   onChange={e => setListInput(e.target.value)}
                 />
@@ -107,9 +107,9 @@ export function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           </div>
         </Tabs>
 
-        <div className="px-8 py-5 border-t border-border/60 bg-[#F5F4F0]/50 flex justify-end gap-3 mt-auto">
-           <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-9 hover:bg-[#E8E5DF] rounded-full text-[13px] font-medium text-text-secondary px-6 transition-all">取消</Button>
-           <Button onClick={handleImport} className="h-9 rounded-full bg-button-main text-[#F2EFEB] hover:bg-[#333230] px-6 shadow-sm text-[13px] font-medium transition-all">确认导入</Button>
+        <div className="px-8 py-5 border-t border-border/60 bg-background/50 flex justify-end gap-3 mt-auto">
+           <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-9 hover:bg-secondary rounded-full text-[13px] font-medium text-foreground/70 px-6 transition-all">取消</Button>
+           <Button onClick={handleImport} className="h-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-6 shadow-sm text-[13px] font-medium transition-all">开始生成任务</Button>
         </div>
       </DialogContent>
     </Dialog>
