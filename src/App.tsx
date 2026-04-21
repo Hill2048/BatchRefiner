@@ -10,6 +10,7 @@ import { TaskList } from './components/workspace/TaskList';
 import { Lightbox } from './components/workspace/Lightbox';
 import { useAppStore } from './store';
 import { Toaster } from './components/ui/sonner';
+import { QuotaStatus } from './components/layout/QuotaStatus';
 
 export default function App() {
   const isBatchRunning = useAppStore(state => state.isBatchRunning);
@@ -69,7 +70,7 @@ export default function App() {
           {/* Floating Status Badge replacing the old footer */}
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40">
              <div className="flex items-center gap-4 bg-white/80 backdrop-blur-md px-4 py-2 rounded-full shadow-sm border border-border/50 text-[11.55px] text-text-secondary">
-               <span className="flex items-center gap-2" title="当前连接的模型">
+               <span className="flex items-center gap-2" title="当前连接的文本模型">
                  <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
                  <span className="font-mono opacity-80">{textModel}</span>
                </span>
@@ -80,6 +81,8 @@ export default function App() {
                </span>
                <span className="w-px h-3 bg-border" />
                <span className={`font-medium ${isBatchRunning ? 'text-button-main' : ''}`}>{isBatchRunning ? '处理中...' : '准备就绪'}</span>
+               <span className="w-px h-3 bg-border/70" />
+               <QuotaStatus />
                <span className="w-px h-3 bg-border/70" />
                <span className="text-[10px] tracking-[0.12em] text-black/30 select-none">V1.1</span>
              </div>

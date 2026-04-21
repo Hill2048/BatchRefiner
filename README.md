@@ -1,6 +1,6 @@
 # BatchRefiner
 
-AI 图片批量处理工作台。
+AI 图片批量生成与编辑工作台。
 
 ## 本地运行
 
@@ -29,24 +29,17 @@ http://localhost:3000
 
 推荐方式：
 - 在网页设置里填写 `API Base URL` 和 `API Key`
+- 通过“导出加密配置”分享给别人
+- 如果希望站点提供默认配置，可把导出的加密文件放到 `public/default-api-config.json`
 
-可选方式：
-- 本地 `.env.local` 中配置 `VITE_GEMINI_API_KEY`
-
-示例：
-
-```env
-VITE_GEMINI_API_KEY=your_local_gemini_key
-```
-
-注意：
-- `VITE_` 前缀变量会被打进前端构建产物
-- 只适合本地开发或你明确接受密钥暴露的场景
-- 公网部署时不要把真实密钥直接放进前端
+说明：
+- 加密配置文件适合分享和分发，但接收方仍然需要口令才能导入
+- 纯前端页面无法把已解密的真实密钥做到绝对不可提取
+- 不建议再把真实密钥直接写进 `VITE_` 环境变量并打包到前端
 
 ## Cloudflare Pages 部署
 
-这个项目适合按静态 Vite 站点部署到 Cloudflare Pages。
+这个项目适合作为静态 Vite 站点部署到 Cloudflare Pages。
 
 Pages 配置：
 - Framework preset: `React (Vite)`
@@ -54,18 +47,10 @@ Pages 配置：
 - Build output directory: `dist`
 - Production branch: `main`
 
-部署步骤：
-1. 打开 Cloudflare Dashboard
-2. 进入 `Workers & Pages`
-3. 选择 `Create application`
-4. 选择 `Pages`
-5. 连接 GitHub 仓库 `Hill2048/BatchRefiner`
-6. 填入上面的构建配置
-7. 点击 `Save and Deploy`
-
-生产环境建议：
-- 不要在 Cloudflare Pages 里设置 `VITE_GEMINI_API_KEY`
-- 部署后通过网页内设置让用户自己填写 API Key
+部署建议：
+- 不要在 Cloudflare Pages 里设置真实的 `VITE_GEMINI_API_KEY`
+- 如需预置配置，使用加密后的 `public/default-api-config.json`
+- 部署后可让用户在网页内导入加密配置或自行填写 Key
 
 ## GitHub
 

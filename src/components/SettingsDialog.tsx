@@ -7,6 +7,7 @@ import { useAppStore } from '@/store';
 import { PlatformPreset } from '@/types';
 import { toast } from 'sonner';
 import { clearDownloadDirectory, pickDownloadDirectory, supportsDirectoryDownload } from '@/lib/downloadDirectory';
+import { decryptApiConfig, encryptApiConfig, isEncryptedApiConfig } from '@/lib/secureConfig';
 
 const PLATFORM_PRESETS: Array<{
   value: PlatformPreset;
@@ -92,6 +93,16 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     if (presetConfig.defaultImageModel) setLocalImageModel(presetConfig.defaultImageModel);
   };
 
+  const applyImportedConfig = (data: any) => {
+    if (data.platformPreset) setPlatformPreset(data.platformPreset);
+    if (data.apiBaseUrl !== undefined) setApiBaseUrl(data.apiBaseUrl);
+    if (data.apiKey !== undefined) setApiKey(data.apiKey);
+    if (data.downloadDirectoryName !== undefined) setDownloadDirectoryName(data.downloadDirectoryName);
+    if (data.textModel) setLocalTextModel(data.textModel);
+    if (data.imageModel) setLocalImageModel(data.imageModel);
+    if (data.maxConcurrency) setMaxConcurrency(String(data.maxConcurrency));
+  };
+
   const testConnection = async () => {
     setIsTesting(true);
     setTestResult({ status: 'idle', msg: '正在测试...' });
@@ -140,26 +151,29 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const handleImportConfig = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json';
+    input.accept = '.json,.txt,.brcfg';
     input.onchange = (e: Event) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         if (!event.target?.result) return;
         try {
-          const data = JSON.parse(event.target.result as string);
-          if (data.platformPreset) setPlatformPreset(data.platformPreset);
-          if (data.apiBaseUrl !== undefined) setApiBaseUrl(data.apiBaseUrl);
-          if (data.apiKey !== undefined) setApiKey(data.apiKey);
-          if (data.downloadDirectoryName !== undefined) setDownloadDirectoryName(data.downloadDirectoryName);
-          if (data.textModel) setLocalTextModel(data.textModel);
-          if (data.imageModel) setLocalImageModel(data.imageModel);
-          if (data.maxConcurrency) setMaxConcurrency(String(data.maxConcurrency));
+          const raw = String(event.target.result);
+          const parsed = JSON.parse(raw);
+
+          if (isEncryptedApiConfig(parsed)) {
+            const decrypted = await decryptApiConfig(raw);
+            applyImportedConfig(decrypted);
+            toast.success('已导入配置文件');
+            return;
+          }
+
+          applyImportedConfig(parsed);
           toast.success('已导入配置文件');
-        } catch {
-          toast.error('配置文件解析失败，请确认 JSON 格式正确');
+        } catch (error: any) {
+          toast.error(error?.message || '配置文件解析失败');
         }
       };
       reader.readAsText(file);
@@ -170,22 +184,21 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const handleExportConfig = async () => {
     try {
       const { saveAs } = await import('file-saver');
-      const configToExport = {
+      const encryptedConfig = await encryptApiConfig({
+        version: 1,
         platformPreset,
         apiBaseUrl,
         apiKey,
-        downloadDirectoryName,
-        maxConcurrency: parseInt(maxConcurrency, 10) || store.maxConcurrency,
         textModel: localTextModel,
         imageModel: localImageModel,
-        exportDate: new Date().toISOString(),
-      };
+        exportedAt: new Date().toISOString(),
+      });
 
-      const blob = new Blob([JSON.stringify(configToExport, null, 2)], { type: 'application/json;charset=utf-8' });
-      saveAs(blob, `BatchRefiner_Settings_${new Date().toISOString().slice(0, 10)}.json`);
-      toast.success('配置已导出');
-    } catch {
-      toast.error('导出失败');
+      const blob = new Blob([encryptedConfig], { type: 'application/json;charset=utf-8' });
+      saveAs(blob, `BatchRefiner_API_Config_${new Date().toISOString().slice(0, 10)}.json`);
+      toast.success('已导出配置文件');
+    } catch (error: any) {
+      toast.error(error?.message || '导出失败');
     }
   };
 
@@ -246,7 +259,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </Button>
               <div className="w-px h-3 bg-border" />
               <Button variant="ghost" size="sm" onClick={handleExportConfig} className="text-button-main hover:bg-black/5 text-[12.6px] h-7 px-3 rounded-lg font-medium transition-colors">
-                导出
+                导出配置
               </Button>
             </div>
           </div>
@@ -276,7 +289,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </SelectContent>
             </Select>
             <p className="text-[11.55px] text-text-secondary">
-              `云雾` 优先走 Gemini 原生 `generateContent`，`comfly.chat` 启用平台专属的模型映射和请求适配。
+              `云雾` 优先走 Gemini 原生 `generateContent`，`comfly.chat` 会启用平台专属模型映射和请求适配。
             </p>
           </div>
 
@@ -330,9 +343,27 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <div className="flex flex-col gap-2 border-t border-border/80 pt-5">
             <h4 className="text-[15.44px] font-medium text-text-primary">接口配置</h4>
             <div className="flex flex-col gap-1 mt-1">
+              <input
+                type="text"
+                name="fake-username"
+                autoComplete="username"
+                tabIndex={-1}
+                aria-hidden="true"
+                className="hidden"
+              />
+              <input
+                type="password"
+                name="fake-password"
+                autoComplete="current-password"
+                tabIndex={-1}
+                aria-hidden="true"
+                className="hidden"
+              />
               <label className="text-[13.65px] font-medium text-text-secondary">API Base URL</label>
               <Input
                 type="text"
+                name="batch-refiner-api-base"
+                autoComplete="off"
                 placeholder="例如: https://yunwu.ai"
                 value={apiBaseUrl}
                 onChange={(e) => setApiBaseUrl(e.target.value)}
@@ -341,15 +372,24 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
               <label className="text-[13.65px] font-medium text-text-secondary mt-3">API Key</label>
               <Input
-                type="password"
+                type="text"
+                name="batch-refiner-api-key"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                data-form-type="other"
+                data-lpignore="true"
+                data-1p-ignore="true"
                 placeholder="AIzaSy... / sk-..."
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 className="font-mono text-[13.65px] rounded-xl border-border bg-white shadow-sm focus-visible:ring-button-main/30"
+                style={{ WebkitTextSecurity: 'disc' } as React.CSSProperties}
               />
 
               <div className="flex flex-col gap-2 mt-3 p-3 bg-black/[0.03] rounded-2xl border border-black/5 shadow-inner">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <Button
                     variant="outline"
                     size="sm"
@@ -379,7 +419,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <div className="rounded-2xl border border-border/60 bg-white/70 px-4 py-3">
               <div className="text-[12.6px] font-medium text-text-primary">当前目录</div>
               <div className="mt-1 text-[12.6px] text-text-secondary break-all">
-                {downloadDirectoryName || '未设置，当前将回退为浏览器 ZIP 下载'}
+                {downloadDirectoryName || '未设置，当前会回退为浏览器 ZIP 下载'}
               </div>
             </div>
             <div className="flex items-center gap-2 mt-2">

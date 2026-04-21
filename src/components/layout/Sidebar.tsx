@@ -27,6 +27,15 @@ import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { AspectRatio, Resolution } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
+import { buildProjectExportPayload } from "@/lib/projectSnapshot";
+import {
+  clearProjectFileHandle,
+  ensureProjectFilePermission,
+  getProjectFileHandle,
+  pickProjectSaveFile,
+  supportsProjectFileSave,
+  writeProjectFile,
+} from "@/lib/projectFileSave";
 
 function SidebarProgress() {
   const tasksCount = useAppStore(state => state.tasks.length);
@@ -89,6 +98,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
   const setBatchRunning = useAppStore((state) => state.setBatchRunning);
   const selectedTaskIds = useAppStore((state) => state.selectedTaskIds);
   const projectName = useAppStore((state) => state.projectName);
+  const projectId = useAppStore((state) => state.projectId);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -397,11 +407,44 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
   };
 
   const handleExportProject = async () => {
+    const payload = buildProjectExportPayload(store);
+    const data = JSON.stringify(payload, null, 2);
+    const filename = `Project_${projectName}.json`;
+    const successfulPromptCount = payload.successfulPrompts.length;
+
+    if (supportsProjectFileSave()) {
+      try {
+        let handle = await getProjectFileHandle(projectId);
+        let reusedExistingFile = true;
+
+        if (!handle) {
+          handle = await pickProjectSaveFile(projectId, filename);
+          reusedExistingFile = false;
+        } else {
+          const hasPermission = await ensureProjectFilePermission(handle);
+          if (!hasPermission) {
+            await clearProjectFileHandle(projectId);
+            handle = await pickProjectSaveFile(projectId, filename);
+            reusedExistingFile = false;
+          }
+        }
+
+        await writeProjectFile(handle, data);
+        toast.success(
+          reusedExistingFile
+            ? `项目空间已覆盖保存，并写入 ${successfulPromptCount} 条成功提示词`
+            : `项目空间已保存，并写入 ${successfulPromptCount} 条成功提示词`
+        );
+        return;
+      } catch (error) {
+        console.error("Project save error", error);
+      }
+    }
+
     const { saveAs } = await import('file-saver');
-    const data = JSON.stringify(store, null, 2);
     const blob = new Blob([data], { type: "application/json;charset=utf-8" });
-    saveAs(blob, `Project_${projectName}.json`);
-    toast.success("项目配置导出成功。");
+    saveAs(blob, filename);
+    toast.success(`项目空间已导出，并写入 ${successfulPromptCount} 条成功提示词`);
   };
 
   const handleImportProject = () => {

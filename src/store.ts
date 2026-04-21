@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { get, set, del } from 'idb-keyval';
 import { ProjectData, Task } from './types';
 import { DEFAULT_SKILL_FILE_NAME, DEFAULT_SKILL_TEXT } from './lib/defaultSkillText';
+import { extractProjectDataFromImport, mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from './lib/projectSnapshot';
 
 // Storage Debouncer for disk I/O perf
 let persistTimeout: ReturnType<typeof setTimeout>;
@@ -169,9 +170,16 @@ export const useAppStore = create<AppState>()(
       
       loadProjectFromJson: (jsonString: string) => {
          try {
-             const data = JSON.parse(jsonString);
+             const data = extractProjectDataFromImport(JSON.parse(jsonString));
              if (data.projectId && data.tasks) {
-                 set((state) => ({ ...state, ...withDefaultSkill(data), isBatchRunning: false, activeTaskId: null, lightboxTaskId: null, selectedTaskIds: [] }));
+                 set((state) => ({
+                   ...state,
+                   ...mergeProjectSnapshotWithGlobalConfig(withDefaultSkill(sanitizeProjectSnapshot(data)), state),
+                   isBatchRunning: false,
+                   activeTaskId: null,
+                   lightboxTaskId: null,
+                   selectedTaskIds: [],
+                 }));
              }
          } catch(e) {}
       },

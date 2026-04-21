@@ -1,6 +1,7 @@
 import { useAppStore } from "@/store";
 import { v4 as uuidv4 } from "uuid";
 import { get, set, del } from "idb-keyval";
+import { mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from "./projectSnapshot";
 
 export interface ProjectMeta {
   projectId: string;
@@ -26,7 +27,12 @@ export async function saveCurrentProject() {
   // But zustand saves to "batch-refiner-idb". 
   const json = await get("batch-refiner-idb");
   if (json) {
-    await set(`project_${store.projectId}`, json);
+    const parsed = JSON.parse(json as string);
+    const sanitized = {
+      ...parsed,
+      state: sanitizeProjectSnapshot(parsed.state || {}),
+    };
+    await set(`project_${store.projectId}`, JSON.stringify(sanitized));
   }
 }
 
@@ -45,11 +51,16 @@ export async function switchProject(projectId: string) {
   await saveCurrentProject();
   const json = await get(`project_${projectId}`);
   if (json) {
-    await set("batch-refiner-idb", json);
+    const parsed = JSON.parse(json as string);
+    const merged = {
+      ...parsed,
+      state: mergeProjectSnapshotWithGlobalConfig(parsed.state || {}, useAppStore.getState()),
+    };
+    const mergedJson = JSON.stringify(merged);
+    await set("batch-refiner-idb", mergedJson);
     // Reload state from new json
-    const parsed = JSON.parse(json as string).state;
-    if (parsed) {
-        useAppStore.setState({ ...parsed });
+    if (merged.state) {
+        useAppStore.setState({ ...merged.state });
     }
   }
 }
