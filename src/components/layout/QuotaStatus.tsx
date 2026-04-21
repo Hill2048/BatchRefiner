@@ -62,7 +62,7 @@ export function QuotaStatus() {
   }
 
   const totalQuota = Math.max(snapshot.balanceUsd + snapshot.usageUsd, 0);
-  const usageRatio = totalQuota > 0 ? Math.min(snapshot.usageUsd / totalQuota, 1) : 0;
+  const remainingRatio = totalQuota > 0 ? Math.min(snapshot.balanceUsd / totalQuota, 1) : 0;
   const ringLength = 43.98;
   const accessUntilText = formatAccessUntil(snapshot.accessUntil);
   const title = [
@@ -88,7 +88,7 @@ export function QuotaStatus() {
             strokeWidth="2"
             strokeLinecap="round"
             strokeDasharray={ringLength}
-            strokeDashoffset={ringLength * (1 - usageRatio)}
+            strokeDashoffset={ringLength * (1 - remainingRatio)}
           />
         </svg>
       </span>
