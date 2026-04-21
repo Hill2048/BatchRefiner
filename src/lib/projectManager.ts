@@ -1,6 +1,6 @@
 import { useAppStore } from "@/store";
 import { v4 as uuidv4 } from "uuid";
-import { get, set, del } from "idb-keyval";
+import { get, set, del, keys } from "idb-keyval";
 import { mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from "./projectSnapshot";
 
 export interface ProjectMeta {
@@ -37,8 +37,8 @@ export async function saveCurrentProject() {
 }
 
 export async function getProjectIndex(): Promise<ProjectMeta[]> {
-  const keys = await import("idb-keyval").then(m => m.keys());
-  const metaKeys = keys.filter(k => typeof k === 'string' && k.startsWith("meta_"));
+  const allKeys = await keys();
+  const metaKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith("meta_"));
   const metas: ProjectMeta[] = [];
   for (const k of metaKeys) {
     const meta = await get(k as string);

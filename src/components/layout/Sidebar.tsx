@@ -24,6 +24,7 @@ import { processBatch, generateTaskPrompt, haltBatch } from "@/lib/batchRunner";
 import { toast } from "sonner";
 import { SettingsDialog } from "../SettingsDialog";
 import { GenerateParamsSelector } from "../GenerateParamsSelector";
+import { MarkdownEditorDialog } from "../MarkdownEditorDialog";
 import { AspectRatio, Resolution } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
@@ -81,6 +82,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
   const [chatInput, setChatInput] = useState("");
 
   const [isSkillEditing, setIsSkillEditing] = useState(false);
+  const [isMarkdownEditorOpen, setIsMarkdownEditorOpen] = useState(false);
   
   const store = useAppStore();
   const globalSkillText = useAppStore((state) => state.globalSkillText);
@@ -176,6 +178,12 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
       reader.readAsText(file);
     }
     e.target.value = '';
+  };
+
+  const handleSaveSkillText = (nextValue: string) => {
+    setLocalSkillText(nextValue);
+    setProjectFields({ globalSkillText: nextValue });
+    toast.success("提示词 Skills 已保存");
   };
 
   const handleChatFileAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -549,22 +557,20 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
         <div className="flex flex-col gap-6 pt-3 pb-6 px-1">
           {/* Global Skill / Style */}
           <div className="flex flex-col perspective-1000 relative">
-            <h3 className="text-[12.6px] font-medium text-text-secondary mb-3">
-              全局设定风格
-            </h3>
+            <h3 className="text-[12.6px] font-medium text-text-secondary mb-3">提示词Skills</h3>
             
             {skillFileName && !isSkillEditing ? (
                <div 
                  className="flex flex-col items-center justify-center gap-2 p-6 border border-border/60 rounded-2xl bg-[#F5F4F0] relative group cursor-pointer hover:border-button-main transition-all duration-500 ease-out transform-gpu animate-in fade-in"
-                 onDoubleClick={() => setIsSkillEditing(true)}
-                 title="双击进行详细编辑"
+                 onDoubleClick={() => setIsMarkdownEditorOpen(true)}
+                 title="双击打开大编辑器"
                >
                   <FileText className="w-10 h-10 text-button-main" strokeWidth={1.5} />
                   <span className="text-[13.65px] font-medium text-foreground truncate max-w-full px-4">{skillFileName}</span>
                   <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                      <button className="p-1 hover:bg-black/5 rounded-full" onClick={(e) => { e.stopPropagation(); setProjectFields({ skillFileName: '', globalSkillText: '' }); }} title="移除预设"><X className="w-4 h-4 text-text-secondary" /></button>
                   </div>
-                  <div className="text-[10.5px] text-text-secondary absolute bottom-2">双击进入编辑</div>
+                  <div className="text-[10.5px] text-text-secondary absolute bottom-2">双击打开大编辑器</div>
                </div>
             ) : (
                <div className="relative transition-all duration-500 ease-out transform-gpu animate-in fade-in zoom-in-95">
@@ -715,7 +721,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
             size="icon"
             className="h-10 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-2xl"
             onClick={handleExportZip}
-            title="?????????????????????">
+            title="导出结果图">
             <Download className="w-4 h-4" strokeWidth={1.5} />
           </Button>
         </div>
@@ -771,6 +777,13 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
       </div>
 
       <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+      <MarkdownEditorDialog
+        open={isMarkdownEditorOpen}
+        fileName={skillFileName}
+        value={localSkillText}
+        onOpenChange={setIsMarkdownEditorOpen}
+        onSave={handleSaveSkillText}
+      />
     </div>
   );
 }
