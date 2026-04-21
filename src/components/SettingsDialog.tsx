@@ -486,7 +486,31 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     input.click();
   };
 
-  const handleExportConfig = async () => {
+const handleExportCurrentConfig = async () => {
+    try {
+      const { saveAs } = await import('file-saver');
+      const syncedConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
+      const currentConfig = syncedConfigs[platformPreset];
+      const payload: ApiConfigPayload = {
+        version: 1,
+        platformPreset,
+        apiBaseUrl: currentConfig.apiBaseUrl,
+        apiKey: currentConfig.apiKey,
+        textModel: currentConfig.textModel,
+        imageModel: currentConfig.imageModel,
+        exportedAt: new Date().toISOString(),
+      };
+
+      const encryptedConfig = await encryptApiConfig(payload);
+      const blob = new Blob([encryptedConfig], { type: 'application/json;charset=utf-8' });
+      saveAs(blob, `BatchRefiner_API_Config_${platformPreset}_${new Date().toISOString().slice(0, 10)}.json`);
+      toast.success('已导出当前平台配置');
+    } catch (error: any) {
+      toast.error(error?.message || '导出失败');
+    }
+  };
+
+  const handleExportAllConfigs = async () => {
     try {
       const { saveAs } = await import('file-saver');
       const payload: MultiPlatformApiConfigPayload = {
@@ -563,18 +587,22 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         <DialogHeader>
           <div className="mt-1 mb-2 flex items-center justify-between">
             <DialogTitle className="font-serif text-[18.9px] tracking-tight">系统设置</DialogTitle>
-            <div className="flex items-center gap-1.5 pr-6">
+<div className="flex items-center gap-1.5 pr-6">
               <Button variant="ghost" size="sm" onClick={handleImportConfig} className="h-7 rounded-lg px-3 text-[12.6px] font-medium text-button-main transition-colors hover:bg-black/5">
                 导入
               </Button>
               <div className="h-3 w-px bg-border" />
-              <Button variant="ghost" size="sm" onClick={handleExportConfig} className="h-7 rounded-lg px-3 text-[12.6px] font-medium text-button-main transition-colors hover:bg-black/5">
-                导出全部配置
+              <Button variant="ghost" size="sm" onClick={handleExportCurrentConfig} className="h-7 rounded-lg px-3 text-[12.6px] font-medium text-button-main transition-colors hover:bg-black/5">
+                导出当前
+              </Button>
+              <div className="h-3 w-px bg-border" />
+              <Button variant="ghost" size="sm" onClick={handleExportAllConfigs} className="h-7 rounded-lg px-3 text-[12.6px] font-medium text-button-main transition-colors hover:bg-black/5">
+                导出全部
               </Button>
             </div>
           </div>
           <DialogDescription className="text-[13.65px] text-text-secondary">
-            每个平台的 API 地址、Key 和模型会分别保存，并统一导出到一个文件里。
+            每个平台的 API 地址、Key 和模型会分别保存。支持导出当前平台配置，也支持一键导出全部平台配置。
           </DialogDescription>
         </DialogHeader>
 
