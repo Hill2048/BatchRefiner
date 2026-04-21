@@ -1,4 +1,4 @@
-import * as React from "react";
+﻿import * as React from "react";
 import {
   Play,
   Pause,
@@ -77,6 +77,29 @@ async function resultImageToBlob(resultImage: string) {
   return response.blob();
 }
 
+function getGlobalParamsLabel(imageModel?: string) {
+  const normalized = (imageModel || "").trim().toLowerCase();
+  if (normalized.startsWith("gpt-image") || normalized === "image2") {
+    return "GPT";
+  }
+  return "Gemini";
+}
+
+function getQuickSwitchImageModel(target: "gemini" | "gpt", currentModel?: string) {
+  const normalized = (currentModel || "").trim().toLowerCase();
+
+  if (target === "gpt") {
+    if (normalized.startsWith("gpt-image") || normalized === "image2") {
+      return currentModel || "gpt-image-2";
+    }
+    return "gpt-image-2";
+  }
+
+  if (normalized.includes("gemini") || normalized.includes("imagen") || normalized.includes("banana")) {
+    return currentModel || "gemini-3.1-flash-image-preview";
+  }
+  return "gemini-3.1-flash-image-preview";
+}
 export function Sidebar({ className = "", style }: { className?: string, style?: React.CSSProperties }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
@@ -92,6 +115,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
   const globalAspectRatio = useAppStore((state) => state.globalAspectRatio);
   const globalResolution = useAppStore((state) => state.globalResolution);
   const imageModel = useAppStore((state) => state.imageModel);
+  const globalParamsLabel = getGlobalParamsLabel(imageModel);
   const textModel = useAppStore((state) => state.textModel);
   const setProjectFields = useAppStore((state) => state.setProjectFields);
   const importTasks = useAppStore((state) => state.importTasks);
@@ -625,12 +649,37 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
           </div>
 
           <div className="flex flex-col">
-            <h3 className="text-[12.6px] font-medium text-text-secondary mb-3 flex items-center justify-between">
-              <span>全局参数 <span>(Banana 2/Pro)</span></span>
+            <h3 className="text-[12.6px] font-medium text-text-secondary mb-3 flex items-center justify-between gap-3">
+              <span>全局参数 <span>({globalParamsLabel})</span></span>
+              <div className="inline-flex items-center rounded-full border border-border/70 bg-white p-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setProjectFields({ imageModel: getQuickSwitchImageModel("gemini", imageModel) })}
+                  className={`rounded-full px-3 py-1 text-[11px] transition-colors ${
+                    globalParamsLabel === "Gemini"
+                      ? "bg-button-main text-white"
+                      : "text-text-secondary hover:bg-black/5"
+                  }`}
+                >
+                  Gemini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProjectFields({ imageModel: getQuickSwitchImageModel("gpt", imageModel) })}
+                  className={`rounded-full px-3 py-1 text-[11px] transition-colors ${
+                    globalParamsLabel === "GPT"
+                      ? "bg-button-main text-white"
+                      : "text-text-secondary hover:bg-black/5"
+                  }`}
+                >
+                  GPT
+                </button>
+              </div>
             </h3>
             <GenerateParamsSelector 
               aspectRatio={globalAspectRatio}
               resolution={globalResolution}
+              imageModel={imageModel}
               onAspectRatioChange={(ar) => setProjectFields({ globalAspectRatio: ar })}
               onResolutionChange={(res) => setProjectFields({ globalResolution: res })}
               triggerClassName="w-full justify-start py-4 h-auto bg-[#F5F4F0] border-transparent"
@@ -787,3 +836,5 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
     </div>
   );
 }
+
+

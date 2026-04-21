@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
 import { get, set, del } from 'idb-keyval';
-import { ProjectData, Task } from './types';
+import { PlatformApiConfigMap, ProjectData, Task } from './types';
 import { DEFAULT_SKILL_FILE_NAME, DEFAULT_SKILL_TEXT } from './lib/defaultSkillText';
 import { extractProjectDataFromImport, mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from './lib/projectSnapshot';
 
@@ -42,6 +42,7 @@ interface AppState extends ProjectData {
   selectedTaskIds: string[];
   apiKey: string;
   apiBaseUrl: string;
+  platformConfigs: PlatformApiConfigMap;
   
   // Actions
   setProjectFields: (fields: Partial<AppState>) => void;
@@ -64,6 +65,39 @@ interface AppState extends ProjectData {
   setApiBaseUrl: (url: string) => void;
   reorderTasks: (startIndex: number, endIndex: number) => void;
 }
+
+const initialPlatformConfigs: PlatformApiConfigMap = {
+  'yunwu': {
+    apiBaseUrl: 'https://yunwu.ai',
+    apiKey: '',
+    textModel: 'gemini-3.1-flash-lite-preview',
+    imageModel: 'gemini-3.1-flash-image-preview',
+  },
+  'comfly-chat': {
+    apiBaseUrl: 'https://ai.comfly.chat',
+    apiKey: '',
+    textModel: 'gemini-3.1-flash-lite-preview',
+    imageModel: 'gemini-3.1-flash-image-preview',
+  },
+  'openai-compatible': {
+    apiBaseUrl: '',
+    apiKey: '',
+    textModel: 'gpt-4o',
+    imageModel: 'gpt-image-1',
+  },
+  'gemini-native': {
+    apiBaseUrl: '',
+    apiKey: '',
+    textModel: 'gemini-2.5-flash',
+    imageModel: 'imagen-3.0-generate-001',
+  },
+  'custom': {
+    apiBaseUrl: '',
+    apiKey: '',
+    textModel: '',
+    imageModel: '',
+  },
+};
 
 const initialState: ProjectData = {
   projectId: uuidv4(),
@@ -120,6 +154,7 @@ export const useAppStore = create<AppState>()(
       selectedTaskIds: [],
       apiKey: '',
       apiBaseUrl: 'https://yunwu.ai',
+      platformConfigs: initialPlatformConfigs,
 
       setProjectFields: (fields) => set((state) => ({ ...state, ...fields, updatedAt: Date.now() })),
       
@@ -237,6 +272,7 @@ export const useAppStore = create<AppState>()(
          exportTemplate: state.exportTemplate,
          apiKey: state.apiKey,
          apiBaseUrl: state.apiBaseUrl,
+         platformConfigs: state.platformConfigs,
          createdAt: state.createdAt,
          updatedAt: state.updatedAt
       }),

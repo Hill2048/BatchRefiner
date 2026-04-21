@@ -48,6 +48,7 @@ export const TaskCard = React.memo(function TaskCard({
   const globalReferenceImages = useAppStore(state => state.globalReferenceImages);
   const globalAspectRatio = useAppStore(state => state.globalAspectRatio);
   const globalResolution = useAppStore(state => state.globalResolution);
+  const imageModel = useAppStore(state => state.imageModel);
 
   if (!task) return null;
 
@@ -483,6 +484,7 @@ export const TaskCard = React.memo(function TaskCard({
                 <GenerateParamsSelector
                   aspectRatio={task.aspectRatio || globalAspectRatio}
                   resolution={task.resolution || globalResolution}
+                  imageModel={imageModel}
                   onAspectRatioChange={(ar) => updateTask(task.id, { aspectRatio: ar === globalAspectRatio ? undefined : ar })}
                   onResolutionChange={(res) => updateTask(task.id, { resolution: res === globalResolution ? undefined : res })}
                   triggerClassName="w-fit h-9 text-[10.5px] px-3 bg-white shadow-sm border-black/10 hover:border-black/20"

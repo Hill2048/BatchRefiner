@@ -56,6 +56,23 @@ function getNormalizedModelName(model?: string) {
   return (model || "").trim().toLowerCase();
 }
 
+function isGptImageModel(model?: string) {
+  const normalized = getNormalizedModelName(model);
+  return normalized.startsWith("gpt-image") || normalized === "image2";
+}
+
+function isComflyResponsesImageModel(model?: string, platformPreset?: PlatformPreset) {
+  if (platformPreset !== "comfly-chat") return false;
+  const normalized = getNormalizedModelName(model);
+  return normalized === "gpt-image-2" || normalized === "image2";
+}
+
+function normalizeComflyImageModelAlias(modelName: string) {
+  const normalized = getNormalizedModelName(modelName);
+  if (normalized === "image2") return "gpt-image-2";
+  return modelName;
+}
+
 function normalizeResolution(value?: Resolution) {
   return (value || "1K").toUpperCase();
 }
@@ -99,7 +116,7 @@ function getTaskImageInputs(task: Task, globalReferenceImages: string[]) {
 }
 
 function getComflyModelResolutionSupport(modelName: string, resolution: string): ResolutionSupport {
-  const normalized = getNormalizedModelName(modelName);
+  const normalized = getNormalizedModelName(normalizeComflyImageModelAlias(modelName));
 
   if (normalized.startsWith("gemini-3.1-flash-image-preview")) {
     return resolution === "1K" || resolution === "2K" || resolution === "4K" ? "hard" : "soft";
@@ -113,11 +130,16 @@ function getComflyModelResolutionSupport(modelName: string, resolution: string):
     return resolution === "1K" || resolution === "2K" || resolution === "4K" ? "hard" : "soft";
   }
 
+  if (normalized === "gpt-image-2") {
+    return "hard";
+  }
+
   return "soft";
 }
 
 function resolveComflyImageModel(modelName: string, resolution: string) {
-  const normalized = getNormalizedModelName(modelName);
+  const canonicalModelName = normalizeComflyImageModelAlias(modelName);
+  const normalized = getNormalizedModelName(canonicalModelName);
 
   if (normalized.startsWith("gemini-3.1-flash-image-preview")) {
     if (resolution === "2K") return "gemini-3.1-flash-image-preview-2k";
@@ -134,7 +156,7 @@ function resolveComflyImageModel(modelName: string, resolution: string) {
     return "nano-banana-pro";
   }
 
-  return modelName;
+  return canonicalModelName;
 }
 
 function resolveImageModel(modelName: string, resolution: string, platformPreset: PlatformPreset): ResolvedModelInfo {
@@ -160,7 +182,7 @@ function resolveImageModel(modelName: string, resolution: string, platformPreset
     return { requestedModel: modelName, actualModel: modelName, resolutionSupport: "hard" };
   }
 
-  if (normalized.startsWith("gpt-image") || normalized.startsWith("dall-e")) {
+  if (isGptImageModel(normalized) || normalized.startsWith("dall-e")) {
     return { requestedModel: modelName, actualModel: modelName, resolutionSupport: "hard" };
   }
 
@@ -171,7 +193,7 @@ export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey
   const normalizedModel = getNormalizedModelName(modelName);
 
   if (platformPreset === "comfly-chat") {
-    return normalizedModel.includes("gemini") || normalizedModel.includes("banana") || normalizedModel.includes("gpt-image");
+    return normalizedModel.includes("gemini") || normalizedModel.includes("banana") || normalizedModel.includes("gpt-image") || normalizedModel === "image2";
   }
 
   if (platformPreset === "yunwu") {
@@ -180,7 +202,7 @@ export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey
 
   const isCustomOpenAI = !!apiBaseUrl && !!apiKey;
   if (isCustomOpenAI) {
-    return normalizedModel.startsWith("gpt-image") || normalizedModel.includes("banana") || normalizedModel.includes("gemini");
+    return isGptImageModel(normalizedModel) || normalizedModel.includes("banana") || normalizedModel.includes("gemini");
   }
 
   return GEMINI_NATIVE_IMAGE_INPUT_MODELS.includes(normalizedModel);
@@ -216,18 +238,17 @@ function buildGenerationConstraints(task: Task, resolution: string, aspectRatio:
 }
 
 function appendSoftResolutionHint(prompt: string, resolution: string, aspectRatio: string) {
-  return `${prompt}\n\nOutput requirements:\n- target resolution: ${resolution}\n- aspect ratio: ${aspectRatio}\n- keep the output as close as possible to the requested resolution.`;
+  return `${prompt}\n\n分辨率：${resolution}\n比例：${aspectRatio}\n尽量贴近以上尺寸要求。`;
 }
 
 function buildImageAwarePrompt(task: Task, imageCount: number, resolution: string, aspectRatio: string) {
   return [
-    "Use the provided images as required visual inputs.",
-    "Preserve the identity, composition, and key structure from the source or reference images when the request implies editing instead of re-creation.",
-    `You are receiving ${imageCount} image input(s).`,
-    "",
     buildGenerationConstraints(task, resolution, aspectRatio),
     "",
-    "[Final Prompt]",
+    `[Image Inputs]`,
+    `${imageCount}`,
+    "",
+    "[Prompt]",
     task.promptText || "N/A",
   ].join("\n");
 }
@@ -395,12 +416,121 @@ function getOpenAIImageSize(aspectRatio: string) {
   return "1024x1024";
 }
 
+function parseAspectRatioValue(aspectRatio: string) {
+  if (!aspectRatio || aspectRatio === "auto") return 1;
+  const parts = aspectRatio.split(":");
+  if (parts.length !== 2) return 1;
+  const width = Number(parts[0]);
+  const height = Number(parts[1]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return 1;
+  return width / height;
+}
+
+function clampImage2AspectRatio(aspectRatio: string) {
+  const ratio = parseAspectRatioValue(aspectRatio);
+  return Math.min(3, Math.max(1 / 3, ratio));
+}
+
+function roundToMultipleOf16(value: number) {
+  return Math.max(16, Math.round(value / 16) * 16);
+}
+
+function floorToMultipleOf16(value: number) {
+  return Math.max(16, Math.floor(value / 16) * 16);
+}
+
+function getImage2TargetPixels(resolution: string) {
+  switch (resolution) {
+    case "4K":
+      return 8_294_400;
+    case "2K":
+      return 2_359_296;
+    default:
+      return 1_048_576;
+  }
+}
+
+function getImage2ImageSize(aspectRatio: string, resolution: string) {
+  const targetPixels = getImage2TargetPixels(resolution);
+  const ratio = clampImage2AspectRatio(aspectRatio);
+  let width = Math.sqrt(targetPixels * ratio);
+  let height = width / ratio;
+
+  width = roundToMultipleOf16(width);
+  height = roundToMultipleOf16(height);
+
+  const longestEdge = Math.max(width, height);
+  if (longestEdge > 4000) {
+    const scale = 4000 / longestEdge;
+    width = floorToMultipleOf16(width * scale);
+    height = floorToMultipleOf16(height * scale);
+  }
+
+  let pixels = width * height;
+  if (pixels < 655_360) {
+    const scale = Math.sqrt(655_360 / pixels);
+    width = roundToMultipleOf16(width * scale);
+    height = roundToMultipleOf16(height * scale);
+    if (Math.max(width, height) > 4000) {
+      const retryScale = 4000 / Math.max(width, height);
+      width = floorToMultipleOf16(width * retryScale);
+      height = floorToMultipleOf16(height * retryScale);
+    }
+    pixels = width * height;
+  }
+
+  if (pixels > 8_294_400) {
+    const scale = Math.sqrt(8_294_400 / pixels);
+    width = floorToMultipleOf16(width * scale);
+    height = floorToMultipleOf16(height * scale);
+  }
+
+  return `${width}x${height}`;
+}
+
 function getOpenAIImageQuality(resolution: string) {
   return resolution === "4K" || resolution === "2K" ? "high" : "medium";
 }
 
+function parseCustomImageSize(resolution: string) {
+  const match = String(resolution || "").trim().match(/^(\d+)x(\d+)$/i);
+  if (!match) return null;
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isInteger(width) || !Number.isInteger(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+  if (width % 16 !== 0 || height % 16 !== 0) return null;
+  if (width > 4000 || height > 4000) return null;
+
+  const ratio = Math.max(width / height, height / width);
+  if (ratio > 3) return null;
+
+  const pixels = width * height;
+  if (pixels < 655_360 || pixels > 8_294_400) return null;
+
+  return `${width}x${height}`;
+}
+
+function isExactImage2Size(resolution: string) {
+  return Boolean(parseCustomImageSize(resolution));
+}
+
+function getRequestedImageSize(modelName: string, aspectRatio: string, resolution: string) {
+  if (isComflyResponsesImageModel(modelName, "comfly-chat") || getNormalizedModelName(modelName) === "gpt-image-2") {
+    return parseCustomImageSize(resolution) || getImage2ImageSize(aspectRatio, resolution);
+  }
+
+  return getOpenAIImageSize(aspectRatio);
+}
+
 function buildComflyResolutionFields(modelName: string, resolution: string, aspectRatio: string) {
   const payload: Record<string, string> = { model: modelName };
+
+  if (isComflyResponsesImageModel(modelName, "comfly-chat")) {
+    payload.size = getRequestedImageSize(modelName, aspectRatio, resolution);
+    return payload;
+  }
 
   if (modelName.includes("banana")) {
     payload.resolution = resolution;
@@ -412,6 +542,22 @@ function buildComflyResolutionFields(modelName: string, resolution: string, aspe
   }
 
   return payload;
+}
+
+function extractImageResultFromResponsesApi(payload: any): GeneratedImageResult | null {
+  const imageOutput = payload?.output?.find?.((item: any) => item?.type === "image_generation_call");
+  const base64Image = imageOutput?.result;
+  if (typeof base64Image === "string" && base64Image.trim()) {
+    const mimeType = imageOutput?.mime_type || "image/png";
+    const src = `data:${mimeType};base64,${base64Image}`;
+    return {
+      src,
+      sourceType: "base64",
+      originalSrc: src
+    };
+  }
+
+  return extractImageResultFromResponse(payload);
 }
 
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
@@ -589,7 +735,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
 
   const resolution = getEffectiveResolution(task);
   const aspectRatio = getEffectiveAspectRatio(task);
-  const systemPrompt = "You are an expert prompt writer for image generation. Expand the user's constraints into a concise, effective, artistic English image prompt.";
+  const systemPrompt = "你负责根据用户输入整理出一段可直接用于生图或改图的最终提示词，不强制英文，不额外解释。";
   const contentMsg = [
     `[Global Skill (Style Constraint)]\n${store.globalSkillText || "N/A"}`,
     `[Global Target (Action Constraint)]\n${store.globalTargetText || "N/A"}`,
@@ -769,6 +915,38 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
       let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
+      if (isComflyResponsesImageModel(resolvedModel.actualModel, platformPreset) && hasImageInputs) {
+        const requestBody: Record<string, unknown> = {
+          model: resolvedModel.actualModel,
+          prompt: buildImageAwarePrompt(task, imageInputs.length, resolution, aspectRatio),
+          image: imageInputs,
+          size: getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution),
+        };
+
+        if (aspectRatio !== "auto" && !isExactImage2Size(resolution)) {
+          requestBody.aspect_ratio = aspectRatio;
+        }
+
+        const res = await fetchWithTimeout(`${baseUrl}/images/generations`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${store.apiKey}`
+          },
+          body: JSON.stringify(requestBody)
+        }, IMAGE_REQUEST_TIMEOUT_MS);
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`HTTP Error ${res.status}: ${errText.substring(0, 160)}`);
+        }
+
+        const json = await res.json();
+        const extracted = extractImageResultFromResponse(json);
+        if (!extracted) throw new Error("Could not extract image from comfly.chat image generation output");
+        return extracted;
+      }
+
       if (hasImageInputs) {
         const content = [
           { type: "text", text: buildImageAwarePrompt(task, imageInputs.length, resolution, aspectRatio) },
@@ -812,8 +990,8 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
 
       if (platformPreset === "comfly-chat") {
         Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, aspectRatio));
-      } else if (resolvedModel.actualModel.startsWith("gpt-image") || resolvedModel.actualModel.startsWith("dall-e")) {
-        requestBody.size = getOpenAIImageSize(aspectRatio);
+      } else if (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e")) {
+        requestBody.size = getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution);
         requestBody.quality = getOpenAIImageQuality(resolution);
       }
 

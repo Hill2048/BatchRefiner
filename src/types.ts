@@ -3,6 +3,15 @@ export type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4' | '2:3' | '3:2
 export type Resolution = '1K' | '2K' | '4K' | string;
 export type PlatformPreset = 'openai-compatible' | 'gemini-native' | 'comfly-chat' | 'yunwu' | 'custom';
 
+export interface PlatformApiConfig {
+  apiBaseUrl: string;
+  apiKey: string;
+  textModel: string;
+  imageModel: string;
+}
+
+export type PlatformApiConfigMap = Record<PlatformPreset, PlatformApiConfig>;
+
 export interface ErrorLog {
   message: string;
   time: number;

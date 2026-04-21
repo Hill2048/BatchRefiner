@@ -1,4 +1,4 @@
-import type { PlatformPreset } from "@/types";
+import type { PlatformApiConfigMap, PlatformPreset } from "@/types";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -21,6 +21,13 @@ export interface ApiConfigPayload {
   exportedAt: string;
 }
 
+export interface MultiPlatformApiConfigPayload {
+  version: 2;
+  selectedPlatformPreset: PlatformPreset;
+  platformConfigs: PlatformApiConfigMap;
+  exportedAt: string;
+}
+
 interface ProtectedConfigEnvelope {
   type: "batch-refiner-protected-config";
   version: 2;
@@ -39,6 +46,16 @@ interface ChunkedProtectedConfigEnvelope {
     order: number[];
     chunks: string[];
   };
+}
+
+interface MultiChunkedProtectedConfigEnvelope {
+  type: "batch-refiner-protected-config";
+  version: 4;
+  algorithm: "chunked-obfuscation-multi";
+  payload: Omit<MultiPlatformApiConfigPayload, "platformConfigs"> & {
+    platformConfigs: Record<PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey">>;
+  };
+  keyDataByPlatform: Record<PlatformPreset, ChunkedProtectedConfigEnvelope["keyData"]>;
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -124,7 +141,42 @@ async function restoreApiKey(keyData: ChunkedProtectedConfigEnvelope["keyData"])
   return originalChunks.join("");
 }
 
-export async function encryptApiConfig(payload: ApiConfigPayload) {
+export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatformApiConfigPayload) {
+  if (payload.version === 2) {
+    const platformEntries = Object.entries(payload.platformConfigs) as Array<[PlatformPreset, PlatformApiConfigMap[PlatformPreset]]>;
+    const payloadPlatformConfigs = Object.fromEntries(
+      platformEntries.map(([platform, config]) => [
+        platform,
+        {
+          apiBaseUrl: config.apiBaseUrl,
+          textModel: config.textModel,
+          imageModel: config.imageModel,
+        },
+      ]),
+    ) as MultiChunkedProtectedConfigEnvelope["payload"]["platformConfigs"];
+
+    const keyDataByPlatform = Object.fromEntries(
+      await Promise.all(
+        platformEntries.map(async ([platform, config]) => [platform, await obfuscateApiKey(config.apiKey)]),
+      ),
+    ) as MultiChunkedProtectedConfigEnvelope["keyDataByPlatform"];
+
+    const envelope: MultiChunkedProtectedConfigEnvelope = {
+      type: "batch-refiner-protected-config",
+      version: 4,
+      algorithm: "chunked-obfuscation-multi",
+      payload: {
+        version: payload.version,
+        selectedPlatformPreset: payload.selectedPlatformPreset,
+        exportedAt: payload.exportedAt,
+        platformConfigs: payloadPlatformConfigs,
+      },
+      keyDataByPlatform,
+    };
+
+    return JSON.stringify(envelope, null, 2);
+  }
+
   const { apiKey, ...restPayload } = payload;
   const envelope: ChunkedProtectedConfigEnvelope = {
     type: "batch-refiner-protected-config",
@@ -137,10 +189,10 @@ export async function encryptApiConfig(payload: ApiConfigPayload) {
   return JSON.stringify(envelope, null, 2);
 }
 
-export function isEncryptedApiConfig(input: unknown): input is ProtectedConfigEnvelope | ChunkedProtectedConfigEnvelope {
+export function isEncryptedApiConfig(input: unknown): input is ProtectedConfigEnvelope | ChunkedProtectedConfigEnvelope | MultiChunkedProtectedConfigEnvelope {
   if (!input || typeof input !== "object") return false;
   const envelope = input as { type?: unknown; version?: unknown };
-  return envelope.type === "batch-refiner-protected-config" && (envelope.version === 2 || envelope.version === 3);
+  return envelope.type === "batch-refiner-protected-config" && (envelope.version === 2 || envelope.version === 3 || envelope.version === 4);
 }
 
 export async function decryptApiConfig(input: string) {
@@ -154,7 +206,29 @@ export async function decryptApiConfig(input: string) {
     return {
       ...parsed.payload,
       apiKey,
-    } as ApiConfigPayload;
+    } as ApiConfigPayload | MultiPlatformApiConfigPayload;
+  }
+
+  if (parsed.version === 4) {
+    const platformEntries = Object.entries(parsed.payload.platformConfigs) as Array<
+      [PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey">]
+    >;
+    const platformConfigs = Object.fromEntries(
+      await Promise.all(
+        platformEntries.map(async ([platform, config]) => [
+          platform,
+          {
+            ...config,
+            apiKey: await restoreApiKey(parsed.keyDataByPlatform[platform]),
+          },
+        ]),
+      ),
+    ) as PlatformApiConfigMap;
+
+    return {
+      ...parsed.payload,
+      platformConfigs,
+    } as MultiPlatformApiConfigPayload;
   }
 
   const key = await getBuiltInKey();
@@ -163,7 +237,7 @@ export async function decryptApiConfig(input: string) {
 
   try {
     const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
-    return JSON.parse(textDecoder.decode(plaintext)) as ApiConfigPayload;
+    return JSON.parse(textDecoder.decode(plaintext)) as ApiConfigPayload | MultiPlatformApiConfigPayload;
   } catch {
     throw new Error("配置文件解密失败，文件可能已损坏");
   }
