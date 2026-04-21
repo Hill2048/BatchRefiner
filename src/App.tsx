@@ -84,7 +84,7 @@ export default function App() {
                <span className="w-px h-3 bg-border/70" />
                <QuotaStatus />
                <span className="w-px h-3 bg-border/70" />
-               <span className="text-[10px] tracking-[0.12em] text-black/30 select-none">V1.1</span>
+               <span className="text-[10px] tracking-[0.12em] text-black/30 select-none">V{__APP_VERSION__}</span>
              </div>
           </div>
         </main>

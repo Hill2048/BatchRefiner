@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Wallet } from "lucide-react";
 import { useAppStore } from "@/store";
 import { fetchYunwuQuota, type YunwuQuotaSnapshot } from "@/lib/yunwuQuota";
 
@@ -62,21 +61,38 @@ export function QuotaStatus() {
     return <span className="text-amber-700">额度不可用</span>;
   }
 
+  const totalQuota = Math.max(snapshot.balanceUsd + snapshot.usageUsd, 0);
+  const usageRatio = totalQuota > 0 ? Math.min(snapshot.usageUsd / totalQuota, 1) : 0;
+  const ringLength = 43.98;
   const accessUntilText = formatAccessUntil(snapshot.accessUntil);
   const title = [
     snapshot.tokenName ? `令牌：${snapshot.tokenName}` : "",
     accessUntilText ? `有效期至：${accessUntilText}` : "",
+    `已使用：${formatUsd(snapshot.usageUsd)}`,
     `最近更新：${new Date(snapshot.fetchedAt).toLocaleTimeString("zh-CN")}`,
   ]
     .filter(Boolean)
     .join("\n");
 
   return (
-    <span className="flex items-center gap-2" title={title}>
-      <Wallet className="w-3.5 h-3.5 text-emerald-600" />
-      <span className="font-medium text-text-primary">余额 {formatUsd(snapshot.balanceUsd)}</span>
-      <span className="opacity-40">/</span>
-      <span>本月 {formatUsd(snapshot.usageUsd)}</span>
+    <span className="flex items-center gap-2.5" title={title}>
+      <span className="relative flex h-5 w-5 items-center justify-center">
+        <svg viewBox="0 0 20 20" className="h-5 w-5 -rotate-90">
+          <circle cx="10" cy="10" r="7" fill="none" stroke="rgba(15, 23, 42, 0.10)" strokeWidth="2" />
+          <circle
+            cx="10"
+            cy="10"
+            r="7"
+            fill="none"
+            stroke="#E07A53"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeDasharray={ringLength}
+            strokeDashoffset={ringLength * (1 - usageRatio)}
+          />
+        </svg>
+      </span>
+      <span className="font-medium text-text-primary">{formatUsd(snapshot.balanceUsd)}</span>
     </span>
   );
 }

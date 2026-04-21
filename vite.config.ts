@@ -1,11 +1,20 @@
+import fs from 'fs';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const packageJson = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+  appVersion?: string;
+  version?: string;
+};
+
 export default defineConfig(({mode}) => {
   return {
+    define: {
+      __APP_VERSION__: JSON.stringify(packageJson.appVersion || packageJson.version || '0.0'),
+    },
     plugins: [
       react(), 
       tailwindcss(),

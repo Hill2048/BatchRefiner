@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+if [ "${SKIP_AUTO_VERSION_BUMP:-}" = "1" ]; then
+  exit 0
+fi
+
+push_line=""
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+  if [ -n "${local_ref:-}" ] && [ "${local_sha:-}" != "0000000000000000000000000000000000000000" ]; then
+    push_line="$local_ref $local_sha $remote_ref $remote_sha"
+    break
+  fi
+done
+
+if [ -z "$push_line" ]; then
+  exit 0
+fi
+
+remote_name="${1:-origin}"
+remote_ref=$(printf '%s\n' "$push_line" | awk '{print $3}')
+remote_branch=$(printf '%s' "${remote_ref#refs/heads/}")
+
+if [ -z "$remote_branch" ] || [ "$remote_branch" = "$remote_ref" ]; then
+  remote_branch="$(git branch --show-current)"
+fi
+
+next_version="$(node scripts/bump-app-version.mjs)"
+git add package.json
+
+if git diff --cached --quiet -- package.json; then
+  exit 0
+fi
+
+git commit -m "Bump app version to v$next_version"
+SKIP_AUTO_VERSION_BUMP=1 git push "$remote_name" "HEAD:$remote_branch"
+echo "Auto bumped app version to v$next_version and pushed it."
+echo "The original push was cancelled to avoid sending duplicate refs."
+exit 1
