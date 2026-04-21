@@ -11,6 +11,7 @@ import { Lightbox } from './components/workspace/Lightbox';
 import { useAppStore } from './store';
 import { Toaster } from './components/ui/sonner';
 import { QuotaStatus } from './components/layout/QuotaStatus';
+import packageJson from '../package.json';
 
 export default function App() {
   const isBatchRunning = useAppStore(state => state.isBatchRunning);
@@ -84,7 +85,7 @@ export default function App() {
                <span className="w-px h-3 bg-border/70" />
                <QuotaStatus />
                <span className="w-px h-3 bg-border/70" />
-               <span className="text-[10px] tracking-[0.12em] text-black/30 select-none">V{__APP_VERSION__}</span>
+               <span className="text-[10px] tracking-[0.12em] text-black/30 select-none">V{packageJson.appVersion}</span>
              </div>
           </div>
         </main>

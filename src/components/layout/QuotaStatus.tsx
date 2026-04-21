@@ -64,6 +64,7 @@ export function QuotaStatus() {
   const totalQuota = Math.max(snapshot.balanceUsd + snapshot.usageUsd, 0);
   const remainingRatio = totalQuota > 0 ? Math.min(snapshot.balanceUsd / totalQuota, 1) : 0;
   const ringLength = 43.98;
+  const ringColor = remainingRatio >= 0.15 ? "#16A34A" : "#E07A53";
   const accessUntilText = formatAccessUntil(snapshot.accessUntil);
   const title = [
     snapshot.tokenName ? `令牌：${snapshot.tokenName}` : "",
@@ -84,7 +85,7 @@ export function QuotaStatus() {
             cy="10"
             r="7"
             fill="none"
-            stroke="#E07A53"
+            stroke={ringColor}
             strokeWidth="2"
             strokeLinecap="round"
             strokeDasharray={ringLength}
