@@ -179,7 +179,7 @@ export function GenerateParamsSelector({
           </Button>
         }
       />
-      <PopoverContent className="w-[360px] rounded-2xl border-border bg-card p-4 shadow-lg" align="start">
+      <PopoverContent className="w-[min(360px,calc(100vw-2rem))] rounded-2xl border-border bg-card p-4 shadow-lg" align="start">
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <span className="text-[12.6px] font-medium text-text-secondary">分辨率</span>

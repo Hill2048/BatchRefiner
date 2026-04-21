@@ -100,7 +100,16 @@ function getQuickSwitchImageModel(target: "gemini" | "gpt", currentModel?: strin
   }
   return "gemini-3.1-flash-image-preview";
 }
-export function Sidebar({ className = "", style }: { className?: string, style?: React.CSSProperties }) {
+export function Sidebar({
+  className = "",
+  style,
+  compact = false,
+}: {
+  className?: string,
+  style?: React.CSSProperties,
+  compact?: boolean,
+  onRequestClose?: () => void,
+}) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
 
@@ -517,7 +526,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
   };
 
   return (
-    <div className={`flex flex-col py-4 gap-6 ${className}`} style={style}>
+    <div className={`flex min-h-0 flex-col gap-5 ${compact ? 'py-2' : 'py-4'} ${className}`} style={style}>
       
       {/* 1. Quick Add (Moved to top) */}
       <div className="shrink-0 flex flex-col gap-2">
@@ -577,8 +586,8 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
       </div>
 
       {/* 2. Scrollable Body */}
-      <ScrollArea className="flex-1 -mx-6 px-6">
-        <div className="flex flex-col gap-6 pt-3 pb-6 px-1">
+      <ScrollArea className={`${compact ? '-mx-4 px-4' : '-mx-6 px-6'} flex-1 min-h-0`}>
+        <div className={`flex flex-col gap-6 ${compact ? 'pt-2 pb-5' : 'pt-3 pb-6'} px-1`}>
           {/* Global Skill / Style */}
           <div className="flex flex-col perspective-1000 relative">
             <h3 className="text-[12.6px] font-medium text-text-secondary mb-3">提示词Skills</h3>
@@ -600,7 +609,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
                <div className="relative transition-all duration-500 ease-out transform-gpu animate-in fade-in zoom-in-95">
                   <Textarea
                     placeholder="例如：保持极简风格，使用清新的色调，4K高清摄影机..."
-                    className={`h-[120px] bg-card border border-border outline-none rounded-2xl p-4 pb-10 text-[13.65px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:border-button-main focus-visible:ring-button-main transition-colors ${skillFileName ? 'ring-2 ring-button-main' : ''}`}
+                    className={`bg-card border border-border outline-none rounded-2xl p-4 pb-10 text-[13.65px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:border-button-main focus-visible:ring-button-main transition-colors ${compact ? 'h-[108px]' : 'h-[120px]'} ${skillFileName ? 'ring-2 ring-button-main' : ''}`}
                     value={localSkillText}
                     onChange={(e) => setLocalSkillText(e.target.value)}
                     onBlur={() => setProjectFields({ globalSkillText: localSkillText })}
@@ -633,7 +642,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
             <div className="relative group">
               <Textarea
                 placeholder="例如：将背景替换为纯白色的摄影布板..."
-                className="min-h-[80px] bg-card border border-border rounded-2xl p-4 pb-10 text-[13.65px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:ring-button-main focus-visible:border-button-main transition-colors outline-none"
+                className={`bg-card border border-border rounded-2xl p-4 pb-10 text-[13.65px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:ring-button-main focus-visible:border-button-main transition-colors outline-none ${compact ? 'min-h-[72px]' : 'min-h-[80px]'}`}
                 value={localTargetText}
                 onChange={(e) => setLocalTargetText(e.target.value)}
                 onBlur={() => setProjectFields({ globalTargetText: localTargetText })}
@@ -733,7 +742,7 @@ export function Sidebar({ className = "", style }: { className?: string, style?:
         </div>
       </ScrollArea>
 
-      <div className="mt-auto bg-card p-4 rounded-3xl shrink-0 border border-transparent shadow-[0_4px_24px_rgba(0,0,0,0.04)] flex flex-col gap-3 mb-2 mx-1">
+      <div className={`mt-auto bg-card p-4 rounded-3xl shrink-0 border border-transparent shadow-[0_4px_24px_rgba(0,0,0,0.04)] flex flex-col gap-3 mb-2 mx-1 ${compact ? 'sticky bottom-0' : ''}`}>
         <SidebarProgress />
 
         {/* Global Controls */}

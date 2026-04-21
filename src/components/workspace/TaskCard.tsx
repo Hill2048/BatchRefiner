@@ -245,8 +245,8 @@ export const TaskCard = React.memo(function TaskCard({
       }}
       style={style}
       className={`p-0 gap-0 bg-white flex overflow-hidden cursor-pointer transition-all duration-300 relative group
-      ${isListMode ? 'flex-row items-center h-[140px]' : 'flex-col'}
-      ${isActive ? (isListMode ? 'border-border/50 shadow-[0_8px_30px_rgb(0,0,0,0.08)] rounded-2xl h-auto items-stretch' : 'col-span-2 row-span-2 shadow-[0_12px_40px_-5px_rgba(0,0,0,0.12)] scale-[1.01] rounded-[24px] z-40 border border-transparent') : 'border border-border/40 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-border/80 rounded-2xl hover:-translate-y-0.5'}
+      ${isListMode ? 'flex-col sm:flex-row sm:items-center min-h-[140px]' : 'flex-col'}
+      ${isActive ? (isListMode ? 'border-border/50 shadow-[0_8px_30px_rgb(0,0,0,0.08)] rounded-2xl h-auto items-stretch' : 'md:col-span-2 md:row-span-2 shadow-[0_12px_40px_-5px_rgba(0,0,0,0.12)] scale-[1.01] rounded-[24px] z-40 border border-transparent') : 'border border-border/40 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-border/80 rounded-2xl hover:-translate-y-0.5'}
       ${isSelected ? 'ring-2 ring-button-main ring-offset-2' : ''}
       ${isFileDropTarget ? 'ring-2 ring-button-main/70 ring-offset-2 shadow-[0_12px_40px_-5px_rgba(223,122,87,0.22)]' : ''}`}
       onClick={(e) => {
@@ -291,8 +291,8 @@ export const TaskCard = React.memo(function TaskCard({
     >
       <div
         className={`bg-[#F9F8F6] flex items-center justify-center relative isolate overflow-hidden min-h-0 shrink-0
-        ${isListMode ? 'border-r border-border/40' : 'border-b border-border/40'}
-        ${isListMode ? (isActive ? 'w-[280px]' : 'w-[180px] h-full') : (isActive ? 'h-[280px] w-full rounded-t-[24px]' : 'flex-1 w-full aspect-[4/3] rounded-t-2xl')}`}
+        ${isListMode ? 'border-b sm:border-b-0 sm:border-r border-border/40' : 'border-b border-border/40'}
+        ${isListMode ? (isActive ? 'w-full sm:w-[280px]' : 'w-full h-[180px] sm:w-[180px] sm:h-full') : (isActive ? 'h-[220px] md:h-[280px] w-full rounded-t-[24px]' : 'flex-1 w-full aspect-[4/3] rounded-t-2xl')}`}
       >
         {(task.status === 'Rendering' || task.status === 'Prompting') && (
           <div className="absolute inset-0 z-10 bg-black/20 flex flex-col items-center justify-center">
@@ -358,7 +358,7 @@ export const TaskCard = React.memo(function TaskCard({
           <span className="text-[10.5px] font-mono text-text-secondary">{idStr}</span>
           {getStatusDisplay()}
         </div>
-        <div className="text-[13.65px] font-serif leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-foreground font-medium">
+        <div className="text-[13.65px] font-serif leading-tight overflow-hidden text-ellipsis text-foreground font-medium sm:whitespace-nowrap">
           {task.title}
         </div>
 
@@ -401,9 +401,9 @@ export const TaskCard = React.memo(function TaskCard({
 
         {isActive && (
           <div className="mt-3 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300 w-full min-w-0">
-            <div className="grid grid-cols-[auto_auto_1fr] items-stretch gap-0 bg-black/[0.02] rounded-xl border border-black/5 overflow-hidden min-h-[92px]">
+            <div className="grid grid-cols-1 xl:grid-cols-[auto_auto_1fr] items-stretch gap-0 bg-black/[0.02] rounded-xl border border-black/5 overflow-hidden min-h-[92px]">
               {globalReferenceImages.length > 0 && (
-                <div className="flex flex-col justify-between gap-2 px-4 py-3 border-r border-black/5 min-w-[96px]">
+                <div className="flex flex-col justify-between gap-2 px-4 py-3 border-b xl:border-b-0 xl:border-r border-black/5 min-w-0 xl:min-w-[96px]">
                   <span className="text-[9.45px] font-bold text-black/45 uppercase tracking-wider flex items-center gap-1">
                     <span className="w-1.5 h-1.5 bg-button-main/60 rounded-full"></span> 全局参考图
                   </span>
@@ -417,9 +417,9 @@ export const TaskCard = React.memo(function TaskCard({
                 </div>
               )}
 
-              <div className="flex flex-col justify-between gap-2 px-4 py-3 border-r border-black/5 min-w-[188px]">
+              <div className="flex flex-col justify-between gap-2 px-4 py-3 border-b xl:border-b-0 xl:border-r border-black/5 min-w-0 xl:min-w-[188px]">
                 <span className="text-[9.45px] font-bold text-black/45 uppercase tracking-wider">任务参考图</span>
-                <div className="flex gap-2 items-center">
+                <div className="flex gap-2 items-center flex-wrap">
                   {task.referenceImages?.map((img, i) => (
                     <div key={i} className="w-11 h-11 rounded-lg overflow-hidden border border-black/10 shadow-sm relative group/ref cursor-pointer bg-white" onClick={(e) => { e.stopPropagation(); window.open(img, '_blank'); }}>
                       <img src={img} className="w-full h-full object-cover" alt="Ref" title="点击预览参考图" draggable={false} onDragStart={preventNativeImageDrag} />
@@ -479,7 +479,7 @@ export const TaskCard = React.memo(function TaskCard({
                 </div>
               </div>
 
-              <div className="flex flex-col justify-between gap-2 px-4 py-3 min-w-[152px]">
+              <div className="flex flex-col justify-between gap-2 px-4 py-3 min-w-0 xl:min-w-[152px]">
                 <span className="text-[9.45px] font-bold text-black/45 uppercase tracking-wider">专属参数</span>
                 <GenerateParamsSelector
                   aspectRatio={task.aspectRatio || globalAspectRatio}
@@ -487,7 +487,7 @@ export const TaskCard = React.memo(function TaskCard({
                   imageModel={imageModel}
                   onAspectRatioChange={(ar) => updateTask(task.id, { aspectRatio: ar === globalAspectRatio ? undefined : ar })}
                   onResolutionChange={(res) => updateTask(task.id, { resolution: res === globalResolution ? undefined : res })}
-                  triggerClassName="w-fit h-9 text-[10.5px] px-3 bg-white shadow-sm border-black/10 hover:border-black/20"
+                  triggerClassName="w-full sm:w-fit h-9 text-[10.5px] px-3 bg-white shadow-sm border-black/10 hover:border-black/20 justify-between"
                 />
               </div>
             </div>

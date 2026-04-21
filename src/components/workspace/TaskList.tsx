@@ -223,7 +223,7 @@ export function TaskList() {
       onDragOver={handleWorkspaceDragOver}
       onDragLeave={handleWorkspaceDragLeave}
       onDrop={handleWorkspaceDrop}
-      className="flex-1 flex flex-col p-8 overflow-y-auto w-full max-w-[1600px] mx-auto relative outline-none custom-scrollbar"
+      className="flex-1 flex flex-col p-4 md:p-6 xl:p-8 overflow-y-auto w-full max-w-[1600px] mx-auto relative outline-none custom-scrollbar"
     >
       {dragMode === "workspace-drop" && (
         <div className="absolute inset-0 z-50 bg-white/70 backdrop-blur-md border-2 border-dashed border-button-main/40 rounded-3xl m-4 flex flex-col items-center justify-center animate-in fade-in duration-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] pointer-events-none">
@@ -237,8 +237,8 @@ export function TaskList() {
         </div>
       )}
 
-      <div className="mb-8 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
+      <div className="mb-6 md:mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between shrink-0">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
           <h2 className="text-[18.9px] font-serif font-medium text-foreground tracking-tight">
             当前任务{" "}
             <span className="font-sans text-[12.6px] text-text-secondary ml-2 font-normal">
@@ -246,7 +246,7 @@ export function TaskList() {
             </span>
           </h2>
           {tasksCount > 0 && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-[13.65px] cursor-pointer text-text-secondary">
                 <input
                   type="checkbox"
@@ -281,7 +281,7 @@ export function TaskList() {
           )}
         </div>
 
-        <div className="flex bg-background p-1 rounded-full border border-border/60 shadow-sm">
+        <div className="flex bg-background p-1 rounded-full border border-border/60 shadow-sm self-start lg:self-auto">
           <button
             onClick={() => setProjectFields({ viewMode: "grid" })}
             className={`px-3.5 py-1 text-[12.6px] font-medium rounded-full transition-all duration-300 ${viewMode === "grid" ? "bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] text-foreground" : "text-text-secondary hover:text-foreground"}`}
@@ -298,7 +298,7 @@ export function TaskList() {
       </div>
 
       {tasksCount === 0 ? (
-        <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-border/60 rounded-3xl bg-transparent text-text-secondary text-[14.7px]">
+        <div className="h-52 md:h-64 px-6 flex flex-col items-center justify-center border-2 border-dashed border-border/60 rounded-3xl bg-transparent text-text-secondary text-[14.7px] text-center">
           <p className="font-medium opacity-80">暂无任务，请从左侧栏导入或直接拖拽图片到此处</p>
         </div>
       ) : (
@@ -317,11 +317,11 @@ export function TaskList() {
             }
           >
             <div
-              className="grid gap-6 pb-12 transition-all duration-300"
+              className="grid gap-4 md:gap-6 pb-12 transition-all duration-300"
               style={{
                 gridTemplateColumns:
                   viewMode === "grid"
-                    ? "repeat(auto-fill, minmax(260px, 1fr))"
+                    ? "repeat(auto-fill, minmax(min(100%, 240px), 1fr))"
                     : "1fr",
                 gridAutoRows: "max-content",
               }}
