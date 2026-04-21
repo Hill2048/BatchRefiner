@@ -18,11 +18,31 @@ if [ -z "$push_line" ]; then
 fi
 
 remote_name="${1:-origin}"
+local_sha=$(printf '%s\n' "$push_line" | awk '{print $2}')
 remote_ref=$(printf '%s\n' "$push_line" | awk '{print $3}')
+remote_sha=$(printf '%s\n' "$push_line" | awk '{print $4}')
 remote_branch=$(printf '%s' "${remote_ref#refs/heads/}")
 
 if [ -z "$remote_branch" ] || [ "$remote_branch" = "$remote_ref" ]; then
   remote_branch="$(git branch --show-current)"
+fi
+
+package_changed_in_push=0
+zero_sha="0000000000000000000000000000000000000000"
+
+if [ "$remote_sha" = "$zero_sha" ]; then
+  if git log --format= --name-only "$local_sha" --not --remotes="$remote_name" -- package.json | grep -q "package.json"; then
+    package_changed_in_push=1
+  fi
+else
+  if git diff --name-only "$remote_sha" "$local_sha" -- package.json | grep -q "package.json"; then
+    package_changed_in_push=1
+  fi
+fi
+
+if [ "$package_changed_in_push" = "1" ]; then
+  echo "Detected package.json version change in outgoing commits. Skip auto version bump."
+  exit 0
 fi
 
 next_version="$(node scripts/bump-app-version.mjs)"
