@@ -36,15 +36,17 @@ function preventNativeImageDrag(e: React.DragEvent<HTMLImageElement>) {
   e.preventDefault();
 }
 
-function triggerDirectDownload(src: string, fileName: string) {
+function triggerDirectDownload(blob: Blob, fileName: string) {
+  const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = src;
+  link.href = objectUrl;
   link.download = fileName;
   link.rel = 'noopener';
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
   link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
 function getCollapsedTextClass(text: string | undefined, shortLines: number, mediumLines: number, longLines: number) {
@@ -296,11 +298,15 @@ export const TaskCard = React.memo(function TaskCard({
 
   const downloadResultImage = async (resultSrc: string, fileName: string) => {
     try {
-      const { saveAs } = await import('file-saver');
       const blob = await getResultImageBlob(resultSrc);
-      saveAs(blob, fileName);
+      try {
+        const { saveAs } = await import('file-saver');
+        saveAs(blob, fileName);
+      } catch {
+        triggerDirectDownload(blob, fileName);
+      }
     } catch {
-      triggerDirectDownload(resultSrc, fileName);
+      toast.error('下载失败');
     }
   };
 
