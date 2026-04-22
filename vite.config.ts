@@ -1,13 +1,13 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(({mode}) => {
+export default defineConfig(() => {
   return {
     plugins: [
-      react(), 
+      react(),
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
@@ -33,7 +33,7 @@ export default defineConfig(({mode}) => {
         devOptions: {
           enabled: true,
         },
-      })
+      }),
     ],
     resolve: {
       alias: {
@@ -82,8 +82,7 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // When DISABLE_HMR=true, keep HMR off to avoid UI flicker during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };

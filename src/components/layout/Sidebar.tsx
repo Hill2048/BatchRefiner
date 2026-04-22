@@ -25,10 +25,11 @@ import { toast } from "sonner";
 import { SettingsDialog } from "../SettingsDialog";
 import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { MarkdownEditorDialog } from "../MarkdownEditorDialog";
-import { AspectRatio, Resolution } from "@/types";
+import { AspectRatio, Resolution, Task } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
 import { buildProjectExportPayload } from "@/lib/projectSnapshot";
+import { getTaskResultImages } from "@/lib/taskResults";
 import {
   clearProjectFileHandle,
   ensureProjectFilePermission,
@@ -77,6 +78,10 @@ async function resultImageToBlob(resultImage: string) {
   return response.blob();
 }
 
+function getExportableTaskImages(task: Task) {
+  return getTaskResultImages(task);
+}
+
 function getGlobalParamsLabel(imageModel?: string) {
   const normalized = (imageModel || "").trim().toLowerCase();
   if (normalized.startsWith("gpt-image") || normalized === "image2") {
@@ -123,6 +128,7 @@ export function Sidebar({
   const globalReferenceImages = useAppStore((state) => state.globalReferenceImages);
   const globalAspectRatio = useAppStore((state) => state.globalAspectRatio);
   const globalResolution = useAppStore((state) => state.globalResolution);
+  const globalBatchCount = useAppStore((state) => state.globalBatchCount);
   const imageModel = useAppStore((state) => state.imageModel);
   const globalParamsLabel = getGlobalParamsLabel(imageModel);
   const textModel = useAppStore((state) => state.textModel);
@@ -183,6 +189,9 @@ export function Sidebar({
             description: globalTargetText || t.description,
             promptText: undefined, // Clear old prompt cache
             resultImage: undefined, // Clear old image results
+            resultImages: [],
+            failedResultCount: 0,
+            requestedBatchCount: t.batchCount || globalBatchCount || 'x1',
             promptSource: 'auto' as const,
             status: 'Idle' as const, // Reset to idle
             errorLog: undefined
@@ -372,7 +381,7 @@ export function Sidebar({
     const useSelected = selectedTaskIds.length > 0;
     const matchingTasks = currentTasks.filter((task) => {
       if (useSelected && !selectedTaskIds.includes(task.id)) return false;
-      return task.status === "Success" && !!task.resultImage;
+      return getExportableTaskImages(task).length > 0;
     });
 
     if (matchingTasks.length === 0) {
@@ -380,15 +389,18 @@ export function Sidebar({
       return;
     }
 
-    const tasksToExport = matchingTasks.filter((task) => !task.exported);
+    const tasksToExport = matchingTasks.filter((task) => {
+      const exportedIds = task.exportedResultIds || [];
+      return getExportableTaskImages(task).some((image) => !exportedIds.includes(image.id));
+    });
     const finalTasksToExport = tasksToExport.length > 0 ? tasksToExport : matchingTasks;
     const isReExport = tasksToExport.length === 0;
 
-    const getFilename = (task: (typeof tasksToExport)[number]) => {
+    const getFilename = (task: (typeof tasksToExport)[number], imageIndex: number) => {
       let filename = exportTemplate || "{task_id}_{title}";
       filename = filename.replace("{task_id}", task.index.toString().padStart(3, "0"));
       filename = filename.replace("{title}", task.title.substring(0, 30).replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, ""));
-      return filename || `task_${task.index.toString().padStart(3, "0")}`;
+      return `${filename || `task_${task.index.toString().padStart(3, "0")}`}_${String(imageIndex + 1).padStart(2, "0")}`;
     };
 
     const downloadDirectoryHandle = await getDownloadDirectoryHandle();
@@ -401,11 +413,16 @@ export function Sidebar({
 
         let successCount = 0;
         for (const task of finalTasksToExport) {
-          if (!task.resultImage) continue;
-          const blob = await resultImageToBlob(task.resultImage);
-          await writeBlobToDirectory(downloadDirectoryHandle, `${getFilename(task)}.jpg`, blob);
-          store.updateTask(task.id, { exported: true });
-          successCount++;
+          const results = getExportableTaskImages(task);
+          const exportedIds = new Set(task.exportedResultIds || []);
+          for (let index = 0; index < results.length; index += 1) {
+            const result = results[index];
+            const blob = await resultImageToBlob(result.originalSrc || result.src);
+            await writeBlobToDirectory(downloadDirectoryHandle, `${getFilename(task, index)}.jpg`, blob);
+            exportedIds.add(result.id);
+            successCount++;
+          }
+          store.updateTask(task.id, { exported: true, exportedResultIds: Array.from(exportedIds) });
         }
 
         toast.success(
@@ -427,15 +444,20 @@ export function Sidebar({
 
     let exportedCount = 0;
     for (const task of finalTasksToExport) {
-      if (!task.resultImage) continue;
-      try {
-        const blob = await resultImageToBlob(task.resultImage);
-        zip.file(`${getFilename(task)}.jpg`, blob);
-        store.updateTask(task.id, { exported: true });
-        exportedCount++;
-      } catch (error) {
-        console.error("Export image error", error);
+      const results = getExportableTaskImages(task);
+      const exportedIds = new Set(task.exportedResultIds || []);
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index];
+        try {
+          const blob = await resultImageToBlob(result.originalSrc || result.src);
+          zip.file(`${getFilename(task, index)}.jpg`, blob);
+          exportedIds.add(result.id);
+          exportedCount++;
+        } catch (error) {
+          console.error("Export image error", error);
+        }
       }
+      store.updateTask(task.id, { exported: true, exportedResultIds: Array.from(exportedIds) });
     }
 
     const blob = await zip.generateAsync({ type: "blob" });
@@ -688,9 +710,11 @@ export function Sidebar({
             <GenerateParamsSelector 
               aspectRatio={globalAspectRatio}
               resolution={globalResolution}
+              batchCount={globalBatchCount || 'x1'}
               imageModel={imageModel}
               onAspectRatioChange={(ar) => setProjectFields({ globalAspectRatio: ar })}
               onResolutionChange={(res) => setProjectFields({ globalResolution: res })}
+              onBatchCountChange={(count) => setProjectFields({ globalBatchCount: count })}
               triggerClassName="w-full justify-start py-4 h-auto bg-[#F5F4F0] border-transparent"
             />
           </div>

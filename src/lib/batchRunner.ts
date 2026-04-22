@@ -1,7 +1,8 @@
-import { AspectRatio, PlatformPreset, Resolution, Task } from "@/types";
+import { AspectRatio, BatchCount, PlatformPreset, Resolution, Task, TaskResultImage } from "@/types";
 import { useAppStore } from "@/store";
 import pLimit from "p-limit";
 import { toast } from "sonner";
+import { getBatchCountNumber, getEffectiveBatchCount } from "./taskResults";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const PROMPT_REQUEST_TIMEOUT_MS = 90_000;
@@ -40,6 +41,11 @@ interface GeneratedImageResult {
   sourceType: "preview" | "original" | "base64";
   previewSrc?: string;
   originalSrc?: string;
+}
+
+interface GeneratedBatchResult {
+  images: TaskResultImage[];
+  failedCount: number;
 }
 
 function getBuiltInGeminiApiKey() {
@@ -97,6 +103,11 @@ function getEffectiveResolution(task: Task) {
 function getEffectiveAspectRatio(task: Task) {
   const store = useAppStore.getState();
   return normalizeAspectRatio(task.aspectRatio || store.globalAspectRatio || "auto");
+}
+
+function getEffectiveTaskBatchCount(task: Task): BatchCount {
+  const store = useAppStore.getState();
+  return getEffectiveBatchCount(task, store.globalBatchCount);
 }
 
 export function taskHasImageInputs(task: Task, globalReferenceImages: string[]) {
@@ -366,6 +377,20 @@ async function measureImageDimensions(src: string): Promise<ImageDimensions | nu
   });
 }
 
+async function createTaskResultImage(result: GeneratedImageResult): Promise<TaskResultImage> {
+  const dimensions = await measureImageDimensions(result.src);
+  return {
+    id: crypto.randomUUID(),
+    src: result.src,
+    previewSrc: result.previewSrc,
+    originalSrc: result.originalSrc,
+    sourceType: result.sourceType,
+    width: dimensions?.width,
+    height: dimensions?.height,
+    createdAt: Date.now(),
+  };
+}
+
 function getGeminiSampleImageSize(resolution: string) {
   switch (resolution) {
     case "4K":
@@ -633,20 +658,31 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
 
       if (mode === "all" || mode === "images") {
         const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
-        if (currentTask && currentTask.promptText && !currentTask.resultImage) {
+        if (currentTask && currentTask.promptText && !(currentTask.resultImages?.length)) {
           useAppStore.getState().updateTask(task.id, { status: "Rendering", errorLog: undefined });
-          const generatedImage = await retryWrap(() => runImageGeneration(task.id));
-          const dimensions = await measureImageDimensions(generatedImage.src);
+          const generatedBatch = await retryWrap(() => runImageGeneration(task.id));
+          if (generatedBatch.images.length === 0) {
+            throw createStageError("没有成功返回任何结果图。", "Image Generation");
+          }
+          const primaryResult = generatedBatch.images[0];
           useAppStore.getState().updateTask(task.id, {
-            resultImage: generatedImage.src,
-            resultImagePreview: generatedImage.previewSrc,
-            resultImageOriginal: generatedImage.originalSrc,
-            resultImageSourceType: generatedImage.sourceType,
-            resultImageWidth: dimensions?.width,
-            resultImageHeight: dimensions?.height,
-            status: "Success"
+            resultImages: generatedBatch.images,
+            resultImage: primaryResult.src,
+            resultImagePreview: primaryResult.previewSrc,
+            resultImageOriginal: primaryResult.originalSrc,
+            resultImageSourceType: primaryResult.sourceType,
+            resultImageWidth: primaryResult.width,
+            resultImageHeight: primaryResult.height,
+            requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
+            failedResultCount: generatedBatch.failedCount,
+            status: "Success",
+            errorLog: generatedBatch.failedCount > 0 ? {
+              message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
+              time: Date.now(),
+              stage: "Image Generation",
+            } : undefined,
           });
-        } else if (currentTask && currentTask.resultImage) {
+        } else if (currentTask && currentTask.resultImages?.length) {
           useAppStore.getState().updateTask(task.id, { status: "Success" });
         }
       } else {
@@ -709,15 +745,26 @@ export async function processSingleTask(taskId: string) {
     }
 
     store.updateTask(taskId, { status: "Rendering", errorLog: undefined });
-    const generatedImage = await retryWrap(() => runImageGeneration(taskId));
-    const dimensions = await measureImageDimensions(generatedImage.src);
+    const generatedBatch = await retryWrap(() => runImageGeneration(taskId));
+    if (generatedBatch.images.length === 0) {
+      throw createStageError("没有成功返回任何结果图。", "Image Generation");
+    }
+    const primaryResult = generatedBatch.images[0];
     store.updateTask(taskId, {
-      resultImage: generatedImage.src,
-      resultImagePreview: generatedImage.previewSrc,
-      resultImageOriginal: generatedImage.originalSrc,
-      resultImageSourceType: generatedImage.sourceType,
-      resultImageWidth: dimensions?.width,
-      resultImageHeight: dimensions?.height,
+      resultImages: generatedBatch.images,
+      resultImage: primaryResult.src,
+      resultImagePreview: primaryResult.previewSrc,
+      resultImageOriginal: primaryResult.originalSrc,
+      resultImageSourceType: primaryResult.sourceType,
+      resultImageWidth: primaryResult.width,
+      resultImageHeight: primaryResult.height,
+      requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
+      failedResultCount: generatedBatch.failedCount,
+      errorLog: generatedBatch.failedCount > 0 ? {
+        message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
+        time: Date.now(),
+        stage: "Image Generation",
+      } : undefined,
       status: "Success"
     });
   } catch (error: any) {
@@ -822,7 +869,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
   }
 }
 
-async function runImageGeneration(taskId: string): Promise<GeneratedImageResult> {
+async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageResult> {
   const store = useAppStore.getState();
   const task = store.tasks.find(t => t.id === taskId);
   if (!task || !task.promptText) throw new Error("Task or prompt missing");
@@ -1108,4 +1155,28 @@ async function runImageGeneration(taskId: string): Promise<GeneratedImageResult>
   } catch (e: any) {
     throw createStageError(e.message, "Image Generation");
   }
+}
+
+async function runImageGeneration(taskId: string): Promise<GeneratedBatchResult> {
+  const store = useAppStore.getState();
+  const task = store.tasks.find(t => t.id === taskId);
+  if (!task) throw new Error("Task not found");
+
+  const targetBatchCount = getBatchCountNumber(getEffectiveTaskBatchCount(task));
+  const images: TaskResultImage[] = [];
+  let failedCount = 0;
+
+  for (let index = 0; index < targetBatchCount; index += 1) {
+    try {
+      const generatedImage = await runSingleImageGeneration(taskId);
+      images.push(await createTaskResultImage(generatedImage));
+    } catch (error) {
+      failedCount += 1;
+      if (targetBatchCount === 1) {
+        throw error;
+      }
+    }
+  }
+
+  return { images, failedCount };
 }

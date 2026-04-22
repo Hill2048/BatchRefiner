@@ -1,8 +1,9 @@
-import { useAppStore } from "@/store";
-import { TaskCard } from "./TaskCard";
-import { Upload } from "lucide-react";
-import * as React from "react";
-import { useShallow } from "zustand/react/shallow";
+import * as React from 'react';
+import { Upload } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
+import { useAppStore } from '@/store';
+import { TaskCard } from './TaskCard';
+import { buildImportedTasksFromFiles, buildReferenceImagesFromFiles } from '@/lib/taskFileImport';
 import {
   DndContext,
   closestCenter,
@@ -13,43 +14,40 @@ import {
   DragEndEvent,
   DragStartEvent,
   DragOverlay,
-} from "@dnd-kit/core";
+} from '@dnd-kit/core';
 import {
   SortableContext,
   sortableKeyboardCoordinates,
   rectSortingStrategy,
   verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+} from '@dnd-kit/sortable';
 
 function hasImageFiles(dataTransfer?: DataTransfer | null) {
   if (!dataTransfer) return false;
   return Array.from(dataTransfer.items || []).some(
-    (item) => item.kind === "file" && item.type.startsWith("image/")
+    (item) => item.kind === 'file' && item.type.startsWith('image/'),
   );
 }
 
 export function TaskList() {
-  const store = useAppStore();
-  const taskIds = useAppStore(useShallow(state => state.tasks.map(t => t.id)));
-  const tasksCount = useAppStore(state => state.tasks.length);
-  const viewMode = useAppStore(state => state.viewMode);
-  const selectedTaskIds = useAppStore(state => state.selectedTaskIds);
-  const importTasks = useAppStore(state => state.importTasks);
-  const setProjectFields = useAppStore(state => state.setProjectFields);
-  const selectAllTasks = useAppStore(state => state.selectAllTasks);
-  const clearTaskSelection = useAppStore(state => state.clearTaskSelection);
-  const reorderTasks = useAppStore(state => state.reorderTasks);
+  const taskIds = useAppStore(useShallow((state) => state.tasks.map((task) => task.id)));
+  const tasksCount = useAppStore((state) => state.tasks.length);
+  const viewMode = useAppStore((state) => state.viewMode);
+  const selectedTaskIds = useAppStore((state) => state.selectedTaskIds);
+  const importTasks = useAppStore((state) => state.importTasks);
+  const setProjectFields = useAppStore((state) => state.setProjectFields);
+  const selectAllTasks = useAppStore((state) => state.selectAllTasks);
+  const clearTaskSelection = useAppStore((state) => state.clearTaskSelection);
+  const reorderTasks = useAppStore((state) => state.reorderTasks);
 
   const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
-  const [dragMode, setDragMode] = React.useState<"idle" | "workspace-drop" | "task-drop">("idle");
+  const [dragMode, setDragMode] = React.useState<'idle' | 'workspace-drop' | 'task-drop'>('idle');
   const [hoverTaskId, setHoverTaskId] = React.useState<string | null>(null);
   const workspaceDragDepthRef = React.useRef(0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
+      activationConstraint: { distance: 8 },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
@@ -71,109 +69,57 @@ export function TaskList() {
     }
   };
 
-  const optimizeImage = React.useCallback((file: File): Promise<string> => {
-    return new Promise((resolve) => {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        const MAX_SIZE = 1200;
-        let w = img.width;
-        let h = img.height;
-        if (w > MAX_SIZE || h > MAX_SIZE) {
-          const ratio = Math.min(MAX_SIZE / w, MAX_SIZE / h);
-          w = w * ratio;
-          h = h * ratio;
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, w, h);
-          resolve(canvas.toDataURL("image/jpeg", 0.85));
-        } else {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsDataURL(file);
-        }
-        URL.revokeObjectURL(url);
-      };
-      img.onerror = () => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target?.result as string);
-        reader.readAsDataURL(file);
-        URL.revokeObjectURL(url);
-      };
-      img.src = url;
-    });
-  }, []);
-
   const clearFileDragState = React.useCallback(() => {
     workspaceDragDepthRef.current = 0;
-    setDragMode("idle");
+    setDragMode('idle');
     setHoverTaskId(null);
   }, []);
 
-  const createTasksFromFiles = React.useCallback(async (files: File[]) => {
-    const images = files.filter((file) => file.type.startsWith("image/"));
-    if (images.length === 0) return;
+  const createTasksFromFiles = React.useCallback(
+    async (files: File[]) => {
+      const images = files.filter((file) => file.type.startsWith('image/'));
+      if (images.length === 0) return;
 
-    let startIndex = useAppStore.getState().tasks.length + 1;
-    const CHUNK_SIZE = 5;
+      let startIndex = useAppStore.getState().tasks.length + 1;
+      const chunkSize = 5;
 
-    for (let i = 0; i < images.length; i += CHUNK_SIZE) {
-      const chunk = images.slice(i, i + CHUNK_SIZE);
-      const newTasks: Array<{
-        index: number;
-        title: string;
-        description: string;
-        sourceImage: string;
-        referenceImages: string[];
-      }> = [];
-
-      for (const file of chunk) {
-        const dataUrl = await optimizeImage(file);
-        newTasks.push({
-          index: startIndex++,
-          title: file.name,
-          description: "",
-          sourceImage: dataUrl,
-          referenceImages: [],
-        });
+      for (let index = 0; index < images.length; index += chunkSize) {
+        const chunk = images.slice(index, index + chunkSize);
+        const newTasks = await buildImportedTasksFromFiles(chunk, startIndex);
+        startIndex += newTasks.length;
+        importTasks(newTasks);
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
       }
-
-      importTasks(newTasks);
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-    }
-  }, [importTasks, optimizeImage]);
+    },
+    [importTasks],
+  );
 
   const appendReferencesToTask = React.useCallback(async (taskId: string, files: File[]) => {
-    const images = files.filter((file) => file.type.startsWith("image/"));
+    const images = files.filter((file) => file.type.startsWith('image/'));
     if (images.length === 0) return;
 
-    const encodedImages = await Promise.all(images.map((file) => optimizeImage(file)));
+    const encodedImages = await buildReferenceImagesFromFiles(images);
     const task = useAppStore.getState().tasks.find((item) => item.id === taskId);
     if (!task) return;
 
     useAppStore.getState().updateTask(taskId, {
       referenceImages: [...(task.referenceImages || []), ...encodedImages],
     });
-  }, [optimizeImage]);
+  }, []);
 
   const handleWorkspaceDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     if (!hasImageFiles(e.dataTransfer)) return;
     e.preventDefault();
     workspaceDragDepthRef.current += 1;
-    if (!hoverTaskId) setDragMode("workspace-drop");
+    if (!hoverTaskId) setDragMode('workspace-drop');
   };
 
   const handleWorkspaceDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     if (!hasImageFiles(e.dataTransfer)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-    if (!hoverTaskId && dragMode !== "workspace-drop") {
-      setDragMode("workspace-drop");
+    e.dataTransfer.dropEffect = 'copy';
+    if (!hoverTaskId && dragMode !== 'workspace-drop') {
+      setDragMode('workspace-drop');
     }
   };
 
@@ -193,7 +139,7 @@ export function TaskList() {
     if (hoverTaskId) return;
 
     const files = (Array.from(e.dataTransfer.files || []) as File[]).filter((file) =>
-      file.type.startsWith("image/")
+      file.type.startsWith('image/'),
     );
     clearFileDragState();
     await createTasksFromFiles(files);
@@ -201,21 +147,23 @@ export function TaskList() {
 
   const handleTaskFileDragEnter = React.useCallback((taskId: string) => {
     setHoverTaskId((current) => (current === taskId ? current : taskId));
-    setDragMode("task-drop");
+    setDragMode('task-drop');
   }, []);
 
   const handleTaskFileDragLeave = React.useCallback((taskId: string) => {
     setHoverTaskId((current) => (current === taskId ? null : current));
-    setDragMode(workspaceDragDepthRef.current > 0 ? "workspace-drop" : "idle");
+    setDragMode(workspaceDragDepthRef.current > 0 ? 'workspace-drop' : 'idle');
   }, []);
 
-  const handleTaskFileDrop = React.useCallback(async (taskId: string, files: File[]) => {
-    clearFileDragState();
-    await appendReferencesToTask(taskId, files);
-  }, [appendReferencesToTask, clearFileDragState]);
+  const handleTaskFileDrop = React.useCallback(
+    async (taskId: string, files: File[]) => {
+      clearFileDragState();
+      await appendReferencesToTask(taskId, files);
+    },
+    [appendReferencesToTask, clearFileDragState],
+  );
 
-  const allSelected =
-    tasksCount > 0 && selectedTaskIds.length === tasksCount;
+  const allSelected = tasksCount > 0 && selectedTaskIds.length === tasksCount;
 
   return (
     <div
@@ -223,34 +171,30 @@ export function TaskList() {
       onDragOver={handleWorkspaceDragOver}
       onDragLeave={handleWorkspaceDragLeave}
       onDrop={handleWorkspaceDrop}
-      className="flex-1 flex flex-col p-4 md:p-6 xl:p-8 overflow-y-auto w-full max-w-[1600px] mx-auto relative outline-none custom-scrollbar"
+      className="relative mx-auto flex w-full max-w-[1600px] flex-1 flex-col overflow-y-auto p-4 outline-none custom-scrollbar md:p-6 xl:p-8"
     >
-      {dragMode === "workspace-drop" && (
-        <div className="absolute inset-0 z-50 bg-white/70 backdrop-blur-md border-2 border-dashed border-button-main/40 rounded-3xl m-4 flex flex-col items-center justify-center animate-in fade-in duration-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] pointer-events-none">
-          <Upload className="w-12 h-12 text-button-main/60 mb-4" strokeWidth={1.5} />
-          <p className="text-[18.9px] font-serif font-medium text-text-primary">
-            松开鼠标，新建任务
-          </p>
-          <p className="text-[13.65px] text-text-secondary mt-2 font-medium">
+      {dragMode === 'workspace-drop' && (
+        <div className="pointer-events-none absolute inset-0 z-50 m-4 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-button-main/40 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-md animate-in fade-in duration-200">
+          <Upload className="mb-4 h-12 w-12 text-button-main/60" strokeWidth={1.5} />
+          <p className="text-[18.9px] font-serif font-medium text-text-primary">松开鼠标，新建任务</p>
+          <p className="mt-2 text-[13.65px] font-medium text-text-secondary">
             每张图片会创建一条任务，并作为原图导入
           </p>
         </div>
       )}
 
-      <div className="mb-6 md:mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between shrink-0">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
-          <h2 className="text-[18.9px] font-serif font-medium text-foreground tracking-tight">
-            当前任务{" "}
-            <span className="font-sans text-[12.6px] text-text-secondary ml-2 font-normal">
-              共 {tasksCount} 项
-            </span>
+      <div className="mb-6 flex shrink-0 flex-col gap-4 md:mb-8 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <h2 className="text-[18.9px] font-serif font-medium tracking-tight text-foreground">
+            当前任务
+            <span className="ml-2 font-sans text-[12.6px] font-normal text-text-secondary">共 {tasksCount} 项</span>
           </h2>
           {tasksCount > 0 && (
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-[13.65px] cursor-pointer text-text-secondary">
+              <label className="flex cursor-pointer items-center gap-2 text-[13.65px] text-text-secondary">
                 <input
                   type="checkbox"
-                  className="w-4 h-4 rounded appearance-none border border-black/30 checked:bg-button-main checked:border-button-main flex items-center justify-center relative bg-white transition-all checked:after:content-['✓'] checked:after:absolute checked:after:text-white checked:after:text-[10.5px]"
+                  className="h-4 w-4 rounded appearance-auto accent-[#D97757]"
                   checked={allSelected}
                   onChange={() => {
                     if (allSelected) clearTaskSelection();
@@ -264,16 +208,20 @@ export function TaskList() {
                 <button
                   onClick={() =>
                     setProjectFields({
-                      tasks: useAppStore.getState().tasks.filter(
-                        (t) => !selectedTaskIds.includes(t.id)
-                      ),
+                      tasks: useAppStore.getState().tasks.filter((task) => !selectedTaskIds.includes(task.id)),
                       selectedTaskIds: [],
                     })
                   }
-                  className="flex items-center gap-1 text-[13.65px] text-red-600 hover:bg-red-50 px-2 py-1 rounded-md transition-colors animate-in fade-in zoom-in"
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[13.65px] text-red-600 transition-colors animate-in fade-in zoom-in hover:bg-red-50"
                   title="删除选中的任务"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                    <line x1="10" x2="10" y1="11" y2="17" />
+                    <line x1="14" x2="14" y1="11" y2="17" />
+                  </svg>
                   删除
                 </button>
               )}
@@ -281,16 +229,24 @@ export function TaskList() {
           )}
         </div>
 
-        <div className="flex bg-background p-1 rounded-full border border-border/60 shadow-sm self-start lg:self-auto">
+        <div className="flex self-start rounded-full border border-border/60 bg-background p-1 shadow-sm lg:self-auto">
           <button
-            onClick={() => setProjectFields({ viewMode: "grid" })}
-            className={`px-3.5 py-1 text-[12.6px] font-medium rounded-full transition-all duration-300 ${viewMode === "grid" ? "bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] text-foreground" : "text-text-secondary hover:text-foreground"}`}
+            onClick={() => setProjectFields({ viewMode: 'grid' })}
+            className={`rounded-full px-3.5 py-1 text-[12.6px] font-medium transition-all duration-300 ${
+              viewMode === 'grid'
+                ? 'bg-white text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                : 'text-text-secondary hover:text-foreground'
+            }`}
           >
             网格
           </button>
           <button
-            onClick={() => setProjectFields({ viewMode: "list" })}
-            className={`px-3.5 py-1 text-[12.6px] font-medium rounded-full transition-all duration-300 ${viewMode === "list" ? "bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] text-foreground" : "text-text-secondary hover:text-foreground"}`}
+            onClick={() => setProjectFields({ viewMode: 'list' })}
+            className={`rounded-full px-3.5 py-1 text-[12.6px] font-medium transition-all duration-300 ${
+              viewMode === 'list'
+                ? 'bg-white text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                : 'text-text-secondary hover:text-foreground'
+            }`}
           >
             列表
           </button>
@@ -298,7 +254,7 @@ export function TaskList() {
       </div>
 
       {tasksCount === 0 ? (
-        <div className="h-52 md:h-64 px-6 flex flex-col items-center justify-center border-2 border-dashed border-border/60 rounded-3xl bg-transparent text-text-secondary text-[14.7px] text-center">
+        <div className="flex h-52 flex-col items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-transparent px-6 text-center text-[14.7px] text-text-secondary md:h-64">
           <p className="font-medium opacity-80">暂无任务，请从左侧栏导入或直接拖拽图片到此处</p>
         </div>
       ) : (
@@ -310,20 +266,16 @@ export function TaskList() {
         >
           <SortableContext
             items={taskIds}
-            strategy={
-              viewMode === "grid"
-                ? rectSortingStrategy
-                : verticalListSortingStrategy
-            }
+            strategy={viewMode === 'grid' ? rectSortingStrategy : verticalListSortingStrategy}
           >
             <div
-              className="grid gap-4 md:gap-6 pb-12 transition-all duration-300"
+              className="grid gap-4 pb-12 transition-all duration-300 md:gap-6"
               style={{
                 gridTemplateColumns:
-                  viewMode === "grid"
-                    ? "repeat(auto-fill, minmax(min(100%, 240px), 1fr))"
-                    : "1fr",
-                gridAutoRows: "max-content",
+                  viewMode === 'grid'
+                    ? 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))'
+                    : '1fr',
+                gridAutoRows: 'max-content',
               }}
             >
               {taskIds.map((id) => (
@@ -338,11 +290,8 @@ export function TaskList() {
               ))}
             </div>
           </SortableContext>
-          <DragOverlay>
-            {activeDragId ? (
-              <TaskCard taskId={activeDragId} />
-            ) : null}
-          </DragOverlay>
+
+          <DragOverlay>{activeDragId ? <TaskCard taskId={activeDragId} /> : null}</DragOverlay>
         </DndContext>
       )}
     </div>

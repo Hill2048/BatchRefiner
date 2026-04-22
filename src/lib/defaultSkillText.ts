@@ -1,3 +1,9 @@
 export const DEFAULT_SKILL_FILE_NAME = "默认提示词规则.md";
 
-export const DEFAULT_SKILL_TEXT = "";
+export const DEFAULT_SKILL_TEXT = `请根据任务描述生成可直接用于出图或改图的最终提示词。
+
+要求：
+1. 保留任务里的核心目标，不额外发散。
+2. 如果存在原图或参考图，优先保持主体结构、视角和主要构图稳定。
+3. 结果应为自然、完整、可执行的一段中文提示词。
+4. 不要输出解释、标题或编号。`;

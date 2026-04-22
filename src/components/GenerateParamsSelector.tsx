@@ -1,16 +1,22 @@
 import * as React from "react";
 import { Film, Image as ImgIcon, RectangleHorizontal, Square } from "lucide-react";
-import { AspectRatio, Resolution } from "@/types";
+import { AspectRatio, BatchCount, Resolution } from "@/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { BATCH_COUNT_OPTIONS } from "@/lib/taskResults";
 
 interface GenerateParamsSelectorProps {
   resolution?: Resolution;
   aspectRatio?: AspectRatio;
+  batchCount?: BatchCount;
   imageModel?: string;
   onResolutionChange: (res: Resolution) => void;
   onAspectRatioChange: (ar: AspectRatio) => void;
+  onBatchCountChange?: (count: BatchCount) => void;
+  allowBatchInherit?: boolean;
+  onClearBatchCount?: () => void;
+  inheritedBatchLabel?: string;
   triggerClassName?: string;
 }
 
@@ -126,9 +132,14 @@ function getRatioLabel(ar: AspectRatio) {
 export function GenerateParamsSelector({
   resolution = "1K",
   aspectRatio = "auto",
+  batchCount = "x1",
   imageModel,
   onResolutionChange,
   onAspectRatioChange,
+  onBatchCountChange,
+  allowBatchInherit = false,
+  onClearBatchCount,
+  inheritedBatchLabel = "跟随全局",
   triggerClassName = "",
 }: GenerateParamsSelectorProps) {
   const family = getModelFamily(imageModel);
@@ -175,11 +186,11 @@ export function GenerateParamsSelector({
             className={`h-8 border-border/80 bg-card text-[12.6px] font-mono text-text-primary hover:bg-black/5 ${triggerClassName}`}
           >
             {aspectRatio === "auto" ? "" : <RectangleHorizontal className="mr-1.5 h-3.5 w-3.5 opacity-70" />}
-            {aspectRatio === "auto" ? "自动" : aspectRatio} / {currentResolutionLabel}
+            {aspectRatio === "auto" ? "自动" : aspectRatio} / {currentResolutionLabel} / {allowBatchInherit && !batchCount ? "全局" : batchCount}
           </Button>
         }
       />
-      <PopoverContent className="w-[min(360px,calc(100vw-2rem))] rounded-2xl border-border bg-card p-4 shadow-lg" align="start">
+      <PopoverContent className="w-[min(380px,calc(100vw-2rem))] rounded-2xl border-border bg-card p-4 shadow-lg" align="start">
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <span className="text-[12.6px] font-medium text-text-secondary">分辨率</span>
@@ -188,10 +199,11 @@ export function GenerateParamsSelector({
                 <button
                   key={item.value}
                   onClick={() => onResolutionChange(item.value)}
-                  className={`flex-1 rounded-lg border py-1.5 text-[12.6px] font-mono transition-colors
-                    ${resolution === item.value
+                  className={`flex-1 rounded-lg border py-1.5 text-[12.6px] font-mono transition-colors ${
+                    resolution === item.value
                       ? "border-button-main bg-button-main font-medium text-[#FFFFFF] shadow-md"
-                      : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"}`}
+                      : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
+                  }`}
                 >
                   {item.label}
                 </button>
@@ -206,10 +218,11 @@ export function GenerateParamsSelector({
                 <button
                   key={ar}
                   onClick={() => onAspectRatioChange(ar)}
-                  className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border py-2 transition-all
-                    ${aspectRatio === ar
-                      ? "border-button-main bg-button-main/[0.03] text-[#D97757] shadow-[0_0_0_1px_rgba(217,119,87,0.2)]"
-                      : "border-border/40 bg-transparent text-text-primary hover:border-border hover:bg-black/5"}`}
+                  className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border py-2 transition-all ${
+                    aspectRatio === ar
+                      ? "border-button-main bg-button-main text-white shadow-md"
+                      : "border-border/40 bg-transparent text-text-primary hover:border-border hover:bg-black/5"
+                  }`}
                 >
                   <div className="flex h-5 w-5 items-center justify-center">
                     {renderRatioIcon(ar)}
@@ -221,6 +234,41 @@ export function GenerateParamsSelector({
               ))}
             </div>
           </div>
+
+          {onBatchCountChange ? (
+            <div className="flex flex-col gap-2">
+              <span className="text-[12.6px] font-medium text-text-secondary">批次</span>
+              <div className="flex flex-wrap gap-2">
+                {allowBatchInherit ? (
+                  <button
+                    type="button"
+                    onClick={onClearBatchCount}
+                    className={`rounded-lg border px-3 py-1.5 text-[12px] transition-colors ${
+                      !batchCount
+                        ? "border-button-main bg-button-main text-white shadow-md"
+                        : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
+                    }`}
+                  >
+                    {inheritedBatchLabel}
+                  </button>
+                ) : null}
+                {BATCH_COUNT_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => onBatchCountChange(option)}
+                    className={`rounded-lg border px-3 py-1.5 text-[12px] font-mono transition-colors ${
+                      batchCount === option
+                        ? "border-button-main bg-button-main text-white shadow-md"
+                        : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {family === "gpt" ? (
             <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-white/70 p-3">

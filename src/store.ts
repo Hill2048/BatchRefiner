@@ -3,10 +3,16 @@ import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
 import { get, set, del } from 'idb-keyval';
 import { PlatformApiConfigMap, ProjectData, Task } from './types';
-import { DEFAULT_SKILL_FILE_NAME, DEFAULT_SKILL_TEXT } from './lib/defaultSkillText';
 import { extractProjectDataFromImport, mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from './lib/projectSnapshot';
+import {
+  initialPlatformConfigs,
+  initialProjectState,
+  normalizeIncomingTask,
+  recoverInterruptedTasks,
+  migrateTask,
+  withDefaultSkill,
+} from './lib/taskMigration';
 
-// Storage Debouncer for disk I/O perf
 let persistTimeout: ReturnType<typeof setTimeout>;
 let pendingState: string | null = null;
 
@@ -18,13 +24,13 @@ const idbStorage: StateStorage = {
     pendingState = value;
     if (persistTimeout) clearTimeout(persistTimeout);
     return new Promise(resolve => {
-       persistTimeout = setTimeout(async () => {
-          if (pendingState) {
-             await set(name, pendingState);
-             pendingState = null;
-          }
-          resolve();
-       }, 500);
+      persistTimeout = setTimeout(async () => {
+        if (pendingState) {
+          await set(name, pendingState);
+          pendingState = null;
+        }
+        resolve();
+      }, 500);
     });
   },
   removeItem: async (name: string): Promise<void> => {
@@ -37,14 +43,13 @@ interface AppState extends ProjectData {
   isBatchRunning: boolean;
   viewMode: 'grid' | 'list';
   lightboxTaskId: string | null;
+  lightboxImageIndex: number;
   maxConcurrency: number;
   exportTemplate: string;
   selectedTaskIds: string[];
   apiKey: string;
   apiBaseUrl: string;
   platformConfigs: PlatformApiConfigMap;
-  
-  // Actions
   setProjectFields: (fields: Partial<AppState>) => void;
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
@@ -54,7 +59,7 @@ interface AppState extends ProjectData {
   importTasks: (tasks: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'status'>[]) => void;
   clearProject: () => void;
   setViewMode: (mode: 'grid' | 'list') => void;
-  setLightboxTask: (id: string | null) => void;
+  setLightboxTask: (id: string | null, imageIndex?: number) => void;
   setExportTemplate: (template: string) => void;
   setMaxConcurrency: (limit: number) => void;
   loadProjectFromJson: (jsonString: string) => void;
@@ -66,89 +71,15 @@ interface AppState extends ProjectData {
   reorderTasks: (startIndex: number, endIndex: number) => void;
 }
 
-const initialPlatformConfigs: PlatformApiConfigMap = {
-  'yunwu': {
-    apiBaseUrl: 'https://yunwu.ai',
-    apiKey: '',
-    textModel: 'gemini-3.1-flash-lite-preview',
-    imageModel: 'gemini-3.1-flash-image-preview',
-  },
-  'comfly-chat': {
-    apiBaseUrl: 'https://ai.comfly.chat',
-    apiKey: '',
-    textModel: 'gemini-3.1-flash-lite-preview',
-    imageModel: 'gemini-3.1-flash-image-preview',
-  },
-  'openai-compatible': {
-    apiBaseUrl: '',
-    apiKey: '',
-    textModel: 'gpt-4o',
-    imageModel: 'gpt-image-1',
-  },
-  'gemini-native': {
-    apiBaseUrl: '',
-    apiKey: '',
-    textModel: 'gemini-2.5-flash',
-    imageModel: 'imagen-3.0-generate-001',
-  },
-  'custom': {
-    apiBaseUrl: '',
-    apiKey: '',
-    textModel: '',
-    imageModel: '',
-  },
-};
-
-const initialState: ProjectData = {
-  projectId: uuidv4(),
-  projectName: '未命名项目',
-  platformPreset: 'yunwu',
-  downloadDirectoryName: '',
-  globalSkillText: DEFAULT_SKILL_TEXT,
-  globalTargetText: '',
-  globalReferenceImages: [],
-  skillFileName: DEFAULT_SKILL_FILE_NAME,
-  imageModel: 'gemini-3.1-flash-image-preview',
-  textModel: 'gemini-3.1-flash-lite-preview',
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-  tasks: [],
-};
-
-function recoverInterruptedTasks(tasks: Task[] = []) {
-  return tasks.map((task) => {
-    if (task.status === 'Prompting' || task.status === 'Rendering' || task.status === 'Running' || task.status === 'Waiting') {
-      return {
-        ...task,
-        status: 'Error' as const,
-        errorLog: {
-          message: '请求已中断或页面已刷新，任务已自动恢复为失败状态，请重新执行。',
-          time: Date.now(),
-          stage: task.status,
-        },
-        updatedAt: Date.now(),
-      };
-    }
-    return task;
-  });
-}
-
-function withDefaultSkill<T extends Partial<ProjectData>>(state: T) {
-  return {
-    ...state,
-    globalSkillText: state.globalSkillText?.trim() ? state.globalSkillText : DEFAULT_SKILL_TEXT,
-    skillFileName: state.skillFileName?.trim() ? state.skillFileName : DEFAULT_SKILL_FILE_NAME,
-  };
-}
-
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      ...initialState,
+      ...initialProjectState,
       activeTaskId: null,
       isBatchRunning: false,
       viewMode: 'grid',
       lightboxTaskId: null,
+      lightboxImageIndex: 0,
       maxConcurrency: 3,
       exportTemplate: '{task_id}_{title}',
       selectedTaskIds: [],
@@ -157,80 +88,84 @@ export const useAppStore = create<AppState>()(
       platformConfigs: initialPlatformConfigs,
 
       setProjectFields: (fields) => set((state) => ({ ...state, ...fields, updatedAt: Date.now() })),
-      
-      addTask: (taskInfo) => set((state) => {
-        const newTask: Task = {
-          ...taskInfo,
-          id: uuidv4(),
-          status: 'Idle',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        return { tasks: [...state.tasks, newTask], updatedAt: Date.now() };
-      }),
+
+      addTask: (taskInfo) => set((state) => ({
+        tasks: [...state.tasks, normalizeIncomingTask(taskInfo)],
+        updatedAt: Date.now(),
+      })),
 
       updateTask: (id, updates) => set((state) => ({
-        tasks: state.tasks.map(t => t.id === id ? { ...t, ...updates, updatedAt: Date.now() } : t),
+        tasks: state.tasks.map((task) => {
+          if (task.id !== id) return task;
+          return migrateTask({
+            ...task,
+            ...updates,
+            updatedAt: Date.now(),
+          });
+        }),
         updatedAt: Date.now(),
       })),
 
       removeTask: (id) => set((state) => ({
         tasks: state.tasks.filter(t => t.id !== id),
         activeTaskId: state.activeTaskId === id ? null : state.activeTaskId,
+        lightboxTaskId: state.lightboxTaskId === id ? null : state.lightboxTaskId,
+        lightboxImageIndex: state.lightboxTaskId === id ? 0 : state.lightboxImageIndex,
         selectedTaskIds: state.selectedTaskIds.filter(selectedId => selectedId !== id),
         updatedAt: Date.now(),
       })),
 
       setActiveTask: (id) => set({ activeTaskId: id }),
-      
       setBatchRunning: (isRunning) => set({ isBatchRunning: isRunning }),
 
-      importTasks: (tasksInfo) => set((state) => {
-        const newTasks: Task[] = tasksInfo.map(info => ({
-          ...info,
-          id: uuidv4(),
-          status: 'Idle',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        }));
-        return { tasks: [...state.tasks, ...newTasks], updatedAt: Date.now() };
+      importTasks: (tasksInfo) => set((state) => ({
+        tasks: [...state.tasks, ...tasksInfo.map((task) => normalizeIncomingTask(task))],
+        updatedAt: Date.now(),
+      })),
+
+      clearProject: () => set({
+        ...initialProjectState,
+        projectId: uuidv4(),
+        selectedTaskIds: [],
+        lightboxTaskId: null,
+        lightboxImageIndex: 0,
       }),
 
-      clearProject: () => set({ ...initialState, projectId: uuidv4(), selectedTaskIds: [] }),
-      
       setViewMode: (mode) => set({ viewMode: mode }),
-      setLightboxTask: (id) => set({ lightboxTaskId: id }),
+      setLightboxTask: (id, imageIndex = 0) => set({ lightboxTaskId: id, lightboxImageIndex: imageIndex }),
       setExportTemplate: (template) => set({ exportTemplate: template }),
       setMaxConcurrency: (limit) => set({ maxConcurrency: limit }),
-      
+
       loadProjectFromJson: (jsonString: string) => {
-         try {
-             const data = extractProjectDataFromImport(JSON.parse(jsonString));
-             if (data.projectId && data.tasks) {
-                 set((state) => ({
-                   ...state,
-                   ...mergeProjectSnapshotWithGlobalConfig(withDefaultSkill(sanitizeProjectSnapshot(data)), state),
-                   isBatchRunning: false,
-                   activeTaskId: null,
-                   lightboxTaskId: null,
-                   selectedTaskIds: [],
-                 }));
-             }
-         } catch(e) {}
+        try {
+          const data = extractProjectDataFromImport(JSON.parse(jsonString));
+          if (data.projectId && data.tasks) {
+            const sanitizedProject = withDefaultSkill(sanitizeProjectSnapshot(data));
+            set((state) => ({
+              ...state,
+              ...mergeProjectSnapshotWithGlobalConfig(sanitizedProject, state),
+              tasks: recoverInterruptedTasks((sanitizedProject.tasks || []) as Task[]),
+              isBatchRunning: false,
+              activeTaskId: null,
+              lightboxTaskId: null,
+              lightboxImageIndex: 0,
+              selectedTaskIds: [],
+            }));
+          }
+        } catch (_error) {}
       },
 
       toggleTaskSelection: (id) => set((state) => ({
-        selectedTaskIds: state.selectedTaskIds.includes(id) 
-          ? state.selectedTaskIds.filter(tId => tId !== id)
+        selectedTaskIds: state.selectedTaskIds.includes(id)
+          ? state.selectedTaskIds.filter(taskId => taskId !== id)
           : [...state.selectedTaskIds, id]
       })),
 
       selectAllTasks: () => set((state) => ({
-        selectedTaskIds: state.tasks.map(t => t.id)
+        selectedTaskIds: state.tasks.map(task => task.id)
       })),
 
       clearTaskSelection: () => set({ selectedTaskIds: [] }),
-
       setApiKey: (key) => set({ apiKey: key }),
       setApiBaseUrl: (url) => set({ apiBaseUrl: url }),
 
@@ -238,7 +173,6 @@ export const useAppStore = create<AppState>()(
         const newTasks = Array.from(state.tasks);
         const [removed] = newTasks.splice(startIndex, 1);
         newTasks.splice(endIndex, 0, removed);
-        // Ensure index order is maintained for display if needed, but here we just re-arrange the array
         return { tasks: newTasks, updatedAt: Date.now() };
       }),
     }),
@@ -253,28 +187,32 @@ export const useAppStore = create<AppState>()(
           tasks: recoverInterruptedTasks(state.tasks),
           activeTaskId: null,
           lightboxTaskId: null,
+          lightboxImageIndex: 0,
         });
       },
-      partialize: (state) => ({ 
-         projectId: state.projectId,
-         projectName: state.projectName,
-         platformPreset: state.platformPreset,
-         downloadDirectoryName: state.downloadDirectoryName,
-         globalSkillText: state.globalSkillText,
-         globalTargetText: state.globalTargetText,
-         globalReferenceImages: state.globalReferenceImages,
-         skillFileName: state.skillFileName,
-         imageModel: state.imageModel,
-         textModel: state.textModel,
-         tasks: state.tasks, // Safely stored in IndexedDB regardless of size
-         viewMode: state.viewMode,
-         maxConcurrency: state.maxConcurrency,
-         exportTemplate: state.exportTemplate,
-         apiKey: state.apiKey,
-         apiBaseUrl: state.apiBaseUrl,
-         platformConfigs: state.platformConfigs,
-         createdAt: state.createdAt,
-         updatedAt: state.updatedAt
+      partialize: (state) => ({
+        projectId: state.projectId,
+        projectName: state.projectName,
+        platformPreset: state.platformPreset,
+        downloadDirectoryName: state.downloadDirectoryName,
+        globalSkillText: state.globalSkillText,
+        globalTargetText: state.globalTargetText,
+        globalReferenceImages: state.globalReferenceImages,
+        skillFileName: state.skillFileName,
+        imageModel: state.imageModel,
+        textModel: state.textModel,
+        globalAspectRatio: state.globalAspectRatio,
+        globalResolution: state.globalResolution,
+        globalBatchCount: state.globalBatchCount,
+        tasks: state.tasks,
+        viewMode: state.viewMode,
+        maxConcurrency: state.maxConcurrency,
+        exportTemplate: state.exportTemplate,
+        apiKey: state.apiKey,
+        apiBaseUrl: state.apiBaseUrl,
+        platformConfigs: state.platformConfigs,
+        createdAt: state.createdAt,
+        updatedAt: state.updatedAt
       }),
     }
   )
