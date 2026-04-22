@@ -18,6 +18,14 @@ import { useAppStore } from './store';
 const COMPACT_BREAKPOINT = 1023;
 const NARROW_DESKTOP_BREAKPOINT = 1279;
 
+const PLATFORM_PRESET_LABELS = {
+  'comfly-chat': 'comfly.chat',
+  yunwu: '云雾',
+  'openai-compatible': 'OpenAI',
+  'gemini-native': 'Gemini',
+  custom: '自定义',
+} as const;
+
 function getSidebarBounds(isNarrowDesktop: boolean) {
   if (typeof window === 'undefined') {
     return { min: 250, max: isNarrowDesktop ? 360 : 600 };
@@ -32,8 +40,10 @@ function getSidebarBounds(isNarrowDesktop: boolean) {
 
 export default function App() {
   const isBatchRunning = useAppStore((state) => state.isBatchRunning);
+  const platformPreset = useAppStore((state) => state.platformPreset);
   const textModel = useAppStore((state) => state.textModel) || 'gemini-3.1-flash-lite';
   const imageModel = useAppStore((state) => state.imageModel) || 'banana2';
+  const platformLabel = PLATFORM_PRESET_LABELS[platformPreset] || '自定义';
 
   const isDragging = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -121,12 +131,14 @@ export default function App() {
           isCompactLayout ? 'justify-between gap-2 px-3 py-2 text-[10.5px]' : 'gap-4 px-4 py-2 text-[11.55px]'
         }`}
       >
-        <span className="flex min-w-0 items-center gap-2" title="当前连接的文本模型">
+        <span className="shrink-0 whitespace-nowrap font-medium text-foreground/80">{platformLabel}</span>
+        {!isCompactLayout && <span className="h-3 w-px bg-border/70" />}
+        <span className="flex min-w-0 items-center gap-2" title="当前文本模型">
           <span className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
           <span className="truncate font-mono opacity-80">{textModel}</span>
         </span>
         {!isCompactLayout && <span className="h-3 w-px bg-border" />}
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="flex min-w-0 items-center gap-2" title="当前图片模型">
           <span className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
           <span className="truncate font-mono opacity-80">{imageModel}</span>
         </span>

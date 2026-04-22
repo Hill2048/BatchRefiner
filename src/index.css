@@ -103,3 +103,52 @@
     background-clip: padding-box;
   }
 }
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-42%) translateY(0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.18;
+  }
+  52% {
+    opacity: 0.42;
+  }
+  82% {
+    opacity: 0.18;
+  }
+  100% {
+    transform: translateX(142%) translateY(0);
+    opacity: 0;
+  }
+}
+
+@keyframes dot-drift {
+  0% {
+    background-position: 0 0, 0 0;
+    opacity: 0.24;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    background-position: 72px 72px, 96px 96px;
+    opacity: 0.24;
+  }
+}
+
+@keyframes mist-breathe {
+  0% {
+    opacity: 0.36;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.58;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 0.36;
+    transform: scale(1);
+  }
+}

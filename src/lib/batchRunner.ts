@@ -1,4 +1,4 @@
-import { AspectRatio, BatchCount, PlatformPreset, Resolution, Task, TaskResultImage } from "@/types";
+import { AspectRatio, BatchCount, ImageQuality, PlatformPreset, Resolution, Task, TaskResultImage, TaskStatus } from "@/types";
 import { useAppStore } from "@/store";
 import pLimit from "p-limit";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { primeTaskResultImageCache } from "./resultImageCache";
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const PROMPT_REQUEST_TIMEOUT_MS = 90_000;
 const IMAGE_REQUEST_TIMEOUT_MS = 180_000;
+const YUNWU_GPT_IMAGE_REQUEST_TIMEOUT_MS = 300_000;
 
 const GEMINI_NATIVE_IMAGE_INPUT_MODELS = [
   "gemini-2.0-flash-preview-image-generation",
@@ -43,11 +44,16 @@ interface GeneratedImageResult {
   sourceType: "preview" | "original" | "base64";
   previewSrc?: string;
   originalSrc?: string;
+  generationTimeMs?: number;
 }
 
 interface GeneratedBatchResult {
   images: TaskResultImage[];
   failedCount: number;
+}
+
+interface RunImageGenerationOptions {
+  onImage?: (image: TaskResultImage, images: TaskResultImage[], failedCount: number) => void;
 }
 
 function getBuiltInGeminiApiKey() {
@@ -69,13 +75,36 @@ function isGptImageModel(model?: string) {
   return normalized.startsWith("gpt-image") || normalized === "image2";
 }
 
+function isFlexibleGptImage2Model(model?: string) {
+  const normalized = getNormalizedModelName(model);
+  return normalized === "image2" || normalized.startsWith("gpt-image-2");
+}
+
 function isComflyResponsesImageModel(model?: string, platformPreset?: PlatformPreset) {
   if (platformPreset !== "comfly-chat") return false;
   const normalized = getNormalizedModelName(model);
   return normalized === "gpt-image-2" || normalized === "image2";
 }
 
+function isYunwuGptImageModel(model?: string, platformPreset?: PlatformPreset) {
+  if (platformPreset !== "yunwu") return false;
+  const normalized = getNormalizedModelName(model);
+  return normalized === "gpt-image-2" || normalized === "gpt-image-2-all" || normalized === "image2";
+}
+
 function normalizeComflyImageModelAlias(modelName: string) {
+  const normalized = getNormalizedModelName(modelName);
+  if (normalized === "image2") return "gpt-image-2";
+  return modelName;
+}
+
+function normalizeYunwuImageModelAlias(modelName: string) {
+  const normalized = getNormalizedModelName(modelName);
+  if (normalized === "image2" || normalized === "gpt-image-2") return "gpt-image-2-all";
+  return modelName;
+}
+
+function normalizeOpenAIImageModelAlias(modelName: string) {
   const normalized = getNormalizedModelName(modelName);
   if (normalized === "image2") return "gpt-image-2";
   return modelName;
@@ -94,7 +123,7 @@ function getPlatformPreset() {
 }
 
 function isGeminiGatewayPreset(platformPreset: PlatformPreset) {
-  return platformPreset === "gemini-native" || platformPreset === "yunwu";
+  return platformPreset === "gemini-native";
 }
 
 function getEffectiveResolution(task: Task) {
@@ -105,6 +134,24 @@ function getEffectiveResolution(task: Task) {
 function getEffectiveAspectRatio(task: Task) {
   const store = useAppStore.getState();
   return normalizeAspectRatio(task.aspectRatio || store.globalAspectRatio || "auto");
+}
+
+function normalizeImageQuality(value?: ImageQuality | string): ImageQuality {
+  switch ((value || "auto").toString().trim().toLowerCase()) {
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+      return "high";
+    default:
+      return "auto";
+  }
+}
+
+function getEffectiveImageQuality(task: Task): ImageQuality {
+  const store = useAppStore.getState();
+  return normalizeImageQuality(task.imageQuality || store.globalImageQuality || "auto");
 }
 
 function getEffectiveTaskBatchCount(task: Task): BatchCount {
@@ -195,23 +242,28 @@ function resolveImageModel(modelName: string, resolution: string, platformPreset
   }
 
   if (platformPreset === "yunwu") {
-    const normalized = getNormalizedModelName(modelName);
-    if (normalized.startsWith("gemini-3.1-flash-image-preview") || normalized.startsWith("gemini-3-pro-image-preview")) {
-      return { requestedModel: modelName, actualModel: modelName, resolutionSupport: "hard" };
+    const actualModel = normalizeYunwuImageModelAlias(modelName);
+    const normalized = getNormalizedModelName(actualModel);
+    if (isYunwuGptImageModel(actualModel, platformPreset)) {
+      return { requestedModel: modelName, actualModel, resolutionSupport: "hard" };
     }
-    return { requestedModel: modelName, actualModel: modelName, resolutionSupport: "soft" };
+    if (normalized.startsWith("gemini-3.1-flash-image-preview") || normalized.startsWith("gemini-3-pro-image-preview")) {
+      return { requestedModel: modelName, actualModel, resolutionSupport: "hard" };
+    }
+    return { requestedModel: modelName, actualModel, resolutionSupport: "soft" };
   }
 
-  const normalized = getNormalizedModelName(modelName);
+  const actualModel = normalizeOpenAIImageModelAlias(modelName);
+  const normalized = getNormalizedModelName(actualModel);
   if (GEMINI_NATIVE_HARD_RESOLUTION_MODELS.includes(normalized)) {
-    return { requestedModel: modelName, actualModel: modelName, resolutionSupport: "hard" };
+    return { requestedModel: modelName, actualModel, resolutionSupport: "hard" };
   }
 
   if (isGptImageModel(normalized) || normalized.startsWith("dall-e")) {
-    return { requestedModel: modelName, actualModel: modelName, resolutionSupport: "hard" };
+    return { requestedModel: modelName, actualModel, resolutionSupport: "hard" };
   }
 
-  return { requestedModel: modelName, actualModel: modelName, resolutionSupport: "soft" };
+  return { requestedModel: modelName, actualModel, resolutionSupport: "soft" };
 }
 
 export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey: string, platformPreset: PlatformPreset) {
@@ -222,7 +274,7 @@ export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey
   }
 
   if (platformPreset === "yunwu") {
-    return normalizedModel.includes("gemini");
+    return normalizedModel.includes("gemini") || normalizedModel.includes("gpt-image") || normalizedModel === "image2";
   }
 
   const isCustomOpenAI = !!apiBaseUrl && !!apiKey;
@@ -402,8 +454,145 @@ async function createTaskResultImage(result: GeneratedImageResult): Promise<Task
     sourceType: result.sourceType,
     width: dimensions?.width,
     height: dimensions?.height,
+    generationTimeMs: result.generationTimeMs,
     createdAt: Date.now(),
   };
+}
+
+function finalizeGeneratedImageResult(result: GeneratedImageResult, startedAt: number): GeneratedImageResult {
+  return {
+    ...result,
+    generationTimeMs: Math.max(0, Date.now() - startedAt),
+  };
+}
+
+function buildTaskImageUpdatePayload(task: Task, images: TaskResultImage[], failedCount: number) {
+  const primaryResult = images[0];
+  return {
+    resultImages: images,
+    resultImage: primaryResult?.src,
+    resultImagePreview: primaryResult?.previewSrc,
+    resultImageOriginal: primaryResult?.originalSrc,
+    resultImageSourceType: primaryResult?.sourceType,
+    resultImageWidth: primaryResult?.width,
+    resultImageHeight: primaryResult?.height,
+    requestedBatchCount: getEffectiveTaskBatchCount(task),
+    failedResultCount: failedCount,
+  };
+}
+
+function updateTaskWithGeneratedImages(taskId: string, images: TaskResultImage[], failedCount: number, status?: TaskStatus) {
+  const store = useAppStore.getState();
+  const currentTask = store.tasks.find((item) => item.id === taskId);
+  if (!currentTask || images.length === 0) return;
+
+  store.updateTask(taskId, {
+    ...buildTaskImageUpdatePayload(currentTask, images, failedCount),
+    ...(status ? { status } : {}),
+  });
+}
+
+function withStreamFlag(body: BodyInit | null | undefined, contentType?: string | null) {
+  if (!body) return body;
+
+  if (typeof body === 'string' && contentType?.includes('application/json')) {
+    try {
+      const parsed = JSON.parse(body);
+      return JSON.stringify({ ...parsed, stream: true });
+    } catch {
+      return body;
+    }
+  }
+
+  if (body instanceof FormData) {
+    const nextBody = new FormData();
+    body.forEach((value, key) => {
+      nextBody.append(key, value);
+    });
+    nextBody.set('stream', 'true');
+    return nextBody;
+  }
+
+  return body;
+}
+
+function extractImageResultFromStreamPayload(payloadText: string): GeneratedImageResult | null {
+  if (!payloadText.trim()) return null;
+
+  const parsedEvents: unknown[] = [];
+  const lines = payloadText.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line.startsWith('data:')) continue;
+
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+
+    try {
+      parsedEvents.push(JSON.parse(data));
+    } catch {
+      parsedEvents.push(data);
+    }
+  }
+
+  for (let index = parsedEvents.length - 1; index >= 0; index -= 1) {
+    const event = parsedEvents[index];
+    const extracted = extractImageResultFromResponsesApi(event) || extractImageResultFromResponse(event);
+    if (extracted) return extracted;
+  }
+
+  try {
+    const parsed = JSON.parse(payloadText);
+    return extractImageResultFromResponsesApi(parsed) || extractImageResultFromResponse(parsed);
+  } catch {
+    return extractImageResultFromResponse(payloadText);
+  }
+}
+
+async function fetchImageResultWithOptionalStream(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  enableStream: boolean,
+) {
+  const contentType =
+    init.headers instanceof Headers
+      ? init.headers.get('Content-Type')
+      : (init.headers as Record<string, string> | undefined)?.['Content-Type'] ||
+        (init.headers as Record<string, string> | undefined)?.['content-type'] ||
+        null;
+
+  const attempts = enableStream
+    ? [
+        { ...init, body: withStreamFlag(init.body, contentType) },
+        init,
+      ]
+    : [init];
+
+  let lastError: unknown;
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    try {
+      const response = await fetchWithTimeout(input, attempts[index], timeoutMs);
+      const payloadText = await response.text();
+
+      if (!response.ok) {
+        throw new Error(`HTTP Error ${response.status}: ${payloadText.substring(0, 160)}`);
+      }
+
+      const extracted = extractImageResultFromStreamPayload(payloadText);
+      if (!extracted) {
+        throw new Error('No image source returned from image generation');
+      }
+
+      return extracted;
+    } catch (error) {
+      lastError = error;
+      if (index === attempts.length - 1) throw error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Image request failed');
 }
 
 function getGeminiSampleImageSize(resolution: string) {
@@ -446,6 +635,13 @@ function buildGeminiGatewayHeaders(apiKey: string) {
   };
 }
 
+async function imageInputToFileValue(image: string, fallbackName: string) {
+  const response = await fetch(image);
+  const blob = await response.blob();
+  const extension = blob.type.split("/")[1] || "png";
+  return new File([blob], `${fallbackName}.${extension}`, { type: blob.type || "image/png" });
+}
+
 function getOpenAIImageSize(aspectRatio: string) {
   if (aspectRatio === "9:16" || aspectRatio === "3:4" || aspectRatio === "2:3" || aspectRatio === "1:4" || aspectRatio === "1:8") {
     return "1024x1536";
@@ -454,6 +650,10 @@ function getOpenAIImageSize(aspectRatio: string) {
     return "1536x1024";
   }
   return "1024x1024";
+}
+
+function getYunwuDocumentedImageSize(aspectRatio: string) {
+  return getOpenAIImageSize(aspectRatio);
 }
 
 function parseAspectRatioValue(aspectRatio: string) {
@@ -500,8 +700,8 @@ function getImage2ImageSize(aspectRatio: string, resolution: string) {
   height = roundToMultipleOf16(height);
 
   const longestEdge = Math.max(width, height);
-  if (longestEdge > 4000) {
-    const scale = 4000 / longestEdge;
+  if (longestEdge > 3840) {
+    const scale = 3840 / longestEdge;
     width = floorToMultipleOf16(width * scale);
     height = floorToMultipleOf16(height * scale);
   }
@@ -511,8 +711,8 @@ function getImage2ImageSize(aspectRatio: string, resolution: string) {
     const scale = Math.sqrt(655_360 / pixels);
     width = roundToMultipleOf16(width * scale);
     height = roundToMultipleOf16(height * scale);
-    if (Math.max(width, height) > 4000) {
-      const retryScale = 4000 / Math.max(width, height);
+    if (Math.max(width, height) > 3840) {
+      const retryScale = 3840 / Math.max(width, height);
       width = floorToMultipleOf16(width * retryScale);
       height = floorToMultipleOf16(height * retryScale);
     }
@@ -528,8 +728,8 @@ function getImage2ImageSize(aspectRatio: string, resolution: string) {
   return `${width}x${height}`;
 }
 
-function getOpenAIImageQuality(resolution: string) {
-  return resolution === "4K" || resolution === "2K" ? "high" : "medium";
+function getOpenAIImageQuality(task: Task) {
+  return getEffectiveImageQuality(task);
 }
 
 function parseCustomImageSize(resolution: string) {
@@ -541,7 +741,7 @@ function parseCustomImageSize(resolution: string) {
   if (!Number.isInteger(width) || !Number.isInteger(height)) return null;
   if (width <= 0 || height <= 0) return null;
   if (width % 16 !== 0 || height % 16 !== 0) return null;
-  if (width > 4000 || height > 4000) return null;
+  if (width > 3840 || height > 3840) return null;
 
   const ratio = Math.max(width / height, height / width);
   if (ratio > 3) return null;
@@ -557,7 +757,7 @@ function isExactImage2Size(resolution: string) {
 }
 
 function getRequestedImageSize(modelName: string, aspectRatio: string, resolution: string) {
-  if (isComflyResponsesImageModel(modelName, "comfly-chat") || getNormalizedModelName(modelName) === "gpt-image-2") {
+  if (isComflyResponsesImageModel(modelName, "comfly-chat") || isFlexibleGptImage2Model(modelName)) {
     return parseCustomImageSize(resolution) || getImage2ImageSize(aspectRatio, resolution);
   }
 
@@ -569,6 +769,9 @@ function buildComflyResolutionFields(modelName: string, resolution: string, aspe
 
   if (isComflyResponsesImageModel(modelName, "comfly-chat")) {
     payload.size = getRequestedImageSize(modelName, aspectRatio, resolution);
+    if (aspectRatio !== "auto") {
+      payload.aspect_ratio = aspectRatio;
+    }
     return payload;
   }
 
@@ -684,21 +887,18 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
         const renderablePromptText = currentTask ? getRenderableTaskPrompt(currentTask) : null;
         if (currentTask && renderablePromptText && !(currentTask.resultImages?.length)) {
           useAppStore.getState().updateTask(task.id, { status: "Rendering", errorLog: undefined });
-          const generatedBatch = await retryWrap(() => runImageGeneration(task.id));
+          const generatedBatch = await retryWrap(() =>
+            runImageGeneration(task.id, {
+              onImage: (_image, images, failedCount) => {
+                updateTaskWithGeneratedImages(task.id, images, failedCount, "Rendering");
+              },
+            })
+          );
           if (generatedBatch.images.length === 0) {
             throw createStageError("没有成功返回任何结果图。", "Image Generation");
           }
-          const primaryResult = generatedBatch.images[0];
           useAppStore.getState().updateTask(task.id, {
-            resultImages: generatedBatch.images,
-            resultImage: primaryResult.src,
-            resultImagePreview: primaryResult.previewSrc,
-            resultImageOriginal: primaryResult.originalSrc,
-            resultImageSourceType: primaryResult.sourceType,
-            resultImageWidth: primaryResult.width,
-            resultImageHeight: primaryResult.height,
-            requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
-            failedResultCount: generatedBatch.failedCount,
+            ...buildTaskImageUpdatePayload(currentTask, generatedBatch.images, generatedBatch.failedCount),
             status: "Success",
             errorLog: generatedBatch.failedCount > 0 ? {
               message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
@@ -775,21 +975,18 @@ export async function processSingleTask(taskId: string) {
     }
 
     store.updateTask(taskId, { status: "Rendering", errorLog: undefined });
-    const generatedBatch = await retryWrap(() => runImageGeneration(taskId));
+    const generatedBatch = await retryWrap(() =>
+      runImageGeneration(taskId, {
+        onImage: (_image, images, failedCount) => {
+          updateTaskWithGeneratedImages(taskId, images, failedCount, "Rendering");
+        },
+      })
+    );
     if (generatedBatch.images.length === 0) {
       throw createStageError("没有成功返回任何结果图。", "Image Generation");
     }
-    const primaryResult = generatedBatch.images[0];
     store.updateTask(taskId, {
-      resultImages: generatedBatch.images,
-      resultImage: primaryResult.src,
-      resultImagePreview: primaryResult.previewSrc,
-      resultImageOriginal: primaryResult.originalSrc,
-      resultImageSourceType: primaryResult.sourceType,
-      resultImageWidth: primaryResult.width,
-      resultImageHeight: primaryResult.height,
-      requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
-      failedResultCount: generatedBatch.failedCount,
+      ...buildTaskImageUpdatePayload(currentTask, generatedBatch.images, generatedBatch.failedCount),
       errorLog: generatedBatch.failedCount > 0 ? {
         message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
         time: Date.now(),
@@ -819,7 +1016,8 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
     buildGenerationConstraints(task, resolution, aspectRatio),
   ].join("\n\n");
   const platformPreset = getPlatformPreset();
-  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey;
+  const isYunwuGptImage = isYunwuGptImageModel(store.imageModel, platformPreset);
+  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuGptImage;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
 
   try {
@@ -904,10 +1102,17 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
   const task = store.tasks.find(t => t.id === taskId);
   const effectivePromptText = task ? getRenderableTaskPrompt(task) : null;
   if (!task || !effectivePromptText) throw getMissingPromptError();
+  const startedAt = Date.now();
 
   const platformPreset = getPlatformPreset();
-  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey;
+  const isYunwuGptImage = isYunwuGptImageModel(store.imageModel, platformPreset);
+  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuGptImage;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
+  const imageRequestTimeoutMs =
+    platformPreset === "yunwu" && isYunwuGptImage
+      ? YUNWU_GPT_IMAGE_REQUEST_TIMEOUT_MS
+      : IMAGE_REQUEST_TIMEOUT_MS;
+  const supportsStreamAttempt = platformPreset === 'comfly-chat' || (platformPreset === 'yunwu' && isYunwuGptImage);
   const resolution = getEffectiveResolution(task);
   const aspectRatio = getEffectiveAspectRatio(task);
   const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
@@ -966,7 +1171,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
           contents: [{ role: "user", parts }],
           generationConfig
         })
-      }, IMAGE_REQUEST_TIMEOUT_MS);
+      }, imageRequestTimeoutMs);
 
       if (!res.ok) {
         const errText = await res.text();
@@ -982,47 +1187,111 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
       const mimeType = inlineImagePart.inlineData.mimeType || "image/png";
       const src = `data:${mimeType};base64,${inlineImagePart.inlineData.data}`;
-      return {
+      return finalizeGeneratedImageResult({
         src,
         sourceType: "base64",
         originalSrc: src
+      }, startedAt);
+    }
+
+    if (platformPreset === "yunwu" && isYunwuGptImage && store.apiBaseUrl && store.apiKey) {
+      let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
+      if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
+
+      const yunwuSize = getYunwuDocumentedImageSize(aspectRatio);
+
+      if (hasImageInputs) {
+        const formData = new FormData();
+        formData.append("model", resolvedModel.actualModel);
+        formData.append("prompt", promptForGeneration);
+        formData.append("size", yunwuSize);
+        formData.append("n", "1");
+
+        for (let index = 0; index < imageInputs.length; index += 1) {
+          const fileValue = await imageInputToFileValue(imageInputs[index], `reference-${index + 1}`);
+          formData.append("image", fileValue);
+        }
+
+        const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${store.apiKey}`
+          },
+          body: formData
+        }, imageRequestTimeoutMs, supportsStreamAttempt);
+
+        return finalizeGeneratedImageResult(extracted, startedAt);
+      }
+
+      const requestBody: Record<string, unknown> = {
+        model: resolvedModel.actualModel,
+        prompt: promptForGeneration,
+        size: yunwuSize,
+        n: 1,
       };
+
+      const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${store.apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+      }, imageRequestTimeoutMs, supportsStreamAttempt);
+
+      return finalizeGeneratedImageResult(extracted, startedAt);
     }
 
     if (isCustomOpenAI) {
       let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
+      if (
+        platformPreset !== "comfly-chat" &&
+        hasImageInputs &&
+        (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e"))
+      ) {
+        const formData = new FormData();
+        formData.append("model", resolvedModel.actualModel);
+        formData.append("prompt", promptForGeneration);
+        formData.append("size", getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution));
+        formData.append("quality", getOpenAIImageQuality(task));
+        formData.append("n", "1");
+
+        for (let index = 0; index < imageInputs.length; index += 1) {
+          const fileValue = await imageInputToFileValue(imageInputs[index], `reference-${index + 1}`);
+          formData.append("image", fileValue);
+        }
+
+        const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${store.apiKey}`
+          },
+          body: formData
+        }, imageRequestTimeoutMs, supportsStreamAttempt);
+
+        return finalizeGeneratedImageResult(extracted, startedAt);
+      }
+
       if (isComflyResponsesImageModel(resolvedModel.actualModel, platformPreset) && hasImageInputs) {
         const requestBody: Record<string, unknown> = {
           model: resolvedModel.actualModel,
           prompt: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio),
           image: imageInputs,
-          size: getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution),
         };
+        Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, aspectRatio));
 
-        if (aspectRatio !== "auto" && !isExactImage2Size(resolution)) {
-          requestBody.aspect_ratio = aspectRatio;
-        }
-
-        const res = await fetchWithTimeout(`${baseUrl}/images/generations`, {
+        const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${store.apiKey}`
           },
           body: JSON.stringify(requestBody)
-        }, IMAGE_REQUEST_TIMEOUT_MS);
+        }, imageRequestTimeoutMs, supportsStreamAttempt);
 
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`HTTP Error ${res.status}: ${errText.substring(0, 160)}`);
-        }
-
-        const json = await res.json();
-        const extracted = extractImageResultFromResponse(json);
-        if (!extracted) throw new Error("Could not extract image from comfly.chat image generation output");
-        return extracted;
+        return finalizeGeneratedImageResult(extracted, startedAt);
       }
 
       if (hasImageInputs) {
@@ -1047,7 +1316,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
             "Authorization": `Bearer ${store.apiKey}`
           },
           body: JSON.stringify(requestBody)
-        }, IMAGE_REQUEST_TIMEOUT_MS);
+        }, imageRequestTimeoutMs);
 
         if (!res.ok) {
           const errText = await res.text();
@@ -1057,7 +1326,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         const json = await res.json();
         const extracted = extractImageResultFromResponse(json);
         if (!extracted) throw new Error("Could not extract image from image-aware model output");
-        return extracted;
+        return finalizeGeneratedImageResult(extracted, startedAt);
       }
 
       const requestBody: Record<string, unknown> = {
@@ -1070,33 +1339,19 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, aspectRatio));
       } else if (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e")) {
         requestBody.size = getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution);
-        requestBody.quality = getOpenAIImageQuality(resolution);
+        requestBody.quality = getOpenAIImageQuality(task);
       }
 
-      const res = await fetchWithTimeout(`${baseUrl}/images/generations`, {
+      const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${store.apiKey}`
         },
         body: JSON.stringify(requestBody)
-      }, IMAGE_REQUEST_TIMEOUT_MS);
+      }, imageRequestTimeoutMs, supportsStreamAttempt);
 
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`HTTP Error ${res.status}: ${errText.substring(0, 100)}`);
-      }
-
-      const json = await res.json();
-      const data = json.data?.[0];
-      if (!data) throw new Error("No image data returned object");
-      const resultSrc = data.b64_json ? `data:image/jpeg;base64,${data.b64_json}` : data.url;
-      if (!resultSrc) throw new Error("No image source returned from image generation");
-      return {
-        src: resultSrc,
-        sourceType: data.b64_json ? "base64" : "original",
-        originalSrc: resultSrc
-      };
+      return finalizeGeneratedImageResult(extracted, startedAt);
     }
 
     const apiKey = getBuiltInGeminiApiKey();
@@ -1128,7 +1383,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
             responseModalities: ["TEXT", "IMAGE"]
           }
         })
-      }, IMAGE_REQUEST_TIMEOUT_MS);
+      }, imageRequestTimeoutMs);
 
       if (!res.ok) {
         const errText = await res.text();
@@ -1143,11 +1398,11 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       }
 
       const mimeType = inlineImagePart.inlineData.mimeType || "image/png";
-      return {
+      return finalizeGeneratedImageResult({
         src: `data:${mimeType};base64,${inlineImagePart.inlineData.data}`,
         sourceType: "base64",
         originalSrc: `data:${mimeType};base64,${inlineImagePart.inlineData.data}`
-      };
+      }, startedAt);
     }
 
     const params: Record<string, unknown> = {
@@ -1168,7 +1423,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         instances: [{ prompt: promptForGeneration }],
         parameters: params
       })
-    }, IMAGE_REQUEST_TIMEOUT_MS);
+    }, imageRequestTimeoutMs);
 
     if (!res.ok) {
       const errText = await res.text();
@@ -1178,17 +1433,17 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
     const json = await res.json();
     const b64 = json.predictions?.[0]?.bytesBase64Encoded;
     if (!b64) throw new Error("No predictions returned from Imagen");
-    return {
+    return finalizeGeneratedImageResult({
       src: `data:image/jpeg;base64,${b64}`,
       sourceType: "base64",
       originalSrc: `data:image/jpeg;base64,${b64}`
-    };
+    }, startedAt);
   } catch (e: any) {
     throw createStageError(e.message, "Image Generation");
   }
 }
 
-async function runImageGeneration(taskId: string): Promise<GeneratedBatchResult> {
+async function runImageGeneration(taskId: string, options: RunImageGenerationOptions = {}): Promise<GeneratedBatchResult> {
   const store = useAppStore.getState();
   const task = store.tasks.find(t => t.id === taskId);
   if (!task) throw new Error("Task not found");
@@ -1200,7 +1455,9 @@ async function runImageGeneration(taskId: string): Promise<GeneratedBatchResult>
   for (let index = 0; index < targetBatchCount; index += 1) {
     try {
       const generatedImage = await runSingleImageGeneration(taskId);
-      images.push(await createTaskResultImage(generatedImage));
+      const createdImage = await createTaskResultImage(generatedImage);
+      images.push(createdImage);
+      options.onImage?.(createdImage, [...images], failedCount);
     } catch (error) {
       failedCount += 1;
       if (targetBatchCount === 1) {

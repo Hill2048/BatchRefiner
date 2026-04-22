@@ -3,7 +3,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useSortable } from '@dnd-kit/sortable';
 import { Download, Eye, Fullscreen, GripVertical, ImageIcon, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import { Task } from '@/types';
+import { Task, TaskResultImage } from '@/types';
 import { useAppStore } from '@/store';
 import { generateTaskPrompt, processSingleTask } from '@/lib/batchRunner';
 import { getBatchCountNumber, getEffectiveBatchCount, getPrimaryTaskResult, getTaskResultImages, getTaskResultProgress } from '@/lib/taskResults';
@@ -34,6 +34,17 @@ function preventNativeImageDrag(e: React.DragEvent<HTMLImageElement>) {
   e.preventDefault();
 }
 
+function triggerDirectDownload(src: string, fileName: string) {
+  const link = document.createElement('a');
+  link.href = src;
+  link.download = fileName;
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 function getCollapsedTextClass(text: string | undefined, shortLines: number, mediumLines: number, longLines: number) {
   const content = (text || '').trim();
   const lineCount = content ? content.split(/\r?\n/).filter(Boolean).length : 0;
@@ -60,6 +71,15 @@ function getEditorHeightClass(text: string | undefined, shortClass: string, medi
   return longClass;
 }
 
+function formatGenerationTime(durationMs?: number) {
+  if (!durationMs || durationMs < 1000) return null;
+  const totalSeconds = Math.round(durationMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
 function shouldShowCollapsedFade(text: string | undefined, maxLines: number) {
   const content = (text || '').trim();
   if (!content) return false;
@@ -70,7 +90,20 @@ function shouldShowCollapsedFade(text: string | undefined, maxLines: number) {
   return Math.max(explicitLines, estimatedWrappedLines) > maxLines;
 }
 
+function getTotalGenerationTime(images: TaskResultImage[]) {
+  const total = images.reduce((sum, image) => sum + (image.generationTimeMs || 0), 0);
+  return total > 0 ? total : undefined;
+}
+
 type ViewerMode = 'result' | 'source';
+type ThumbnailViewerItem = ReturnType<typeof getTaskViewerItems>[number] & { placeholder?: false };
+type PlaceholderThumbnailItem = {
+  id: string;
+  type: 'placeholder';
+  resultIndex: number;
+  src: '';
+  placeholder: true;
+};
 
 export const TaskCard = React.memo(function TaskCard({
   taskId,
@@ -91,6 +124,7 @@ export const TaskCard = React.memo(function TaskCard({
   const globalReferenceImages = useAppStore(state => state.globalReferenceImages);
   const globalAspectRatio = useAppStore(state => state.globalAspectRatio);
   const globalResolution = useAppStore(state => state.globalResolution);
+  const globalImageQuality = useAppStore(state => state.globalImageQuality);
   const globalBatchCount = useAppStore(state => state.globalBatchCount);
   const enablePromptOptimization = useAppStore(state => state.enablePromptOptimization !== false);
   const imageModel = useAppStore(state => state.imageModel);
@@ -101,6 +135,7 @@ export const TaskCard = React.memo(function TaskCard({
   const primaryResult = getPrimaryTaskResult(task);
   const resultProgress = getTaskResultProgress(task, globalBatchCount);
   const effectiveBatchCount = getEffectiveBatchCount(task, globalBatchCount);
+  const isGeneratingVisual = task.status === 'Rendering' || task.status === 'Prompting';
   const isListMode = viewMode === 'list';
   const [selectedResultIndex, setSelectedResultIndex] = React.useState(0);
   const [viewerMode, setViewerMode] = React.useState<ViewerMode>('result');
@@ -122,10 +157,16 @@ export const TaskCard = React.memo(function TaskCard({
     if (selectedResultIndex > resultImages.length - 1) {
       setSelectedResultIndex(0);
     }
+    if (isGeneratingVisual) {
+      if (viewerMode !== 'result') {
+        setViewerMode('result');
+      }
+      return;
+    }
     if (viewerMode !== 'source') {
       setViewerMode('result');
     }
-  }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage]);
+  }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage, isGeneratingVisual]);
 
   React.useEffect(() => {
     void primeTaskResultImageCache(
@@ -136,6 +177,7 @@ export const TaskCard = React.memo(function TaskCard({
   const activeResult = resultImages[selectedResultIndex] || primaryResult;
   const coverImageSrc = primaryResult?.src || task.sourceImage;
   const showProgressBadge = resultProgress.requested > 1 && resultImages.length > 0;
+  const totalResultDuration = formatGenerationTime(getTotalGenerationTime(resultImages));
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: taskId });
   const style: React.CSSProperties = {
@@ -186,7 +228,7 @@ export const TaskCard = React.memo(function TaskCard({
       const blob = await getResultImageBlob(resultSrc);
       saveAs(blob, fileName);
     } catch {
-      window.open(resultSrc, '_blank');
+      triggerDirectDownload(resultSrc, fileName);
     }
   };
 
@@ -210,15 +252,15 @@ export const TaskCard = React.memo(function TaskCard({
     switch (task.status) {
       case 'Waiting':
       case 'Idle':
-        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-black/[0.03] text-black/50 border border-black/[0.04]">待处理</span>;
+        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-black/[0.03] text-black/58 border border-black/[0.06]">待处理</span>;
       case 'Prompting':
-        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF8EB] text-[#C99130] border border-[#C99130]/20">提示词中</span>;
+        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF8EB] text-[#B97512] border border-[#D9A33B]/24 shadow-[0_4px_12px_rgba(217,163,59,0.12)]">提示词中</span>;
       case 'Rendering':
-        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF5F2] text-[#D97757] border border-[#D97757]/20">生成中</span>;
+        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF5F2] text-[#CC6B4C] border border-[#D97757]/24 shadow-[0_4px_12px_rgba(217,119,87,0.12)]">生成中</span>;
       case 'Success':
-        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#F3F9F5] text-[#2D734C] border border-[#2D734C]/10">已完成</span>;
+        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#F3F9F5] text-[#2D734C] border border-[#2D734C]/12 shadow-[0_4px_12px_rgba(45,115,76,0.10)]">已完成</span>;
       case 'Error':
-        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FEF4F4] text-[#BE3827] border border-[#BE3827]/10">失败</span>;
+        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FEF4F4] text-[#BE3827] border border-[#BE3827]/12 shadow-[0_4px_12px_rgba(190,56,39,0.10)]">失败</span>;
       default:
         return null;
     }
@@ -287,18 +329,48 @@ export const TaskCard = React.memo(function TaskCard({
   const renderUnifiedViewer = () => {
     const mainImageSrc = getTaskViewerMainImage(task, viewerMode, selectedResultIndex);
     const showResultSize = viewerMode === 'result' && activeResult?.width && activeResult?.height;
-    const thumbnailItems = getTaskViewerItems(task);
-    const hasThumbnailStrip = thumbnailItems.length > 0;
+    const activeResultDuration = formatGenerationTime(activeResult?.generationTimeMs);
+    const thumbnailItems = getTaskViewerItems(task) as ThumbnailViewerItem[];
+    const placeholderCount = isGeneratingVisual
+      ? Math.max(0, resultProgress.requested - resultImages.length - resultProgress.failed)
+      : 0;
+    const placeholderItems: PlaceholderThumbnailItem[] = Array.from({ length: placeholderCount }, (_, index) => ({
+      id: `placeholder-${task.id}-${resultImages.length + resultProgress.failed + index}`,
+      type: 'placeholder',
+      resultIndex: resultImages.length + index,
+      src: '',
+      placeholder: true,
+    }));
+    const visibleThumbnailItems = [...thumbnailItems, ...placeholderItems];
+    const hasThumbnailStrip = visibleThumbnailItems.length > 0;
+    const shouldAnimateViewerImage = isGeneratingVisual && viewerMode === 'result';
 
     return (
       <div className="overflow-hidden rounded-t-[22px] rounded-b-none bg-[#FBFAF7] p-0 transition-all duration-300 ease-out">
         <div className="relative aspect-[3/2] w-full overflow-hidden bg-[#F7F5F1]">
+          {shouldAnimateViewerImage ? (
+            <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+              <div className="absolute inset-0 bg-white/20 backdrop-blur-[18px]" />
+              <div className="absolute inset-0 animate-[mist-breathe_3.1s_ease-in-out_infinite] bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_34%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.24),transparent_30%)]" />
+              <div
+                className="absolute inset-0 animate-[dot-drift_4.8s_linear_infinite]"
+                style={{
+                  backgroundImage:
+                    'radial-gradient(circle, rgba(255,255,255,0.88) 0 1px, transparent 1.8px), radial-gradient(circle, rgba(255,255,255,0.32) 0 1px, transparent 2px)',
+                  backgroundSize: '18px 18px, 24px 24px',
+                }}
+              />
+              <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/48 to-transparent blur-[24px] animate-[shimmer_2.4s_ease-in-out_infinite]" />
+              <div className="absolute left-[12%] top-[16%] h-28 w-28 rounded-full bg-white/24 blur-[58px] animate-[mist-breathe_2.6s_ease-in-out_infinite]" />
+              <div className="absolute bottom-[14%] right-[16%] h-24 w-24 rounded-full bg-white/16 blur-[46px] animate-[mist-breathe_2.9s_ease-in-out_infinite]" />
+            </div>
+          ) : null}
           {mainImageSrc ? (
-            <div className="flex h-full w-full items-center justify-center">
+            <div className="relative z-0 flex h-full w-full items-center justify-center">
               <img
                 src={mainImageSrc}
                 alt={task.title}
-                className="block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012]"
+                className={`block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.018] blur-[16px] saturate-[0.88]' : isGeneratingVisual ? 'scale-[1.008]' : ''}`}
                 draggable={false}
                 onDragStart={preventNativeImageDrag}
               />
@@ -309,7 +381,7 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
           )}
 
-          <div className="absolute left-3 right-3 top-3 flex items-start justify-between gap-3">
+          <div className="absolute left-3 right-3 top-3 z-20 flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <div className="drag-handle inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/72 text-black/70 shadow-sm backdrop-blur-sm transition-colors hover:bg-white" {...attributes} {...listeners}>
                 <GripVertical className="h-4 w-4" />
@@ -338,11 +410,43 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
           </div>
 
-          <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/14 via-black/0 to-transparent px-3 pb-3 pt-10">
+          <div className="absolute inset-x-0 bottom-0 z-20 flex items-end justify-between gap-3 bg-gradient-to-t from-black/14 via-black/0 to-transparent px-3 pb-3 pt-10">
             <div className="flex min-w-0 flex-1 items-end gap-2">
               {hasThumbnailStrip ? (
                 <div className="flex min-h-[56px] max-w-[220px] items-center gap-2 rounded-[18px] border border-white/70 bg-[rgba(255,255,255,0.88)] px-2.5 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.1)] backdrop-blur-md">
-                  {thumbnailItems.map((item) => {
+                  {visibleThumbnailItems.map((item) => {
+                    if (item.type === 'placeholder') {
+                      return (
+                        <div
+                          key={item.id}
+                          className="relative h-10 w-[54px] shrink-0 overflow-hidden rounded-[12px] border border-black/10 bg-[#f3efe8]"
+                          aria-hidden="true"
+                        >
+                          {task.sourceImage ? (
+                            <img
+                              src={task.sourceImage}
+                              alt=""
+                              className="absolute inset-0 h-full w-full scale-[1.68] object-cover opacity-92 blur-[18px] saturate-[0.88] brightness-[1.03]"
+                              draggable={false}
+                              onDragStart={preventNativeImageDrag}
+                            />
+                          ) : null}
+                          <div className="absolute inset-0 bg-white/20 backdrop-blur-[12px]" />
+                          <div className="absolute inset-0 animate-[mist-breathe_2.6s_ease-in-out_infinite] bg-[radial-gradient(circle_at_28%_24%,rgba(255,255,255,0.52),transparent_34%),radial-gradient(circle_at_72%_72%,rgba(255,255,255,0.24),transparent_30%)]" />
+                          <div
+                            className="absolute inset-0 animate-[dot-drift_3.2s_linear_infinite]"
+                            style={{
+                              backgroundImage:
+                                'radial-gradient(circle, rgba(255,255,255,0.86) 0 1px, transparent 1.8px), radial-gradient(circle, rgba(255,255,255,0.36) 0 1px, transparent 2px)',
+                              backgroundSize: '18px 18px, 24px 24px',
+                            }}
+                          />
+                          <div className="absolute inset-y-[-15%] left-[-42%] w-[48%] rotate-[12deg] bg-gradient-to-r from-transparent via-white/56 to-transparent blur-[16px] animate-[shimmer_1.9s_ease-in-out_infinite]" />
+                          <div className="absolute left-[12%] top-[18%] h-6 w-6 rounded-full bg-white/22 blur-[16px] animate-[mist-breathe_2.3s_ease-in-out_infinite]" />
+                          <div className="absolute bottom-[16%] right-[16%] h-5 w-5 rounded-full bg-white/16 blur-[14px] animate-[mist-breathe_2.8s_ease-in-out_infinite]" />
+                        </div>
+                      );
+                    }
                     const isActiveThumb =
                       item.type === 'source'
                         ? viewerMode === 'source'
@@ -393,8 +497,9 @@ export const TaskCard = React.memo(function TaskCard({
               ) : null}
 
               {showResultSize ? (
-                <div className="rounded-full bg-white/84 px-2.5 py-1 text-[10px] font-mono text-black/45 shadow-sm backdrop-blur-sm">
+                <div className="rounded-full border border-black/10 bg-white px-2.5 py-1 text-[10px] font-mono font-medium text-black/78 shadow-[0_8px_20px_rgba(0,0,0,0.10)]">
                   {activeResult.width} × {activeResult.height}
+                  {activeResultDuration ? ` / ${activeResultDuration}` : ''}
                 </div>
               ) : null}
             </div>
@@ -511,9 +616,23 @@ export const TaskCard = React.memo(function TaskCard({
           ${isListMode ? 'border-b sm:border-b-0 sm:border-r border-border/40' : 'border-b border-border/40'}
           ${isListMode ? 'w-full h-[180px] sm:w-[180px] sm:h-full' : 'flex-1 w-full aspect-[4/3] rounded-t-2xl'}`}
         >
-          {(task.status === 'Rendering' || task.status === 'Prompting') && (
-            <div className="absolute inset-0 z-10 bg-black/20">
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
+          {isGeneratingVisual && (
+            <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+              <div className={`absolute inset-0 ${primaryResult?.src ? 'bg-white/[0.05] backdrop-blur-[1.5px]' : 'bg-white/14 backdrop-blur-[10px]'}`} />
+              <div className={`absolute inset-0 animate-[mist-breathe_3s_ease-in-out_infinite] ${primaryResult?.src ? 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.18),transparent_24%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.12),transparent_24%)]' : 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_30%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.24),transparent_28%)]'}`} />
+              <div
+                className="absolute inset-0 animate-[dot-drift_4.2s_linear_infinite]"
+                style={{
+                  backgroundImage:
+                    primaryResult?.src
+                      ? 'radial-gradient(circle, rgba(255,255,255,0.8) 0 1px, transparent 1.6px), radial-gradient(circle, rgba(255,255,255,0.28) 0 1px, transparent 1.85px)'
+                      : 'radial-gradient(circle, rgba(255,255,255,0.9) 0 1px, transparent 1.7px), radial-gradient(circle, rgba(255,255,255,0.36) 0 1px, transparent 1.9px)',
+                  backgroundSize: '18px 18px, 24px 24px',
+                }}
+              />
+              <div className={`absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent ${primaryResult?.src ? 'via-white/22' : 'via-white/58'} to-transparent blur-[18px] animate-[shimmer_2.2s_ease-in-out_infinite]`} />
+              <div className={`absolute left-[15%] top-[18%] rounded-full ${primaryResult?.src ? 'h-14 w-14 bg-white/12 blur-[30px]' : 'h-16 w-16 bg-white/26 blur-[36px]'} animate-[mist-breathe_2.4s_ease-in-out_infinite]`} />
+              <div className={`absolute right-[18%] top-[58%] rounded-full ${primaryResult?.src ? 'h-12 w-12 bg-white/10 blur-[24px]' : 'h-14 w-14 bg-white/18 blur-[28px]'} animate-[mist-breathe_2.8s_ease-in-out_infinite]`} />
             </div>
           )}
 
@@ -554,8 +673,9 @@ export const TaskCard = React.memo(function TaskCard({
           </div>
 
           {primaryResult?.width && primaryResult?.height ? (
-            <div className="absolute bottom-3 left-3 z-20 rounded-full bg-white/74 px-3 py-1 text-[10.5px] font-mono text-black/45 backdrop-blur-sm">
+            <div className="absolute bottom-3 left-3 z-20 rounded-full border border-black/10 bg-white px-3 py-1 text-[10.5px] font-mono font-medium text-black/78 shadow-[0_8px_20px_rgba(0,0,0,0.10)]">
               {primaryResult.width} × {primaryResult.height}
+              {totalResultDuration ? ` / ${totalResultDuration}` : ''}
             </div>
           ) : null}
         </div>
@@ -690,10 +810,14 @@ export const TaskCard = React.memo(function TaskCard({
                 <GenerateParamsSelector
                   aspectRatio={task.aspectRatio || globalAspectRatio}
                   resolution={task.resolution || globalResolution}
+                  imageQuality={task.imageQuality || globalImageQuality || 'auto'}
                   batchCount={task.batchCount}
                   imageModel={imageModel}
                   onAspectRatioChange={(ar) => updateTask(task.id, { aspectRatio: ar === globalAspectRatio ? undefined : ar })}
                   onResolutionChange={(res) => updateTask(task.id, { resolution: res === globalResolution ? undefined : res })}
+                  onImageQualityChange={(quality) => updateTask(task.id, {
+                    imageQuality: quality === (globalImageQuality || 'auto') ? undefined : quality,
+                  })}
                   onBatchCountChange={(count) => updateTask(task.id, { batchCount: count })}
                   allowBatchInherit
                   onClearBatchCount={() => updateTask(task.id, { batchCount: undefined })}

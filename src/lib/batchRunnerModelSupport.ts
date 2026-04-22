@@ -38,13 +38,36 @@ export function isGptImageModel(model?: string) {
   return normalized.startsWith('gpt-image') || normalized === 'image2';
 }
 
+function isFlexibleGptImage2Model(model?: string) {
+  const normalized = getNormalizedModelName(model);
+  return normalized === 'image2' || normalized.startsWith('gpt-image-2');
+}
+
 export function isComflyResponsesImageModel(model?: string, platformPreset?: PlatformPreset) {
   if (platformPreset !== 'comfly-chat') return false;
   const normalized = getNormalizedModelName(model);
   return normalized === 'gpt-image-2' || normalized === 'image2';
 }
 
+export function isYunwuGptImageModel(model?: string, platformPreset?: PlatformPreset) {
+  if (platformPreset !== 'yunwu') return false;
+  const normalized = getNormalizedModelName(model);
+  return normalized === 'gpt-image-2' || normalized === 'gpt-image-2-all' || normalized === 'image2';
+}
+
 export function normalizeComflyImageModelAlias(modelName: string) {
+  const normalized = getNormalizedModelName(modelName);
+  if (normalized === 'image2') return 'gpt-image-2';
+  return modelName;
+}
+
+export function normalizeYunwuImageModelAlias(modelName: string) {
+  const normalized = getNormalizedModelName(modelName);
+  if (normalized === 'image2' || normalized === 'gpt-image-2') return 'gpt-image-2-all';
+  return modelName;
+}
+
+export function normalizeOpenAIImageModelAlias(modelName: string) {
   const normalized = getNormalizedModelName(modelName);
   if (normalized === 'image2') return 'gpt-image-2';
   return modelName;
@@ -116,23 +139,28 @@ export function resolveImageModel(modelName: string, resolution: string, platfor
   }
 
   if (platformPreset === 'yunwu') {
-    const normalized = getNormalizedModelName(modelName);
-    if (normalized.startsWith('gemini-3.1-flash-image-preview') || normalized.startsWith('gemini-3-pro-image-preview')) {
-      return { requestedModel: modelName, actualModel: modelName, resolutionSupport: 'hard' };
+    const actualModel = normalizeYunwuImageModelAlias(modelName);
+    const normalized = getNormalizedModelName(actualModel);
+    if (isYunwuGptImageModel(actualModel, platformPreset)) {
+      return { requestedModel: modelName, actualModel, resolutionSupport: 'hard' };
     }
-    return { requestedModel: modelName, actualModel: modelName, resolutionSupport: 'soft' };
+    if (normalized.startsWith('gemini-3.1-flash-image-preview') || normalized.startsWith('gemini-3-pro-image-preview')) {
+      return { requestedModel: modelName, actualModel, resolutionSupport: 'hard' };
+    }
+    return { requestedModel: modelName, actualModel, resolutionSupport: 'soft' };
   }
 
-  const normalized = getNormalizedModelName(modelName);
+  const actualModel = normalizeOpenAIImageModelAlias(modelName);
+  const normalized = getNormalizedModelName(actualModel);
   if (GEMINI_NATIVE_HARD_RESOLUTION_MODELS.includes(normalized)) {
-    return { requestedModel: modelName, actualModel: modelName, resolutionSupport: 'hard' };
+    return { requestedModel: modelName, actualModel, resolutionSupport: 'hard' };
   }
 
   if (isGptImageModel(normalized) || normalized.startsWith('dall-e')) {
-    return { requestedModel: modelName, actualModel: modelName, resolutionSupport: 'hard' };
+    return { requestedModel: modelName, actualModel, resolutionSupport: 'hard' };
   }
 
-  return { requestedModel: modelName, actualModel: modelName, resolutionSupport: 'soft' };
+  return { requestedModel: modelName, actualModel, resolutionSupport: 'soft' };
 }
 
 export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey: string, platformPreset: PlatformPreset) {
@@ -143,7 +171,7 @@ export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey
   }
 
   if (platformPreset === 'yunwu') {
-    return normalizedModel.includes('gemini');
+    return normalizedModel.includes('gemini') || normalizedModel.includes('gpt-image') || normalizedModel === 'image2';
   }
 
   const isCustomOpenAI = Boolean(apiBaseUrl && apiKey);
@@ -223,8 +251,8 @@ function getImage2ImageSize(aspectRatio: string, resolution: string) {
   height = roundToMultipleOf16(height);
 
   const longestEdge = Math.max(width, height);
-  if (longestEdge > 4000) {
-    const scale = 4000 / longestEdge;
+  if (longestEdge > 3840) {
+    const scale = 3840 / longestEdge;
     width = floorToMultipleOf16(width * scale);
     height = floorToMultipleOf16(height * scale);
   }
@@ -234,8 +262,8 @@ function getImage2ImageSize(aspectRatio: string, resolution: string) {
     const scale = Math.sqrt(655_360 / pixels);
     width = roundToMultipleOf16(width * scale);
     height = roundToMultipleOf16(height * scale);
-    if (Math.max(width, height) > 4000) {
-      const retryScale = 4000 / Math.max(width, height);
+    if (Math.max(width, height) > 3840) {
+      const retryScale = 3840 / Math.max(width, height);
       width = floorToMultipleOf16(width * retryScale);
       height = floorToMultipleOf16(height * retryScale);
     }
@@ -260,7 +288,7 @@ function parseCustomImageSize(resolution: string) {
   if (!Number.isInteger(width) || !Number.isInteger(height)) return null;
   if (width <= 0 || height <= 0) return null;
   if (width % 16 !== 0 || height % 16 !== 0) return null;
-  if (width > 4000 || height > 4000) return null;
+  if (width > 3840 || height > 3840) return null;
 
   const ratio = Math.max(width / height, height / width);
   if (ratio > 3) return null;
@@ -276,7 +304,7 @@ function isExactImage2Size(resolution: string) {
 }
 
 export function getRequestedImageSize(modelName: string, aspectRatio: string, resolution: string) {
-  if (isComflyResponsesImageModel(modelName, 'comfly-chat') || getNormalizedModelName(modelName) === 'gpt-image-2') {
+  if (isComflyResponsesImageModel(modelName, 'comfly-chat') || isFlexibleGptImage2Model(modelName)) {
     return parseCustomImageSize(resolution) || getImage2ImageSize(aspectRatio, resolution);
   }
 
@@ -288,6 +316,9 @@ export function buildComflyResolutionFields(modelName: string, resolution: strin
 
   if (isComflyResponsesImageModel(modelName, 'comfly-chat')) {
     payload.size = getRequestedImageSize(modelName, aspectRatio, resolution);
+    if (aspectRatio !== 'auto') {
+      payload.aspect_ratio = aspectRatio;
+    }
     return payload;
   }
 

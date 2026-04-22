@@ -122,6 +122,7 @@ export function Sidebar({
   const globalReferenceImages = useAppStore((state) => state.globalReferenceImages);
   const globalAspectRatio = useAppStore((state) => state.globalAspectRatio);
   const globalResolution = useAppStore((state) => state.globalResolution);
+  const globalImageQuality = useAppStore((state) => state.globalImageQuality);
   const globalBatchCount = useAppStore((state) => state.globalBatchCount);
   const enablePromptOptimization = useAppStore((state) => state.enablePromptOptimization !== false);
   const imageModel = useAppStore((state) => state.imageModel);
@@ -772,10 +773,12 @@ export function Sidebar({
             <GenerateParamsSelector 
               aspectRatio={globalAspectRatio}
               resolution={globalResolution}
+              imageQuality={globalImageQuality || 'auto'}
               batchCount={globalBatchCount || 'x1'}
               imageModel={imageModel}
               onAspectRatioChange={(ar) => setProjectFields({ globalAspectRatio: ar })}
               onResolutionChange={(res) => setProjectFields({ globalResolution: res })}
+              onImageQualityChange={(quality) => setProjectFields({ globalImageQuality: quality })}
               onBatchCountChange={(count) => setProjectFields({ globalBatchCount: count })}
               triggerClassName="w-full justify-start py-4 h-auto bg-[#F5F4F0] border-transparent"
             />

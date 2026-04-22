@@ -29,6 +29,7 @@ function renderComflyQuota(snapshot: Extract<PlatformQuotaSnapshot, { platform: 
     snapshot.accountName ? `账户：${snapshot.accountName}` : "",
     typeof snapshot.accountId === "number" ? `ID：${snapshot.accountId}` : "",
     `余额：${formatCny(snapshot.quota)}`,
+    snapshot.source === "user-self" ? "来源：用户信息" : "来源：令牌额度",
     `最近更新：${new Date(snapshot.fetchedAt).toLocaleTimeString("zh-CN")}`,
   ]
     .filter(Boolean)
@@ -138,11 +139,11 @@ export function QuotaStatus() {
   if (!supportsQuota || !apiKey.trim()) return null;
 
   if (status === "loading" && !snapshot) {
-    return <span className="opacity-70">额度查询中...</span>;
+    return <span className="opacity-70">余额查询中...</span>;
   }
 
   if (!snapshot) {
-    return <span className="text-amber-700">额度不可用</span>;
+    return <span className="text-amber-700">余额不可用</span>;
   }
 
   if (snapshot.platform === "comfly-chat") {

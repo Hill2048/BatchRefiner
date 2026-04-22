@@ -52,7 +52,7 @@ const PLATFORM_PRESETS: Array<{
     label: '通用 OpenAI 兼容',
     defaultBaseUrl: '',
     defaultTextModel: 'gpt-4o',
-    defaultImageModel: 'gpt-image-1',
+    defaultImageModel: 'gpt-image-2',
   },
   {
     value: 'gemini-native',
@@ -119,7 +119,7 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       apiBaseUrl: '',
       apiKey: '',
       textModel: 'gpt-4o',
-      imageModel: 'gpt-image-1',
+      imageModel: 'gpt-image-2',
     },
     'gemini-native': {
       apiBaseUrl: '',

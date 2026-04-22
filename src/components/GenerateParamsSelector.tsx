@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Film, Image as ImgIcon, RectangleHorizontal, Square } from "lucide-react";
-import { AspectRatio, BatchCount, Resolution } from "@/types";
+import { AspectRatio, BatchCount, ImageQuality, Resolution } from "@/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -10,10 +10,12 @@ interface GenerateParamsSelectorProps {
   resolution?: Resolution;
   aspectRatio?: AspectRatio;
   batchCount?: BatchCount;
+  imageQuality?: ImageQuality;
   imageModel?: string;
   onResolutionChange: (res: Resolution) => void;
   onAspectRatioChange: (ar: AspectRatio) => void;
   onBatchCountChange?: (count: BatchCount) => void;
+  onImageQualityChange?: (quality: ImageQuality) => void;
   allowBatchInherit?: boolean;
   onClearBatchCount?: () => void;
   inheritedBatchLabel?: string;
@@ -34,12 +36,26 @@ const GPT_RESOLUTIONS: Array<{ value: Resolution; label: string }> = [
 
 const GEMINI_ASPECT_RATIOS: AspectRatio[] = [
   "auto", "1:1", "9:16", "16:9", "3:4", "4:3",
-  "3:2", "2:3", "4:5", "5:4", "8:1", "1:8", "4:1", "1:4", "21:9"
+  "3:2", "2:3", "4:5", "5:4", "8:1", "1:8", "4:1", "1:4", "21:9",
 ];
 
 const GPT_ASPECT_RATIOS: AspectRatio[] = [
-  "auto", "1:1", "2:3", "3:2", "9:16", "16:9"
+  "auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21",
 ];
+
+const GPT_IMAGE_QUALITIES: Array<{ value: ImageQuality; label: string }> = [
+  { value: "auto", label: "自动" },
+  { value: "low", label: "低" },
+  { value: "medium", label: "中" },
+  { value: "high", label: "高" },
+];
+
+const QUALITY_LABELS: Record<ImageQuality, string> = {
+  auto: "自动",
+  low: "低",
+  medium: "中",
+  high: "高",
+};
 
 function getModelFamily(model?: string) {
   const normalized = (model || "").trim().toLowerCase();
@@ -84,23 +100,28 @@ function validateGptCustomSize(width: number, height: number) {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
     return "宽和高必须是正整数";
   }
+
   const normalizedWidth = snapToNearestMultipleOf16(width);
   const normalizedHeight = snapToNearestMultipleOf16(height);
 
-  if (normalizedWidth > 4000 || normalizedHeight > 4000) {
-    return "任意一边都不能超过 4000px";
+  if (normalizedWidth > 3840 || normalizedHeight > 3840) {
+    return "任意一边都不能超过 3840px";
   }
+
   const ratio = Math.max(normalizedWidth / normalizedHeight, normalizedHeight / normalizedWidth);
   if (ratio > 3) {
     return "宽高比例不能超过 3:1";
   }
+
   const pixels = normalizedWidth * normalizedHeight;
   if (pixels < 655_360) {
     return "总像素不能低于 655,360";
   }
+
   if (pixels > 8_294_400) {
     return "总像素不能超过 8,294,400";
   }
+
   return "";
 }
 
@@ -133,10 +154,12 @@ export function GenerateParamsSelector({
   resolution = "1K",
   aspectRatio = "auto",
   batchCount = "x1",
+  imageQuality = "auto",
   imageModel,
   onResolutionChange,
   onAspectRatioChange,
   onBatchCountChange,
+  onImageQualityChange,
   allowBatchInherit = false,
   onClearBatchCount,
   inheritedBatchLabel = "跟随全局",
@@ -165,16 +188,24 @@ export function GenerateParamsSelector({
       : "";
 
   const applyCustomSize = () => {
-    const width = snapToNearestMultipleOf16(Number(customWidth));
-    const height = snapToNearestMultipleOf16(Number(customHeight));
     const validationMessage = validateGptCustomSize(Number(customWidth), Number(customHeight));
     if (validationMessage) return;
+
+    const width = snapToNearestMultipleOf16(Number(customWidth));
+    const height = snapToNearestMultipleOf16(Number(customHeight));
 
     setCustomWidth(String(width));
     setCustomHeight(String(height));
     onResolutionChange(`${width}x${height}`);
     onAspectRatioChange(reduceAspectRatio(width, height));
   };
+
+  const triggerParts = [
+    aspectRatio === "auto" ? "自动" : String(aspectRatio),
+    currentResolutionLabel,
+    family === "gpt" && onImageQualityChange ? QUALITY_LABELS[imageQuality] : null,
+    allowBatchInherit && !batchCount ? "全局" : batchCount,
+  ].filter(Boolean);
 
   return (
     <Popover>
@@ -186,7 +217,7 @@ export function GenerateParamsSelector({
             className={`h-8 border-border/80 bg-card text-[12.6px] font-mono text-text-primary hover:bg-black/5 ${triggerClassName}`}
           >
             {aspectRatio === "auto" ? "" : <RectangleHorizontal className="mr-1.5 h-3.5 w-3.5 opacity-70" />}
-            {aspectRatio === "auto" ? "自动" : aspectRatio} / {currentResolutionLabel} / {allowBatchInherit && !batchCount ? "全局" : batchCount}
+            {triggerParts.join(" / ")}
           </Button>
         }
       />
@@ -210,6 +241,27 @@ export function GenerateParamsSelector({
               ))}
             </div>
           </div>
+
+          {family === "gpt" && onImageQualityChange ? (
+            <div className="flex flex-col gap-2">
+              <span className="text-[12.6px] font-medium text-text-secondary">质量</span>
+              <div className="flex gap-2">
+                {GPT_IMAGE_QUALITIES.map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => onImageQualityChange(item.value)}
+                    className={`flex-1 rounded-lg border py-1.5 text-[12.6px] transition-colors ${
+                      imageQuality === item.value
+                        ? "border-button-main bg-button-main font-medium text-[#FFFFFF] shadow-md"
+                        : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-2">
             <span className="text-[12.6px] font-medium text-text-secondary">比例</span>

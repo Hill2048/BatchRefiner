@@ -3,6 +3,7 @@ export type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4' | '2:3' | '3:2
 export type Resolution = '1K' | '2K' | '4K' | string;
 export type PlatformPreset = 'openai-compatible' | 'gemini-native' | 'comfly-chat' | 'yunwu' | 'custom';
 export type BatchCount = 'x1' | 'x2' | 'x3' | 'x4';
+export type ImageQuality = 'auto' | 'low' | 'medium' | 'high';
 
 export interface PlatformApiConfig {
   apiBaseUrl: string;
@@ -27,6 +28,7 @@ export interface TaskResultImage {
   sourceType?: 'preview' | 'original' | 'base64';
   width?: number;
   height?: number;
+  generationTimeMs?: number;
   createdAt: number;
 }
 
@@ -56,6 +58,7 @@ export interface Task {
   exported?: boolean;
   aspectRatio?: AspectRatio;
   resolution?: Resolution;
+  imageQuality?: ImageQuality;
   createdAt: number;
   updatedAt: number;
 }
@@ -74,6 +77,7 @@ export interface ProjectData {
   textModel: string;
   globalAspectRatio?: AspectRatio;
   globalResolution?: Resolution;
+  globalImageQuality?: ImageQuality;
   globalBatchCount?: BatchCount;
   createdAt: number;
   updatedAt: number;

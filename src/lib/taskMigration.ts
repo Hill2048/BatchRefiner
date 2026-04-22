@@ -19,7 +19,7 @@ export const initialPlatformConfigs: PlatformApiConfigMap = {
     apiBaseUrl: '',
     apiKey: '',
     textModel: 'gpt-4o',
-    imageModel: 'gpt-image-1',
+    imageModel: 'gpt-image-2',
   },
   'gemini-native': {
     apiBaseUrl: '',
@@ -47,6 +47,7 @@ export const initialProjectState: ProjectData = {
   skillFileName: DEFAULT_SKILL_FILE_NAME,
   imageModel: 'gemini-3.1-flash-image-preview',
   textModel: 'gemini-3.1-flash-lite-preview',
+  globalImageQuality: 'auto',
   globalBatchCount: 'x1',
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -124,6 +125,7 @@ export function withDefaultSkill<T extends Partial<ProjectData>>(state: T) {
     enablePromptOptimization: state.enablePromptOptimization !== false,
     globalSkillText: state.globalSkillText?.trim() ? state.globalSkillText : DEFAULT_SKILL_TEXT,
     skillFileName: state.skillFileName?.trim() ? state.skillFileName : DEFAULT_SKILL_FILE_NAME,
+    globalImageQuality: state.globalImageQuality || 'auto',
     globalBatchCount: (state.globalBatchCount || 'x1') as BatchCount,
   };
 }

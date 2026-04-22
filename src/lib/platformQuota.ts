@@ -16,6 +16,7 @@ export type PlatformQuotaSnapshot =
       quota: number;
       accountId?: number;
       accountName?: string;
+      source?: "user-self" | "token-quota";
       fetchedAt: number;
     };
 
@@ -43,6 +44,68 @@ async function parseJsonSafe(response: Response) {
   } catch {
     return null;
   }
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const normalized = Number(value);
+    return Number.isFinite(normalized) ? normalized : null;
+  }
+  return null;
+}
+
+function pickNumber(input: any, keys: string[]) {
+  for (const key of keys) {
+    const value = toNumber(input?.[key]);
+    if (value != null) return value;
+  }
+  return null;
+}
+
+function pickString(input: any, keys: string[]) {
+  for (const key of keys) {
+    const value = input?.[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function extractComflyAccountId(payload: any): number | undefined {
+  const scoped = payload?.data ?? payload?.user ?? payload;
+  return (
+    pickNumber(scoped, ["id", "user_id", "uid"]) ??
+    pickNumber(payload, ["id", "user_id", "uid"]) ??
+    undefined
+  ) as number | undefined;
+}
+
+function extractComflyAccountName(payload: any): string | undefined {
+  const scoped = payload?.data ?? payload?.user ?? payload;
+  return (
+    pickString(scoped, ["name", "username", "nickname", "display_name"]) ??
+    pickString(payload, ["name", "username", "nickname", "display_name"])
+  );
+}
+
+function extractComflyQuota(payload: any): number {
+  const scoped = payload?.data ?? payload?.user ?? payload;
+  return (
+    pickNumber(scoped, [
+      "quota",
+      "balance",
+      "remain_quota",
+      "remaining_quota",
+      "available_balance",
+      "available_quota",
+      "quota_balance",
+      "credit",
+      "credits",
+    ]) ??
+    0
+  );
 }
 
 export async function fetchYunwuQuota(apiKey: string, signal?: AbortSignal): Promise<PlatformQuotaSnapshot> {
@@ -90,15 +153,18 @@ export async function fetchComflyQuota(apiBaseUrl: string, apiKey: string, signa
     throw new Error("缺少 API Key");
   }
 
-  let baseUrl = apiBaseUrl.trim().replace(/\/+$/, "");
-  if (!baseUrl) {
-    baseUrl = "https://ai.comfly.chat";
-  }
-  if (!baseUrl.endsWith("/v1") && !baseUrl.includes("/v1/")) {
-    baseUrl += "/v1";
+  let rawBaseUrl = apiBaseUrl.trim().replace(/\/+$/, "");
+  if (!rawBaseUrl) {
+    rawBaseUrl = "https://ai.comfly.chat";
   }
 
-  const response = await fetch(`${baseUrl}/token/quota`, {
+  const rootBaseUrl = rawBaseUrl.replace(/\/v1(?:\/.*)?$/i, "");
+  let v1BaseUrl = rawBaseUrl;
+  if (!v1BaseUrl.endsWith("/v1") && !v1BaseUrl.includes("/v1/")) {
+    v1BaseUrl += "/v1";
+  }
+
+  const quotaResponse = await fetch(`${v1BaseUrl}/token/quota`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${trimmedApiKey}`,
@@ -106,16 +172,44 @@ export async function fetchComflyQuota(apiBaseUrl: string, apiKey: string, signa
     signal,
   });
 
-  const data = await parseJsonSafe(response);
-  if (!response.ok) {
-    throw new Error(data?.error?.message || data?.message || "额度查询失败");
+  const quotaData = await parseJsonSafe(quotaResponse);
+  if (!quotaResponse.ok) {
+    throw new Error(quotaData?.error?.message || quotaData?.message || "额度查询失败");
+  }
+
+  const accountId = extractComflyAccountId(quotaData);
+  const accountName = extractComflyAccountName(quotaData);
+  const fallbackQuota = extractComflyQuota(quotaData);
+
+  if (accountId != null) {
+    const selfResponse = await fetch(`${rootBaseUrl}/api/user/self`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${trimmedApiKey}`,
+        "New-API-User": String(accountId),
+      },
+      signal,
+    });
+
+    const selfData = await parseJsonSafe(selfResponse);
+    if (selfResponse.ok) {
+      return {
+        platform: "comfly-chat",
+        quota: extractComflyQuota(selfData),
+        accountId,
+        accountName: extractComflyAccountName(selfData) || accountName,
+        source: "user-self",
+        fetchedAt: Date.now(),
+      };
+    }
   }
 
   return {
     platform: "comfly-chat",
-    quota: Number(data?.quota || 0),
-    accountId: typeof data?.id === "number" ? data.id : undefined,
-    accountName: typeof data?.name === "string" ? data.name : undefined,
+    quota: fallbackQuota,
+    accountId,
+    accountName,
+    source: "token-quota",
     fetchedAt: Date.now(),
   };
 }

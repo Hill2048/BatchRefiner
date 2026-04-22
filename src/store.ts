@@ -204,6 +204,7 @@ export const useAppStore = create<AppState>()(
         textModel: state.textModel,
         globalAspectRatio: state.globalAspectRatio,
         globalResolution: state.globalResolution,
+        globalImageQuality: state.globalImageQuality,
         globalBatchCount: state.globalBatchCount,
         tasks: state.tasks,
         viewMode: state.viewMode,
