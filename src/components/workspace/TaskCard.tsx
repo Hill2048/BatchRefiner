@@ -305,9 +305,18 @@ export const TaskCard = React.memo(function TaskCard({
   };
 
   const handlePreviewPrompt = async (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
     const previewPromise = generateTaskPrompt(task.id).then((generatedPrompt) => {
-      updateTask(task.id, { promptText: generatedPrompt, promptSource: 'auto' });
+      const latestTask = useAppStore.getState().tasks.find((item) => item.id === task.id);
+      const hasAnyResults = Boolean(latestTask?.resultImages?.length || latestTask?.resultImage);
+      updateTask(task.id, {
+        promptText: generatedPrompt,
+        promptSource: 'auto',
+        status: hasAnyResults ? 'Success' : 'Idle',
+        progressStage: undefined,
+        errorLog: undefined,
+      });
       return generatedPrompt;
     });
 
@@ -321,14 +330,16 @@ export const TaskCard = React.memo(function TaskCard({
   };
 
   const getStatusDisplay = () => {
+    const promptingLabel = task.progressStage?.trim() || '提示词中';
+    const renderingLabel = task.progressStage?.trim() || '生成中';
     switch (task.status) {
       case 'Waiting':
       case 'Idle':
         return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-black/[0.03] text-black/58 border border-black/[0.06]">待处理</span>;
       case 'Prompting':
-        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF8EB] text-[#B97512] border border-[#D9A33B]/24 shadow-[0_4px_12px_rgba(217,163,59,0.12)]">提示词中</span>;
+        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF8EB] text-[#B97512] border border-[#D9A33B]/24 shadow-[0_4px_12px_rgba(217,163,59,0.12)]">{promptingLabel}</span>;
       case 'Rendering':
-        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF5F2] text-[#CC6B4C] border border-[#D97757]/24 shadow-[0_4px_12px_rgba(217,119,87,0.12)]">生成中</span>;
+        return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#FDF5F2] text-[#CC6B4C] border border-[#D97757]/24 shadow-[0_4px_12px_rgba(217,119,87,0.12)]">{renderingLabel}</span>;
       case 'Success':
         return <span className="text-[10.5px] px-2.5 py-[3px] rounded-full font-medium bg-[#F3F9F5] text-[#2D734C] border border-[#2D734C]/12 shadow-[0_4px_12px_rgba(45,115,76,0.10)]">已完成</span>;
       case 'Error':
@@ -420,7 +431,10 @@ export const TaskCard = React.memo(function TaskCard({
 
     return (
       <div className="overflow-hidden rounded-t-[22px] rounded-b-none bg-[#FBFAF7] p-0 transition-all duration-300 ease-out">
-        <div className="relative aspect-[3/2] w-full overflow-hidden bg-[#F7F5F1]">
+        <div
+          className="relative aspect-[3/2] w-full overflow-hidden bg-[#F7F5F1]"
+          style={{ contain: 'paint' }}
+        >
           {shouldAnimateViewerImage ? (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
               <div className="absolute inset-0 bg-white/20 backdrop-blur-[18px]" />
@@ -776,6 +790,7 @@ export const TaskCard = React.memo(function TaskCard({
           className={`bg-[#FBFAF7] flex items-center justify-center relative isolate overflow-hidden min-h-0 shrink-0
           ${isListMode ? 'border-b sm:border-b-0 sm:border-r border-border/40' : 'border-b border-border/40'}
           ${isListMode ? 'w-full h-[180px] sm:w-[180px] sm:h-full' : 'flex-1 w-full aspect-[4/3] rounded-t-2xl'}`}
+          style={{ contain: 'paint' }}
         >
           {isGeneratingVisual && !primaryResult?.src && (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
@@ -1127,11 +1142,11 @@ export const TaskCard = React.memo(function TaskCard({
 
             <div className="mt-0.5 flex items-center justify-between gap-2 px-3">
               {enablePromptOptimization ? (
-                <Button variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
+                <Button type="button" variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
                   <Eye className="w-3 h-3 mr-1 opacity-70" /> 预览提示词
                 </Button>
               ) : <div />}
-              <Button className="h-7 px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11.55px] font-medium disabled:opacity-50" onClick={(e) => { e.stopPropagation(); processSingleTask(task.id); }} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
+              <Button type="button" className="h-7 px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11.55px] font-medium disabled:opacity-50" onClick={(e) => { e.preventDefault(); e.stopPropagation(); processSingleTask(task.id); }} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
                 执行此项 ({getBatchCountNumber(effectiveBatchCount)} 张)
               </Button>
             </div>

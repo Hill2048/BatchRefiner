@@ -89,6 +89,7 @@ export function migrateTask(task: Task): Task {
     failedResultCount: task.failedResultCount || 0,
     exportedResultIds: task.exportedResultIds || [],
     activeResultSessionId: task.activeResultSessionId,
+    progressStage: task.progressStage,
     resultImage: resultImages[0]?.src,
     resultImagePreview: resultImages[0]?.previewSrc,
     resultImageOriginal: resultImages[0]?.originalSrc,
@@ -110,6 +111,7 @@ export function recoverInterruptedTasks(tasks: Task[] = []) {
       return {
         ...migratedTask,
         status: 'Error' as const,
+        progressStage: undefined,
         errorLog: {
           message: '请求已中断或页面已刷新，请重新执行该任务。',
           time: Date.now(),
@@ -143,6 +145,7 @@ export function normalizeIncomingTask(taskInfo: Omit<Task, 'id' | 'createdAt' | 
     updatedAt: now,
     resultImages: taskInfo.resultImages || [],
     activeResultSessionId: taskInfo.activeResultSessionId,
+    progressStage: taskInfo.progressStage,
     requestedBatchCount: taskInfo.requestedBatchCount || taskInfo.batchCount || 'x1',
     failedResultCount: taskInfo.failedResultCount || 0,
     exportedResultIds: taskInfo.exportedResultIds || [],

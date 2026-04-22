@@ -3,7 +3,7 @@ import { useAppStore } from "@/store";
 import pLimit from "p-limit";
 import { toast } from "sonner";
 import { getBatchCountNumber, getEffectiveBatchCount } from "./taskResults";
-import { getExecutablePromptText, isPromptOptimizationEnabled } from "./promptExecution";
+import { getExecutablePromptText, getPreparedPromptText, isPromptOptimizationEnabled } from "./promptExecution";
 import { primeTaskResultImageCache } from "./resultImageCache";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -187,6 +187,10 @@ function shouldOptimizePrompts() {
 
 function getRenderableTaskPrompt(task: Pick<Task, "promptText" | "description">) {
   return getExecutablePromptText(task);
+}
+
+function getExecutionReadyTaskPrompt(task: Pick<Task, "promptText" | "description">) {
+  return getPreparedPromptText(task, useAppStore.getState().enablePromptOptimization);
 }
 
 function getMissingPromptError() {
@@ -393,6 +397,47 @@ function extractImageCandidatesFromString(input: string) {
   return Array.from(candidates);
 }
 
+function looksLikeBase64Image(value: string) {
+  const normalized = value.trim();
+  if (!normalized || normalized.length < 128) return false;
+  if (normalized.startsWith("data:image/")) return true;
+  return /^[A-Za-z0-9+/=\r\n]+$/.test(normalized);
+}
+
+function extractBase64ImageFromPayload(payload: unknown): string | null {
+  if (!payload) return null;
+
+  if (typeof payload === "string") {
+    return looksLikeBase64Image(payload) ? payload.trim() : null;
+  }
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const candidate = extractBase64ImageFromPayload(item);
+      if (candidate) return candidate;
+    }
+    return null;
+  }
+
+  if (typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const directKeys = ["b64_json", "base64", "image_base64", "imageBase64"];
+    for (const key of directKeys) {
+      const value = record[key];
+      if (typeof value === "string" && looksLikeBase64Image(value)) {
+        return value.trim();
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      const candidate = extractBase64ImageFromPayload(value);
+      if (candidate) return candidate;
+    }
+  }
+
+  return null;
+}
+
 function collectImageCandidates(value: unknown, results = new Set<string>()) {
   if (!value) return results;
 
@@ -450,6 +495,16 @@ function classifyImageSourceType(candidate: string) {
 }
 
 function extractImageResultFromResponse(payload: unknown): GeneratedImageResult | null {
+  const rawBase64 = extractBase64ImageFromPayload(payload);
+  if (rawBase64) {
+    const src = rawBase64.startsWith("data:image/") ? rawBase64 : `data:image/png;base64,${rawBase64}`;
+    return {
+      src,
+      sourceType: "base64",
+      originalSrc: src,
+    };
+  }
+
   const candidates = Array.from(collectImageCandidates(payload));
   if (candidates.length === 0) return null;
 
@@ -529,6 +584,15 @@ function updateTaskWithGeneratedImages(taskId: string, images: TaskResultImage[]
   store.updateTask(taskId, {
     ...buildTaskImageUpdatePayload(currentTask, images, failedCount),
     ...(status ? { status } : {}),
+    progressStage: "写入结果",
+  });
+}
+
+function updateTaskProgress(taskId: string, status: TaskStatus, progressStage: string) {
+  useAppStore.getState().updateTask(taskId, {
+    status,
+    progressStage,
+    errorLog: undefined,
   });
 }
 
@@ -676,10 +740,97 @@ function buildGeminiGatewayHeaders(apiKey: string) {
 }
 
 async function imageInputToFileValue(image: string, fallbackName: string) {
+  if (image.startsWith("data:image/jpeg;base64,")) {
+    const response = await fetch(image);
+    const blob = await response.blob();
+    return new File([blob], `${fallbackName}.jpg`, { type: "image/jpeg" });
+  }
+
+  const response = await fetch(image);
+  const originalBlob = await response.blob();
+  const optimizedBlob = await optimizeUploadImageBlob(originalBlob);
+  const extension = optimizedBlob.type.split("/")[1] || "jpg";
+  return new File([optimizedBlob], `${fallbackName}.${extension}`, { type: optimizedBlob.type || "image/jpeg" });
+}
+
+async function optimizeUploadImageBlob(blob: Blob) {
+  if (!blob.type.startsWith("image/")) return blob;
+
+  try {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to decode upload image"));
+      img.src = objectUrl;
+    });
+
+    const maxSize = 4000;
+    let width = image.naturalWidth || image.width;
+    let height = image.naturalHeight || image.height;
+    if (!width || !height) {
+      URL.revokeObjectURL(objectUrl);
+      return blob;
+    }
+
+    if (width > maxSize || height > maxSize) {
+      const ratio = Math.min(maxSize / width, maxSize / height);
+      width = Math.max(1, Math.round(width * ratio));
+      height = Math.max(1, Math.round(height * ratio));
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      URL.revokeObjectURL(objectUrl);
+      return blob;
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    URL.revokeObjectURL(objectUrl);
+
+    const optimizedBlob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((value) => resolve(value), "image/jpeg", 0.88);
+    });
+
+    return optimizedBlob || blob;
+  } catch {
+    return blob;
+  }
+}
+
+async function imageInputToDataUrl(image: string) {
+  if (image.startsWith("data:image/")) return image;
   const response = await fetch(image);
   const blob = await response.blob();
-  const extension = blob.type.split("/")[1] || "png";
-  return new File([blob], `${fallbackName}.${extension}`, { type: blob.type || "image/png" });
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        resolve(result);
+        return;
+      }
+      reject(new Error("Failed to convert image input to data URL"));
+    };
+    reader.onerror = () => reject(reader.error || new Error("Failed to read image input"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function normalizePromptImageInputs(taskId: string, imageInputs: string[]) {
+  const normalizedImageInputs: string[] = [];
+
+  for (let index = 0; index < imageInputs.length; index += 1) {
+    updateTaskProgress(taskId, "Prompting", `读取提示词图片 ${index + 1}/${imageInputs.length}`);
+    normalizedImageInputs.push(await imageInputToDataUrl(imageInputs[index]));
+  }
+
+  return normalizedImageInputs;
 }
 
 function getOpenAIImageSize(aspectRatio: string) {
@@ -913,10 +1064,10 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
     try {
       if (mode === "all" || mode === "prompts") {
         const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
-        if (currentTask && promptOptimizationEnabled && !currentTask.promptText) {
-          useAppStore.getState().updateTask(task.id, { status: "Prompting" });
+        if (currentTask && promptOptimizationEnabled && !currentTask.promptText?.trim()) {
+          updateTaskProgress(task.id, "Prompting", "准备提示词");
           const generatedPrompt = await retryWrap(() => generateTaskPrompt(task.id));
-          useAppStore.getState().updateTask(task.id, { promptText: generatedPrompt, promptSource: "auto", errorLog: undefined });
+          useAppStore.getState().updateTask(task.id, { promptText: generatedPrompt, promptSource: "auto", errorLog: undefined, progressStage: undefined });
         }
       }
 
@@ -924,23 +1075,22 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
 
       if (mode === "all" || mode === "images") {
         const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
-        const renderablePromptText = currentTask ? getRenderableTaskPrompt(currentTask) : null;
-        if (currentTask && renderablePromptText) {
+        const executablePromptText = currentTask ? getExecutionReadyTaskPrompt(currentTask) : null;
+        if (currentTask && executablePromptText) {
           const sessionId = crypto.randomUUID();
           useAppStore.getState().updateTask(task.id, {
             activeResultSessionId: sessionId,
             requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
             failedResultCount: 0,
             status: "Rendering",
+            progressStage: "准备任务",
             errorLog: undefined,
           });
-          const generatedBatch = await retryWrap(() =>
-            runImageGeneration(task.id, {
-              onImage: (_image, images, failedCount) => {
-                updateTaskWithGeneratedImages(task.id, images, failedCount, "Rendering");
-              },
-            })
-          );
+          const generatedBatch = await runImageGeneration(task.id, {
+            onImage: (_image, images, failedCount) => {
+              updateTaskWithGeneratedImages(task.id, images, failedCount, "Rendering");
+            },
+          });
           if (generatedBatch.images.length === 0) {
             throw createStageError("没有成功返回任何结果图。", "Image Generation");
           }
@@ -948,13 +1098,14 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
           useAppStore.getState().updateTask(task.id, {
             ...buildTaskImageUpdatePayload(latestTask, generatedBatch.images, generatedBatch.failedCount),
             status: "Success",
+            progressStage: undefined,
             errorLog: generatedBatch.failedCount > 0 ? {
               message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
               time: Date.now(),
               stage: "Image Generation",
             } : undefined,
           });
-        } else if (currentTask && !renderablePromptText) {
+        } else if (currentTask && !executablePromptText) {
           throw getMissingPromptError();
         }
       } else {
@@ -963,9 +1114,10 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
     } catch (error: any) {
       if (!useAppStore.getState().isBatchRunning) return;
       toast.error(`任务 ${task.title || task.index} 处理失败`);
-      useAppStore.getState().updateTask(task.id, {
-        status: "Error",
-        errorLog: {
+        useAppStore.getState().updateTask(task.id, {
+          status: "Error",
+          progressStage: undefined,
+          errorLog: {
           message: error.message || "Error occurred",
           time: Date.now(),
           stage: error.stage || "Unknown"
@@ -992,6 +1144,7 @@ export function haltBatch() {
       return {
         ...t,
         status: "Error" as const,
+        progressStage: undefined,
         errorLog: { message: "已被用户手动中断", time: Date.now(), stage: t.status }
       };
     }
@@ -1009,11 +1162,15 @@ export async function processSingleTask(taskId: string) {
     const currentTask = useAppStore.getState().tasks.find(x => x.id === taskId);
     if (!currentTask) return;
 
-    let promptText = getRenderableTaskPrompt(currentTask);
+    let promptText = getExecutionReadyTaskPrompt(currentTask);
     if (!promptText && shouldOptimizePrompts()) {
-      store.updateTask(taskId, { status: "Prompting", errorLog: undefined });
+      updateTaskProgress(taskId, "Prompting", "准备提示词");
       promptText = await retryWrap(() => generateTaskPrompt(taskId));
-      store.updateTask(taskId, { promptText, promptSource: "auto", errorLog: undefined });
+      store.updateTask(taskId, { promptText, promptSource: "auto", errorLog: undefined, progressStage: undefined });
+      promptText = getExecutionReadyTaskPrompt(useAppStore.getState().tasks.find(x => x.id === taskId) || {
+        promptText,
+        description: currentTask.description
+      });
     }
 
     if (!promptText) {
@@ -1026,22 +1183,22 @@ export async function processSingleTask(taskId: string) {
       requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
       failedResultCount: 0,
       status: "Rendering",
+      progressStage: "准备任务",
       errorLog: undefined,
     });
-    const generatedBatch = await retryWrap(() =>
-      runImageGeneration(taskId, {
-        onImage: (_image, images, failedCount) => {
-          updateTaskWithGeneratedImages(taskId, images, failedCount, "Rendering");
-        },
-      })
-    );
+    const generatedBatch = await runImageGeneration(taskId, {
+      onImage: (_image, images, failedCount) => {
+        updateTaskWithGeneratedImages(taskId, images, failedCount, "Rendering");
+      },
+    });
     if (generatedBatch.images.length === 0) {
       throw createStageError("没有成功返回任何结果图。", "Image Generation");
     }
     const latestTask = useAppStore.getState().tasks.find((item) => item.id === taskId) || currentTask;
-    store.updateTask(taskId, {
-      ...buildTaskImageUpdatePayload(latestTask, generatedBatch.images, generatedBatch.failedCount),
-      errorLog: generatedBatch.failedCount > 0 ? {
+      store.updateTask(taskId, {
+        ...buildTaskImageUpdatePayload(latestTask, generatedBatch.images, generatedBatch.failedCount),
+        progressStage: undefined,
+        errorLog: generatedBatch.failedCount > 0 ? {
         message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
         time: Date.now(),
         stage: "Image Generation",
@@ -1051,6 +1208,7 @@ export async function processSingleTask(taskId: string) {
   } catch (error: any) {
     store.updateTask(taskId, {
       status: "Error",
+      progressStage: undefined,
       errorLog: { message: error.message || "Error occurred", time: Date.now(), stage: error.stage }
     });
   }
@@ -1061,19 +1219,133 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
   const task = store.tasks.find(t => t.id === taskId);
   if (!task) throw new Error("Task not found");
 
+  updateTaskProgress(taskId, "Prompting", "整理提示词输入");
   const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
   const systemPrompt = "你负责根据用户输入整理出一段可直接用于生图或改图的最终提示词，不强制英文，不额外解释。";
   const contentMsg = buildPromptGenerationText(task, store.globalSkillText || "");
   const platformPreset = getPlatformPreset();
-  const isYunwuGptImage = isYunwuGptImageModel(store.imageModel, platformPreset);
-  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuGptImage;
+  const isYunwuPromptImageModel = isYunwuGptImageModel(store.textModel, platformPreset);
+  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuPromptImageModel;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
 
   try {
+    {
     if (isGeminiGateway) {
       const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
+      const normalizedImageInputs = await normalizePromptImageInputs(taskId, imageInputs);
+      updateTaskProgress(taskId, "Prompting", "请求提示词 API");
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
+      normalizedImageInputs.forEach(image => {
+        const mimeTypeMatch = image.match(/^data:(image\/[^;]+);base64,/i);
+        parts.push({
+          inlineData: {
+            mimeType: mimeTypeMatch?.[1] || "image/jpeg",
+            data: dataUrlToBase64(image)
+          }
+        });
+      });
+
+      const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${store.textModel}:generateContent`, {
+        method: "POST",
+        headers: buildGeminiGatewayHeaders(store.apiKey),
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: {
+            temperature: 0.4
+          }
+        })
+      }, PROMPT_REQUEST_TIMEOUT_MS);
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`HTTP Error ${res.status}: ${errText.substring(0, 100)}`);
+      }
+
+      const json = await res.json();
+      return json.candidates?.[0]?.content?.parts?.map((part: any) => part.text).filter(Boolean).join("\n").trim() || "Generated prompt fallback";
+    }
+
+    if (isCustomOpenAI && store.apiBaseUrl && store.apiKey) {
+      let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
+      if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
+      const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+        { type: "text", text: contentMsg }
+      ];
       imageInputs.forEach(image => {
+        userContent.push({ type: "image_url", image_url: { url: image } });
+      });
+
+      updateTaskProgress(taskId, "Prompting", "请求提示词 API");
+      const res = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${store.apiKey}`
+        },
+        body: JSON.stringify({
+          model: store.textModel,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userContent }
+          ]
+        })
+      }, PROMPT_REQUEST_TIMEOUT_MS);
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`HTTP Error ${res.status}: ${errText.substring(0, 100)}`);
+      }
+
+      const json = await res.json();
+      return json.choices?.[0]?.message?.content?.trim() || "Generated prompt fallback";
+    }
+
+    const apiKey = getBuiltInGeminiApiKey();
+    if (!apiKey) {
+      throw new Error("Missing built-in Gemini API Key. For public deployments, use the in-app API settings instead of bundling a key into the frontend.");
+    }
+
+    const normalizedImageInputs = await normalizePromptImageInputs(taskId, imageInputs);
+    updateTaskProgress(taskId, "Prompting", "请求提示词 API");
+    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
+    normalizedImageInputs.forEach(image => {
+      const mimeTypeMatch = image.match(/^data:(image\/[^;]+);base64,/i);
+      parts.push({
+        inlineData: {
+          mimeType: mimeTypeMatch?.[1] || "image/jpeg",
+          data: dataUrlToBase64(image)
+        }
+      });
+    });
+
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${store.textModel || "gemini-2.0-flash"}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ parts }]
+      })
+    }, PROMPT_REQUEST_TIMEOUT_MS);
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Gemini Error ${res.status}: ${errText.substring(0, 100)}`);
+    }
+
+    const json = await res.json();
+    return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Generated prompt fallback";
+    }
+
+    if (isGeminiGateway) {
+      if (imageInputs.length > 0) {
+        updateTaskProgress(taskId, "Prompting", "读取提示词图片");
+      }
+      updateTaskProgress(taskId, "Prompting", imageInputs.length > 0 ? "上传提示词图片" : "请求提示词 API");
+      const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
+      const normalizedImageInputs = await Promise.all(imageInputs.map(imageInputToDataUrl));
+      updateTaskProgress(taskId, "Prompting", "请求提示词 API");
+      const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
+      normalizedImageInputs.forEach(image => {
         const mimeTypeMatch = image.match(/^data:(image\/[^;]+);base64,/i);
         parts.push({
           inlineData: {
@@ -1103,6 +1375,8 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
     }
 
     if (isCustomOpenAI && store.apiBaseUrl && store.apiKey) {
+      updateTaskProgress(taskId, "Prompting", "请求提示词 API");
+      updateTaskProgress(taskId, "Prompting", imageInputs.length > 0 ? "上传提示词图片" : "请求提示词 API");
       let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
       const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
@@ -1141,8 +1415,14 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       throw new Error("Missing built-in Gemini API Key. For public deployments, use the in-app API settings instead of bundling a key into the frontend.");
     }
 
+    updateTaskProgress(taskId, "Prompting", imageInputs.length > 0 ? "上传提示词图片" : "请求提示词 API");
+    if (imageInputs.length > 0) {
+      updateTaskProgress(taskId, "Prompting", "读取提示词图片");
+    }
+    const normalizedImageInputs = await Promise.all(imageInputs.map(imageInputToDataUrl));
+    updateTaskProgress(taskId, "Prompting", "请求提示词 API");
     const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
-    imageInputs.forEach(image => {
+    normalizedImageInputs.forEach(image => {
       const mimeTypeMatch = image.match(/^data:(image\/[^;]+);base64,/i);
       parts.push({
         inlineData: {
@@ -1179,9 +1459,12 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
   const effectivePromptText = task ? getRenderableTaskPrompt(task) : null;
   if (!task || !effectivePromptText) throw getMissingPromptError();
   const startedAt = Date.now();
+  updateTaskProgress(taskId, "Rendering", "准备参数");
 
   const platformPreset = getPlatformPreset();
-  const isYunwuGptImage = isYunwuGptImageModel(store.imageModel, platformPreset);
+  const resolution = getEffectiveResolution(task);
+  const resolvedModel = resolveImageModel(store.imageModel, resolution, platformPreset);
+  const isYunwuGptImage = isYunwuGptImageModel(resolvedModel.actualModel, platformPreset);
   const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuGptImage;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
   const imageRequestTimeoutMs =
@@ -1189,11 +1472,12 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       ? YUNWU_GPT_IMAGE_REQUEST_TIMEOUT_MS
       : IMAGE_REQUEST_TIMEOUT_MS;
   const supportsStreamAttempt = platformPreset === 'comfly-chat' || (platformPreset === 'yunwu' && isYunwuGptImage);
-  const resolution = getEffectiveResolution(task);
   const aspectRatio = getEffectiveAspectRatio(task);
   const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
   const hasImageInputs = imageInputs.length > 0;
-  const resolvedModel = resolveImageModel(store.imageModel, resolution, platformPreset);
+  if (hasImageInputs) {
+    updateTaskProgress(taskId, "Rendering", "准备图片");
+  }
   const sourceImageDimensions = task.sourceImage ? await measureImageDimensions(task.sourceImage) : null;
   const resolvedAspectRatio = resolveAspectRatioForImage2(task, aspectRatio, sourceImageDimensions);
   useAppStore.getState().updateTask(taskId, {
@@ -1213,6 +1497,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
     }
 
     if (isGeminiGateway) {
+      updateTaskProgress(taskId, "Rendering", hasImageInputs ? "上传到 API" : "请求 API");
       const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
         { text: hasImageInputs ? buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) : promptForGeneration }
@@ -1257,6 +1542,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       }
 
       const json = await res.json();
+      updateTaskProgress(taskId, "Rendering", "解析结果");
       const responseParts = json.candidates?.[0]?.content?.parts || [];
       const inlineImagePart = responseParts.find((part: any) => part.inlineData?.data);
       if (!inlineImagePart?.inlineData?.data) {
@@ -1279,6 +1565,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       const yunwuSize = getYunwuDocumentedImageSize(resolvedAspectRatio);
 
       if (hasImageInputs) {
+        updateTaskProgress(taskId, "Rendering", "上传到 API");
         const formData = new FormData();
         formData.append("model", resolvedModel.actualModel);
         formData.append("prompt", promptForGeneration);
@@ -1301,6 +1588,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         return finalizeGeneratedImageResult(extracted, startedAt);
       }
 
+      updateTaskProgress(taskId, "Rendering", "请求 API");
       const requestBody: Record<string, unknown> = {
         model: resolvedModel.actualModel,
         prompt: promptForGeneration,
@@ -1325,10 +1613,10 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
       if (
-        platformPreset !== "comfly-chat" &&
         hasImageInputs &&
         (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e"))
       ) {
+        updateTaskProgress(taskId, "Rendering", "上传到 API");
         const formData = new FormData();
         formData.append("model", resolvedModel.actualModel);
         formData.append("prompt", promptForGeneration);
@@ -1353,6 +1641,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       }
 
       if (isComflyResponsesImageModel(resolvedModel.actualModel, platformPreset) && hasImageInputs) {
+        updateTaskProgress(taskId, "Rendering", "上传到 API");
         const requestBody: Record<string, unknown> = {
           model: resolvedModel.actualModel,
           prompt: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio),
@@ -1373,6 +1662,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       }
 
       if (hasImageInputs) {
+        updateTaskProgress(taskId, "Rendering", "上传到 API");
         const content = [
           { type: "text", text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) },
           ...imageInputs.map(image => ({ type: "image_url", image_url: { url: image } }))
@@ -1402,6 +1692,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         }
 
         const json = await res.json();
+        updateTaskProgress(taskId, "Rendering", "解析结果");
         const extracted = extractImageResultFromResponse(json);
         if (!extracted) throw new Error("Could not extract image from image-aware model output");
         return finalizeGeneratedImageResult(extracted, startedAt);
@@ -1420,6 +1711,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         requestBody.quality = getOpenAIImageQuality(task);
       }
 
+      updateTaskProgress(taskId, "Rendering", "请求 API");
       const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
         method: "POST",
         headers: {
@@ -1438,6 +1730,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
     }
 
     if (hasImageInputs) {
+      updateTaskProgress(taskId, "Rendering", "上传到 API");
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
         { text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) }
       ];
@@ -1469,6 +1762,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       }
 
       const json = await res.json();
+      updateTaskProgress(taskId, "Rendering", "解析结果");
       const responseParts = json.candidates?.[0]?.content?.parts || [];
       const inlineImagePart = responseParts.find((part: any) => part.inlineData?.data);
       if (!inlineImagePart?.inlineData?.data) {
@@ -1494,6 +1788,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       if (geminiAspectRatio) params.aspectRatio = geminiAspectRatio;
     }
 
+    updateTaskProgress(taskId, "Rendering", "请求 API");
     const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel.actualModel}:predict?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1503,12 +1798,14 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       })
     }, imageRequestTimeoutMs);
 
+    updateTaskProgress(taskId, "Rendering", "请求 API");
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Imagen Error ${res.status}: ${errText.substring(0, 100)}`);
     }
 
     const json = await res.json();
+    updateTaskProgress(taskId, "Rendering", "解析结果");
     const b64 = json.predictions?.[0]?.bytesBase64Encoded;
     if (!b64) throw new Error("No predictions returned from Imagen");
     return finalizeGeneratedImageResult({

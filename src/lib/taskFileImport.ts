@@ -1,17 +1,30 @@
 import { Task } from '@/types';
 
+export async function readImageFileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(event.target?.result as string);
+    reader.onerror = () => reject(reader.error || new Error('Failed to read image file'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function optimizeImageToDataUrl(file: File): Promise<string> {
+  const rawDataUrl = await readImageFileToDataUrl(file);
+  return optimizeDataUrlForUpload(rawDataUrl);
+}
+
+export async function optimizeDataUrlForUpload(dataUrl: string): Promise<string> {
   return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      const maxSize = 1200;
+      const maxSize = 4000;
       let width = img.width;
       let height = img.height;
       if (width > maxSize || height > maxSize) {
         const ratio = Math.min(maxSize / width, maxSize / height);
-        width *= ratio;
-        height *= ratio;
+        width = Math.max(1, Math.round(width * ratio));
+        height = Math.max(1, Math.round(height * ratio));
       }
 
       const canvas = document.createElement('canvas');
@@ -19,22 +32,23 @@ export async function optimizeImageToDataUrl(file: File): Promise<string> {
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
+        resolve(canvas.toDataURL('image/jpeg', 0.88));
       } else {
         const reader = new FileReader();
         reader.onload = (event) => resolve(event.target?.result as string);
-        reader.readAsDataURL(file);
+        fetch(dataUrl)
+          .then((response) => response.blob())
+          .then((blob) => reader.readAsDataURL(blob))
+          .catch(() => resolve(dataUrl));
       }
-      URL.revokeObjectURL(url);
     };
     img.onerror = () => {
-      const reader = new FileReader();
-      reader.onload = (event) => resolve(event.target?.result as string);
-      reader.readAsDataURL(file);
-      URL.revokeObjectURL(url);
+      resolve(dataUrl);
     };
-    img.src = url;
+    img.src = dataUrl;
   });
 }
 
@@ -43,7 +57,7 @@ export async function buildImportedTasksFromFiles(
   startIndex: number,
 ): Promise<Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'referenceImages'>>> {
   const images = files.filter((file) => file.type.startsWith('image/'));
-  const encodedImages = await Promise.all(images.map((file) => optimizeImageToDataUrl(file)));
+  const encodedImages = await Promise.all(images.map((file) => readImageFileToDataUrl(file)));
 
   return encodedImages.map((dataUrl, index) => ({
     index: startIndex + index,
@@ -56,5 +70,5 @@ export async function buildImportedTasksFromFiles(
 
 export async function buildReferenceImagesFromFiles(files: File[]) {
   const images = files.filter((file) => file.type.startsWith('image/'));
-  return Promise.all(images.map((file) => optimizeImageToDataUrl(file)));
+  return Promise.all(images.map((file) => readImageFileToDataUrl(file)));
 }

@@ -28,6 +28,7 @@ import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { MarkdownEditorDialog } from "../MarkdownEditorDialog";
 import { AspectRatio, Resolution, Task } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { optimizeDataUrlForUpload, readImageFileToDataUrl } from "@/lib/taskFileImport";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
 import { buildProjectExportPayload } from "@/lib/projectSnapshot";
 import { getTaskResultImages } from "@/lib/taskResults";
@@ -255,14 +256,11 @@ export function Sidebar({
       for (let i = 0; i < images.length; i += CHUNK_SIZE) {
         const chunk = images.slice(i, i + CHUNK_SIZE);
         const newTasks: any[] = [];
+        const chunkStartIndex = startIndex;
         
         for (const file of chunk) {
           const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
-          const reader = new FileReader();
-          const dataUrl = await new Promise<string>((resolve) => {
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsDataURL(file);
-          });
+          const dataUrl = await readImageFileToDataUrl(file);
           
           let initialDesc = "";
           if (textContents[baseName]) {
@@ -280,6 +278,16 @@ export function Sidebar({
           });
         }
         importTasks(newTasks);
+        void (async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          for (let offset = 0; offset < newTasks.length; offset += 1) {
+            const taskIndex = chunkStartIndex + offset;
+            const optimizedSourceImage = await optimizeDataUrlForUpload(newTasks[offset].sourceImage || "");
+            const latestTask = useAppStore.getState().tasks.find((item) => item.index === taskIndex && item.title === newTasks[offset].title);
+            if (!latestTask || !optimizedSourceImage || latestTask.sourceImage === optimizedSourceImage) continue;
+            useAppStore.getState().updateTask(latestTask.id, { sourceImage: optimizedSourceImage });
+          }
+        })();
         await new Promise(r => requestAnimationFrame(r)); // Yield to paint
       }
       addedCount += images.length;
@@ -574,18 +582,25 @@ export function Sidebar({
   const handleGlobalImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setProjectFields({
-            globalReferenceImages: [
-              ...globalReferenceImages,
-              event.target.result as string,
-            ],
-          });
-        }
-      };
-      reader.readAsDataURL(file);
+      void (async () => {
+        const rawDataUrl = await readImageFileToDataUrl(file);
+        const insertIndex = useAppStore.getState().globalReferenceImages.length;
+        setProjectFields({
+          globalReferenceImages: [
+            ...useAppStore.getState().globalReferenceImages,
+            rawDataUrl,
+          ],
+        });
+
+        void (async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const optimizedImage = await optimizeDataUrlForUpload(rawDataUrl);
+          const latestImages = [...useAppStore.getState().globalReferenceImages];
+          if (!latestImages[insertIndex] || latestImages[insertIndex] === optimizedImage) return;
+          latestImages[insertIndex] = optimizedImage;
+          setProjectFields({ globalReferenceImages: latestImages });
+        })();
+      })();
     }
   };
 

@@ -56,6 +56,7 @@ export interface Task {
   failedResultCount?: number;
   exportedResultIds?: string[];
   status: TaskStatus;
+  progressStage?: string;
   errorLog?: ErrorLog;
   exported?: boolean;
   aspectRatio?: AspectRatio;
