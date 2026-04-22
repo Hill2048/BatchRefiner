@@ -692,7 +692,7 @@ export const TaskCard = React.memo(function TaskCard({
                   className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-text-secondary shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
                   onClick={(e) => {
                     e.stopPropagation();
-                    downloadResultImage(activeResult.src, getTaskBatchFileName(task.index, selectedResultIndex, 'png'));
+                    downloadResultImage(activeResult.originalSrc || activeResult.src, getTaskBatchFileName(task.index, selectedResultIndex, 'png'));
                   }}
                   title="下载结果图"
                 >
