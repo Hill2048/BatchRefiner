@@ -1,17 +1,19 @@
 ﻿import * as React from 'react';
 import { CSS } from '@dnd-kit/utilities';
+import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
-import { Download, Eye, Fullscreen, GripVertical, ImageIcon, Trash2, Upload } from 'lucide-react';
+import { ChevronRight, Download, Eye, Fullscreen, GripVertical, History, ImageIcon, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Task, TaskResultImage } from '@/types';
 import { useAppStore } from '@/store';
 import { generateTaskPrompt, processSingleTask } from '@/lib/batchRunner';
-import { getBatchCountNumber, getEffectiveBatchCount, getPrimaryTaskResult, getTaskResultImages, getTaskResultProgress } from '@/lib/taskResults';
+import { getBatchCountNumber, getCurrentTaskResultImages, getEffectiveBatchCount, getHistoricalTaskResultGroups, getHistoricalTaskResultImages, getPrimaryTaskResult, getTaskResultProgress } from '@/lib/taskResults';
 import { getTaskViewerItems, getTaskViewerMainImage } from '@/lib/taskViewer';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { GenerateParamsSelector } from '../GenerateParamsSelector';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useAutoSaveTextEditor } from './useAutoSaveTextEditor';
 import { getResultImageBlob, primeTaskResultImageCache } from '@/lib/resultImageCache';
 import { getTaskBatchFileName } from '@/lib/resultImageFileName';
@@ -80,6 +82,12 @@ function formatGenerationTime(durationMs?: number) {
   return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
 }
 
+function formatHistorySessionTime(timestamp?: number) {
+  if (!timestamp) return '较早批次';
+  const date = new Date(timestamp);
+  return `${date.getMonth() + 1}-${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 function shouldShowCollapsedFade(text: string | undefined, maxLines: number) {
   const content = (text || '').trim();
   if (!content) return false;
@@ -131,7 +139,9 @@ export const TaskCard = React.memo(function TaskCard({
 
   if (!task) return null;
 
-  const resultImages = getTaskResultImages(task);
+  const resultImages = getCurrentTaskResultImages(task);
+  const historicalResultImages = getHistoricalTaskResultImages(task);
+  const historicalResultGroups = getHistoricalTaskResultGroups(task);
   const primaryResult = getPrimaryTaskResult(task);
   const resultProgress = getTaskResultProgress(task, globalBatchCount);
   const effectiveBatchCount = getEffectiveBatchCount(task, globalBatchCount);
@@ -149,24 +159,38 @@ export const TaskCard = React.memo(function TaskCard({
   });
 
   React.useEffect(() => {
-    if (resultImages.length === 0) {
+    if (isGeneratingVisual && task.activeResultSessionId && autoFocusSessionRef.current !== task.activeResultSessionId) {
+      autoFocusSessionRef.current = task.activeResultSessionId;
       setSelectedResultIndex(0);
-      setViewerMode(task.sourceImage ? 'source' : 'result');
+      setViewerMode('result');
       return;
     }
-    if (selectedResultIndex > resultImages.length - 1) {
+
+    if (resultImages.length === 0) {
       setSelectedResultIndex(0);
-    }
-    if (isGeneratingVisual) {
-      if (viewerMode !== 'result') {
+      if (!task.sourceImage) {
         setViewerMode('result');
+      } else if (!isGeneratingVisual && viewerMode !== 'source') {
+        setViewerMode('source');
       }
       return;
     }
-    if (viewerMode !== 'source') {
+    if (isGeneratingVisual) {
+      const latestIndex = resultImages.length - 1;
+      if (selectedResultIndex !== latestIndex && viewerMode === 'result') {
+        setSelectedResultIndex(latestIndex);
+      }
+    } else if (selectedResultIndex > resultImages.length - 1) {
+      setSelectedResultIndex(0);
+    }
+    if (!task.sourceImage && viewerMode === 'source') {
+      setViewerMode('result');
+      return;
+    }
+    if (!isGeneratingVisual && viewerMode !== 'source') {
       setViewerMode('result');
     }
-  }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage, isGeneratingVisual]);
+  }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage, isGeneratingVisual, task.activeResultSessionId]);
 
   React.useEffect(() => {
     void primeTaskResultImageCache(
@@ -192,6 +216,14 @@ export const TaskCard = React.memo(function TaskCard({
   const cardRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const dragDepthRef = React.useRef(0);
+  const referenceDragIndexRef = React.useRef<number | null>(null);
+  const autoFocusSessionRef = React.useRef<string | null>(null);
+  const [referenceSortMode, setReferenceSortMode] = React.useState(false);
+  const [previewReferenceImage, setPreviewReferenceImage] = React.useState<{
+    src: string;
+    title: string;
+    fileName: string;
+  } | null>(null);
 
   React.useEffect(() => {
     const handleScroll = (e: CustomEvent) => {
@@ -203,6 +235,19 @@ export const TaskCard = React.memo(function TaskCard({
     return () => window.removeEventListener('scroll-to-task' as any, handleScroll);
   }, [task.id]);
 
+  React.useEffect(() => {
+    if (!previewReferenceImage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewReferenceImage(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewReferenceImage]);
+
   const updateReferenceImage = (index: number, value: string) => {
     const nextRefs = [...(task.referenceImages || [])];
     nextRefs[index] = value;
@@ -211,6 +256,33 @@ export const TaskCard = React.memo(function TaskCard({
 
   const appendReferenceImage = (value: string) => {
     updateTask(task.id, { referenceImages: [...(task.referenceImages || []), value] });
+  };
+
+  const beginReferenceDrag = (event: React.DragEvent<HTMLElement>, index: number) => {
+    if (!referenceSortMode) {
+      event.preventDefault();
+      return;
+    }
+    referenceDragIndexRef.current = index;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const reorderReferenceImages = (fromIndex: number, toIndex: number) => {
+    const currentImages = [...(task.referenceImages || [])];
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= currentImages.length ||
+      toIndex >= currentImages.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+
+    const [moved] = currentImages.splice(fromIndex, 1);
+    currentImages.splice(toIndex, 0, moved);
+    updateTask(task.id, { referenceImages: currentImages });
   };
 
   const readImageFile = (file: File, onLoad: (result: string) => void) => {
@@ -343,7 +415,8 @@ export const TaskCard = React.memo(function TaskCard({
     }));
     const visibleThumbnailItems = [...thumbnailItems, ...placeholderItems];
     const hasThumbnailStrip = visibleThumbnailItems.length > 0;
-    const shouldAnimateViewerImage = isGeneratingVisual && viewerMode === 'result';
+    const hasResolvedActiveResult = viewerMode === 'result' && Boolean(activeResult?.src) && selectedResultIndex < resultImages.length;
+    const shouldAnimateViewerImage = isGeneratingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
 
     return (
       <div className="overflow-hidden rounded-t-[22px] rounded-b-none bg-[#FBFAF7] p-0 transition-all duration-300 ease-out">
@@ -371,6 +444,16 @@ export const TaskCard = React.memo(function TaskCard({
                 src={mainImageSrc}
                 alt={task.title}
                 className={`block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.018] blur-[16px] saturate-[0.88]' : isGeneratingVisual ? 'scale-[1.008]' : ''}`}
+                draggable={false}
+                onDragStart={preventNativeImageDrag}
+              />
+            </div>
+          ) : shouldAnimateViewerImage && task.sourceImage ? (
+            <div className="relative z-0 flex h-full w-full items-center justify-center">
+              <img
+                src={task.sourceImage}
+                alt={task.title}
+                className="block h-full w-full scale-[1.08] object-cover blur-[26px] saturate-[0.82] opacity-90"
                 draggable={false}
                 onDragStart={preventNativeImageDrag}
               />
@@ -505,6 +588,84 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
+              {historicalResultImages.length > 0 ? (
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white/80 px-2.5 text-[10.5px] text-text-secondary shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
+                        onClick={(e) => e.stopPropagation()}
+                        title="查看历史结果"
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        <span>历史 {historicalResultImages.length}</span>
+                        <ChevronRight className="h-3 w-3 opacity-60" />
+                      </button>
+                    }
+                  />
+                  <PopoverContent className="w-[min(360px,calc(100vw-2rem))] rounded-2xl border-border bg-card p-3 shadow-lg" align="end">
+                    <div className="flex flex-col gap-2">
+                      <div className="text-[12px] font-medium text-text-primary">历史结果</div>
+                      <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+                        {historicalResultGroups.map((group, groupIndex) => (
+                          <div key={group.sessionId} className="rounded-xl border border-black/6 bg-[#FCFBF8] p-2.5">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="text-[11px] font-medium text-black/72">
+                                批次 {historicalResultGroups.length - groupIndex}
+                              </div>
+                              <div className="text-[10px] text-black/45">
+                                {formatHistorySessionTime(group.createdAt)} / {group.images.length} 张
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-4 gap-2">
+                              {group.images.map((image, index) => (
+                                <div
+                                  key={image.id}
+                                  className="group/history relative aspect-[4/3] overflow-hidden rounded-xl border border-black/8 bg-white"
+                                >
+                                  <button
+                                    type="button"
+                                    className="block h-full w-full"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPreviewReferenceImage({
+                                        src: image.originalSrc || image.src,
+                                        title: `历史结果预览`,
+                                        fileName: getTaskBatchFileName(task.index, index, 'png'),
+                                      });
+                                    }}
+                                    title={`查看历史结果 ${index + 1}`}
+                                  >
+                                    <img
+                                      src={image.previewSrc || image.src}
+                                      alt={`历史结果 ${index + 1}`}
+                                      className="h-full w-full object-cover transition-transform duration-200 group-hover/history:scale-[1.03]"
+                                      draggable={false}
+                                      onDragStart={preventNativeImageDrag}
+                                    />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="absolute bottom-1 right-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/62 text-white opacity-0 transition-all hover:bg-black/76 group-hover/history:opacity-100"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      downloadResultImage(image.originalSrc || image.src, getTaskBatchFileName(task.index, index, 'png'));
+                                    }}
+                                    title="下载历史结果"
+                                  >
+                                    <Download className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : null}
               {viewerMode === 'result' && activeResult?.src ? (
                 <button
                   type="button"
@@ -616,7 +777,7 @@ export const TaskCard = React.memo(function TaskCard({
           ${isListMode ? 'border-b sm:border-b-0 sm:border-r border-border/40' : 'border-b border-border/40'}
           ${isListMode ? 'w-full h-[180px] sm:w-[180px] sm:h-full' : 'flex-1 w-full aspect-[4/3] rounded-t-2xl'}`}
         >
-          {isGeneratingVisual && (
+          {isGeneratingVisual && !primaryResult?.src && (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
               <div className={`absolute inset-0 ${primaryResult?.src ? 'bg-white/[0.05] backdrop-blur-[1.5px]' : 'bg-white/14 backdrop-blur-[10px]'}`} />
               <div className={`absolute inset-0 animate-[mist-breathe_3s_ease-in-out_infinite] ${primaryResult?.src ? 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.18),transparent_24%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.12),transparent_24%)]' : 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_30%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.24),transparent_28%)]'}`} />
@@ -737,22 +898,54 @@ export const TaskCard = React.memo(function TaskCard({
 
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="text-[9.45px] font-bold text-black/42 uppercase tracking-wider">参考图</span>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {task.referenceImages?.map((img, i) => (
-                      <div key={i} className="relative h-10 w-10 overflow-hidden rounded-lg bg-white shadow-sm group/ref">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {task.referenceImages?.map((img, i) => (
+                      <div
+                        key={i}
+                        className={`relative h-14 w-14 overflow-hidden rounded-[14px] bg-white shadow-sm ring-1 transition-all duration-200 group/ref ${
+                          referenceSortMode
+                            ? 'cursor-grab ring-[#D97757]/45 hover:-translate-y-[1px] hover:shadow-[0_8px_18px_rgba(217,119,87,0.18)]'
+                            : 'ring-black/6'
+                        }`}
+                        draggable={referenceSortMode}
+                        onDragStart={(e) => beginReferenceDrag(e, i)}
+                        onDragOver={(e) => {
+                          if (!referenceSortMode) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDrop={(e) => {
+                          if (!referenceSortMode) return;
+                          e.preventDefault();
+                          const fromIndex = referenceDragIndexRef.current;
+                          if (fromIndex == null) return;
+                          reorderReferenceImages(fromIndex, i);
+                          referenceDragIndexRef.current = null;
+                        }}
+                        onDragEnd={() => {
+                          referenceDragIndexRef.current = null;
+                        }}
+                      >
                         <img
                           src={img}
-                          className="h-full w-full object-cover cursor-pointer"
+                          className="h-full w-full object-cover transition-transform duration-200 group-hover/ref:scale-[1.04]"
                           alt="Ref"
-                          draggable={false}
-                          onDragStart={preventNativeImageDrag}
-                          onClick={(e) => { e.stopPropagation(); window.open(img, '_blank'); }}
+                          draggable={referenceSortMode}
+                          onDragStart={(e) => {
+                            if (!referenceSortMode) {
+                              preventNativeImageDrag(e);
+                              return;
+                            }
+                            beginReferenceDrag(e as React.DragEvent<HTMLElement>, i);
+                          }}
                         />
-                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/ref:opacity-100 transition-opacity backdrop-blur-[1px]">
-                          <div className="absolute inset-x-0 bottom-0 grid grid-cols-2 gap-px bg-white/15">
+                        <div className={`absolute inset-0 transition-all duration-200 ${referenceSortMode ? 'opacity-100' : 'opacity-0 group-hover/ref:opacity-100'}`}>
+                          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(19,18,17,0.05),rgba(19,18,17,0.16))]" />
+                          <div className="absolute left-1/2 top-1/2 grid w-[46px] -translate-x-1/2 -translate-y-1/2 grid-cols-2 gap-1.5 rounded-[12px] bg-[rgba(48,44,40,0.78)] p-1.5 shadow-[0_10px_22px_rgba(0,0,0,0.18)] backdrop-blur-sm">
                             <button
                               type="button"
-                              className="h-5 bg-black/60 hover:bg-black/75 text-white text-[9px] font-medium"
+                              className="inline-flex h-4.5 w-4.5 items-center justify-center rounded-[8px] bg-[rgba(33,31,29,0.9)] text-white transition-colors hover:bg-[rgba(33,31,29,0.98)]"
+                              title="替换参考图"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 const input = document.createElement('input');
@@ -766,28 +959,64 @@ export const TaskCard = React.memo(function TaskCard({
                                 input.click();
                               }}
                             >
-                              换
+                              <Upload className="h-2.5 w-2.5" strokeWidth={2.2} />
                             </button>
                             <button
                               type="button"
-                              className="h-5 bg-black/60 hover:bg-red-500/85 text-white text-[9px] font-medium"
+                              className="inline-flex h-4.5 w-4.5 items-center justify-center rounded-[8px] bg-[linear-gradient(180deg,rgba(237,105,90,0.98),rgba(215,84,69,0.98))] text-white transition-colors hover:brightness-[0.96]"
+                              title="删除参考图"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 updateTask(task.id, { referenceImages: task.referenceImages.filter((_, idx) => idx !== i) });
                               }}
                             >
-                              删
+                              <Trash2 className="h-2.5 w-2.5" strokeWidth={2.2} />
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex h-4.5 w-4.5 items-center justify-center rounded-[8px] bg-[rgba(33,31,29,0.9)] text-white transition-colors hover:bg-[rgba(33,31,29,0.98)]"
+                              title="预览参考图"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPreviewReferenceImage({
+                                  src: img,
+                                  title: '参考图预览',
+                                  fileName: `reference-${task.index}-${i + 1}.png`,
+                                });
+                              }}
+                            >
+                              <Eye className="h-2.5 w-2.5" strokeWidth={2.2} />
+                            </button>
+                            <button
+                              type="button"
+                              className={`inline-flex h-4.5 w-4.5 items-center justify-center rounded-[8px] text-white transition-colors ${
+                                referenceSortMode
+                                  ? 'bg-[rgba(217,119,87,0.94)] hover:bg-[rgba(217,119,87,1)]'
+                                  : 'bg-[rgba(255,255,255,0.16)] hover:bg-[rgba(255,255,255,0.24)]'
+                              }`}
+                              title={referenceSortMode ? '结束拖拽排序' : '拖拽排序参考图'}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setReferenceSortMode((value) => !value);
+                              }}
+                            >
+                              <GripVertical className="h-2.5 w-2.5" strokeWidth={2.2} />
                             </button>
                           </div>
                         </div>
+                        {referenceSortMode ? (
+                          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-[rgba(217,119,87,0.9)] px-1 py-[1px] text-center text-[7px] font-medium leading-none text-white">
+                            拖拽排序
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                     <button
                       type="button"
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-black/16 bg-white/80 text-black/45 transition-colors hover:bg-white"
+                      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[14px] border border-dashed border-black/16 bg-white/80 text-black/45 transition-colors hover:bg-white"
                       onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
                     >
-                      <Upload className="h-3.5 w-3.5 opacity-70" strokeWidth={2} />
+                      <Upload className="h-4 w-4 opacity-70" strokeWidth={2} />
                     </button>
                     <input
                       type="file"
@@ -923,6 +1152,56 @@ export const TaskCard = React.memo(function TaskCard({
           </div>
         ) : null}
       </div>
+      {previewReferenceImage ? createPortal(
+        <div className="fixed inset-0 z-[999] bg-[rgba(20,19,17,0.78)] backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="flex h-full w-full items-center justify-center p-3 md:p-4">
+            <div className="relative flex h-full max-h-[960px] min-h-0 w-full max-w-[1440px] flex-col overflow-hidden rounded-[28px] border border-white/12 bg-[rgba(24,23,21,0.82)] shadow-[0_20px_80px_rgba(0,0,0,0.28)]">
+              <div className="flex items-center justify-between gap-4 border-b border-white/8 px-5 py-4 md:px-6">
+                <div className="min-w-0">
+                  <div className="truncate font-serif text-[18.9px] tracking-tight text-[#F2EFEB]">{previewReferenceImage.title}</div>
+                  <div className="mt-1 text-[11.55px] text-white/55">{task.title}</div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/6 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                    onClick={() => triggerDirectDownload(previewReferenceImage.src, previewReferenceImage.fileName)}
+                    title="下载图片"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/6 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                    onClick={() => setPreviewReferenceImage(null)}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-3 md:px-4 md:py-4">
+                <div className="relative flex min-h-0 h-full w-full items-center justify-center overflow-hidden rounded-[24px] border border-white/8 bg-transparent">
+                  <img
+                    src={previewReferenceImage.src}
+                    alt={previewReferenceImage.title}
+                    className="max-h-full max-w-full select-none object-contain"
+                    draggable={false}
+                    onDragStart={preventNativeImageDrag}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-white/8 px-5 py-3 text-[11.55px] text-white/50 md:px-6">
+                <span>查看单张参考图</span>
+                <span>ESC 关闭</span>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      ) : null}
     </Card>
   );
 });

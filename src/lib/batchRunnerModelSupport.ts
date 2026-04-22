@@ -81,6 +81,28 @@ export function normalizeAspectRatio(value?: AspectRatio) {
   return (value || 'auto').trim();
 }
 
+function gcd(a: number, b: number) {
+  let x = Math.abs(Math.round(a));
+  let y = Math.abs(Math.round(b));
+  while (y !== 0) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x || 1;
+}
+
+function reduceAspectRatio(width: number, height: number) {
+  const divisor = gcd(width, height);
+  return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+export function resolveAutoAspectRatio(aspectRatio: string, sourceWidth?: number, sourceHeight?: number) {
+  if (aspectRatio !== 'auto') return aspectRatio;
+  if (!sourceWidth || !sourceHeight) return aspectRatio;
+  return reduceAspectRatio(sourceWidth, sourceHeight);
+}
+
 function getComflyModelResolutionSupport(modelName: string, resolution: string): ResolutionSupport {
   const normalized = getNormalizedModelName(normalizeComflyImageModelAlias(modelName));
 
@@ -303,21 +325,35 @@ function isExactImage2Size(resolution: string) {
   return Boolean(parseCustomImageSize(resolution));
 }
 
-export function getRequestedImageSize(modelName: string, aspectRatio: string, resolution: string) {
+export function getRequestedImageSize(
+  modelName: string,
+  aspectRatio: string,
+  resolution: string,
+  sourceWidth?: number,
+  sourceHeight?: number,
+) {
+  const resolvedAspectRatio = resolveAutoAspectRatio(aspectRatio, sourceWidth, sourceHeight);
   if (isComflyResponsesImageModel(modelName, 'comfly-chat') || isFlexibleGptImage2Model(modelName)) {
-    return parseCustomImageSize(resolution) || getImage2ImageSize(aspectRatio, resolution);
+    return parseCustomImageSize(resolution) || getImage2ImageSize(resolvedAspectRatio, resolution);
   }
 
-  return getOpenAIImageSize(aspectRatio);
+  return getOpenAIImageSize(resolvedAspectRatio);
 }
 
-export function buildComflyResolutionFields(modelName: string, resolution: string, aspectRatio: string) {
+export function buildComflyResolutionFields(
+  modelName: string,
+  resolution: string,
+  aspectRatio: string,
+  sourceWidth?: number,
+  sourceHeight?: number,
+) {
+  const resolvedAspectRatio = resolveAutoAspectRatio(aspectRatio, sourceWidth, sourceHeight);
   const payload: Record<string, string> = { model: modelName };
 
   if (isComflyResponsesImageModel(modelName, 'comfly-chat')) {
-    payload.size = getRequestedImageSize(modelName, aspectRatio, resolution);
-    if (aspectRatio !== 'auto') {
-      payload.aspect_ratio = aspectRatio;
+    payload.size = getRequestedImageSize(modelName, resolvedAspectRatio, resolution);
+    if (resolvedAspectRatio !== 'auto') {
+      payload.aspect_ratio = resolvedAspectRatio;
     }
     return payload;
   }
@@ -327,8 +363,8 @@ export function buildComflyResolutionFields(modelName: string, resolution: strin
     payload.size = resolution;
   }
 
-  if (aspectRatio !== 'auto') {
-    payload.aspect_ratio = aspectRatio;
+  if (resolvedAspectRatio !== 'auto') {
+    payload.aspect_ratio = resolvedAspectRatio;
   }
 
   return payload;

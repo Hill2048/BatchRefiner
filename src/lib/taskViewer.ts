@@ -1,5 +1,5 @@
 import type { Task } from '@/types';
-import { getPrimaryTaskResult, getTaskResultImages } from './taskResults';
+import { getCurrentTaskResultImages, getPrimaryTaskResult } from './taskResults';
 
 export type TaskViewerMode = 'result' | 'source';
 
@@ -13,7 +13,7 @@ export interface TaskViewerItem {
 export function getTaskViewerItems(task: Task): TaskViewerItem[] {
   return [
     ...(task.sourceImage ? [{ id: 'source', src: task.sourceImage, type: 'source' as const }] : []),
-    ...getTaskResultImages(task).map((result, index) => ({
+    ...getCurrentTaskResultImages(task).map((result, index) => ({
       id: result.id,
       src: result.src,
       type: 'result' as const,
@@ -26,5 +26,5 @@ export function getTaskViewerMainImage(task: Task, viewerMode: TaskViewerMode, s
   if (viewerMode === 'source') {
     return task.sourceImage;
   }
-  return getTaskResultImages(task)[selectedResultIndex]?.src || getPrimaryTaskResult(task)?.src;
+  return getCurrentTaskResultImages(task)[selectedResultIndex]?.src || getPrimaryTaskResult(task)?.src;
 }

@@ -1,7 +1,7 @@
 import { useAppStore } from '@/store';
 import { ChevronLeft, ChevronRight, GripVertical, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getTaskResultImages } from '@/lib/taskResults';
+import { getCurrentTaskResultImages } from '@/lib/taskResults';
 
 function preventNativeImageDrag(e: React.DragEvent<HTMLImageElement>) {
   e.preventDefault();
@@ -40,7 +40,7 @@ export function Lightbox() {
 
   const task = tasks.find((item) => item.id === lightboxTaskId);
   const taskIndex = useMemo(() => tasks.findIndex((item) => item.id === lightboxTaskId), [tasks, lightboxTaskId]);
-  const resultImages = task ? getTaskResultImages(task) : [];
+  const resultImages = task ? getCurrentTaskResultImages(task) : [];
   const currentResultImage = resultImages[lightboxImageIndex] || resultImages[0];
   const hasResultGallery = resultImages.length > 1;
   const hasCompareView = Boolean(task?.sourceImage && currentResultImage);

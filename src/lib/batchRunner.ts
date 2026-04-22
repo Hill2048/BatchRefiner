@@ -118,6 +118,28 @@ function normalizeAspectRatio(value?: AspectRatio) {
   return (value || "auto").trim();
 }
 
+function gcd(a: number, b: number) {
+  let x = Math.abs(Math.round(a));
+  let y = Math.abs(Math.round(b));
+  while (y !== 0) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x || 1;
+}
+
+function reduceAspectRatio(width: number, height: number) {
+  const divisor = gcd(width, height);
+  return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+function resolveAspectRatioForImage2(task: Task, aspectRatio: string, sourceDimensions?: ImageDimensions | null) {
+  if (aspectRatio !== "auto") return aspectRatio;
+  if (!sourceDimensions?.width || !sourceDimensions?.height) return aspectRatio;
+  return reduceAspectRatio(sourceDimensions.width, sourceDimensions.height);
+}
+
 function getPlatformPreset() {
   return (useAppStore.getState().platformPreset || "comfly-chat") as PlatformPreset;
 }
@@ -318,6 +340,19 @@ function appendSoftResolutionHint(prompt: string, resolution: string, aspectRati
   return `${prompt}\n\n分辨率：${resolution}\n比例：${aspectRatio}\n尽量贴近以上尺寸要求。`;
 }
 
+function buildPromptGenerationText(task: Task, globalSkillText: string) {
+  return [
+    "[Skill]",
+    (globalSkillText || "N/A").trim() || "N/A",
+    "",
+    "[Generation Instruction]",
+    (task.description || "N/A").trim() || "N/A",
+    "",
+    "[Image Inputs]",
+    "Please generate the final image prompt mainly based on the provided images, skill, and generation instruction. Do not add explanation.",
+  ].join("\n");
+}
+
 function buildImageAwarePrompt(task: Task, promptText: string, imageCount: number, resolution: string, aspectRatio: string) {
   return [
     buildGenerationConstraints(task, resolution, aspectRatio),
@@ -443,7 +478,7 @@ async function measureImageDimensions(src: string): Promise<ImageDimensions | nu
   });
 }
 
-async function createTaskResultImage(result: GeneratedImageResult): Promise<TaskResultImage> {
+async function createTaskResultImage(result: GeneratedImageResult, sessionId?: string): Promise<TaskResultImage> {
   const dimensions = await measureImageDimensions(result.src);
   void primeTaskResultImageCache([result.src, result.previewSrc, result.originalSrc]);
   return {
@@ -452,6 +487,7 @@ async function createTaskResultImage(result: GeneratedImageResult): Promise<Task
     previewSrc: result.previewSrc,
     originalSrc: result.originalSrc,
     sourceType: result.sourceType,
+    sessionId,
     width: dimensions?.width,
     height: dimensions?.height,
     generationTimeMs: result.generationTimeMs,
@@ -467,9 +503,13 @@ function finalizeGeneratedImageResult(result: GeneratedImageResult, startedAt: n
 }
 
 function buildTaskImageUpdatePayload(task: Task, images: TaskResultImage[], failedCount: number) {
+  const historicalImages = task.activeResultSessionId
+    ? (task.resultImages || []).filter((image) => image.sessionId !== task.activeResultSessionId)
+    : (task.resultImages || []);
+  const mergedImages = [...images, ...historicalImages];
   const primaryResult = images[0];
   return {
-    resultImages: images,
+    resultImages: mergedImages,
     resultImage: primaryResult?.src,
     resultImagePreview: primaryResult?.previewSrc,
     resultImageOriginal: primaryResult?.originalSrc,
@@ -885,8 +925,15 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
       if (mode === "all" || mode === "images") {
         const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
         const renderablePromptText = currentTask ? getRenderableTaskPrompt(currentTask) : null;
-        if (currentTask && renderablePromptText && !(currentTask.resultImages?.length)) {
-          useAppStore.getState().updateTask(task.id, { status: "Rendering", errorLog: undefined });
+        if (currentTask && renderablePromptText) {
+          const sessionId = crypto.randomUUID();
+          useAppStore.getState().updateTask(task.id, {
+            activeResultSessionId: sessionId,
+            requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
+            failedResultCount: 0,
+            status: "Rendering",
+            errorLog: undefined,
+          });
           const generatedBatch = await retryWrap(() =>
             runImageGeneration(task.id, {
               onImage: (_image, images, failedCount) => {
@@ -897,8 +944,9 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
           if (generatedBatch.images.length === 0) {
             throw createStageError("没有成功返回任何结果图。", "Image Generation");
           }
+          const latestTask = useAppStore.getState().tasks.find((item) => item.id === task.id) || currentTask;
           useAppStore.getState().updateTask(task.id, {
-            ...buildTaskImageUpdatePayload(currentTask, generatedBatch.images, generatedBatch.failedCount),
+            ...buildTaskImageUpdatePayload(latestTask, generatedBatch.images, generatedBatch.failedCount),
             status: "Success",
             errorLog: generatedBatch.failedCount > 0 ? {
               message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
@@ -906,10 +954,8 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
               stage: "Image Generation",
             } : undefined,
           });
-        } else if (currentTask && !renderablePromptText && !(currentTask.resultImages?.length)) {
+        } else if (currentTask && !renderablePromptText) {
           throw getMissingPromptError();
-        } else if (currentTask && currentTask.resultImages?.length) {
-          useAppStore.getState().updateTask(task.id, { status: "Success" });
         }
       } else {
         useAppStore.getState().updateTask(task.id, { status: "Success" });
@@ -974,7 +1020,14 @@ export async function processSingleTask(taskId: string) {
       throw getMissingPromptError();
     }
 
-    store.updateTask(taskId, { status: "Rendering", errorLog: undefined });
+    const sessionId = crypto.randomUUID();
+    store.updateTask(taskId, {
+      activeResultSessionId: sessionId,
+      requestedBatchCount: getEffectiveTaskBatchCount(currentTask),
+      failedResultCount: 0,
+      status: "Rendering",
+      errorLog: undefined,
+    });
     const generatedBatch = await retryWrap(() =>
       runImageGeneration(taskId, {
         onImage: (_image, images, failedCount) => {
@@ -985,8 +1038,9 @@ export async function processSingleTask(taskId: string) {
     if (generatedBatch.images.length === 0) {
       throw createStageError("没有成功返回任何结果图。", "Image Generation");
     }
+    const latestTask = useAppStore.getState().tasks.find((item) => item.id === taskId) || currentTask;
     store.updateTask(taskId, {
-      ...buildTaskImageUpdatePayload(currentTask, generatedBatch.images, generatedBatch.failedCount),
+      ...buildTaskImageUpdatePayload(latestTask, generatedBatch.images, generatedBatch.failedCount),
       errorLog: generatedBatch.failedCount > 0 ? {
         message: `部分成功：已返回 ${generatedBatch.images.length}/${getBatchCountNumber(getEffectiveTaskBatchCount(currentTask))} 张结果图。`,
         time: Date.now(),
@@ -1007,14 +1061,9 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
   const task = store.tasks.find(t => t.id === taskId);
   if (!task) throw new Error("Task not found");
 
-  const resolution = getEffectiveResolution(task);
-  const aspectRatio = getEffectiveAspectRatio(task);
+  const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
   const systemPrompt = "你负责根据用户输入整理出一段可直接用于生图或改图的最终提示词，不强制英文，不额外解释。";
-  const contentMsg = [
-    `[Global Skill (Style Constraint)]\n${store.globalSkillText || "N/A"}`,
-    `[Global Target (Action Constraint)]\n${store.globalTargetText || "N/A"}`,
-    buildGenerationConstraints(task, resolution, aspectRatio),
-  ].join("\n\n");
+  const contentMsg = buildPromptGenerationText(task, store.globalSkillText || "");
   const platformPreset = getPlatformPreset();
   const isYunwuGptImage = isYunwuGptImageModel(store.imageModel, platformPreset);
   const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuGptImage;
@@ -1023,11 +1072,21 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
   try {
     if (isGeminiGateway) {
       const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
+      const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
+      imageInputs.forEach(image => {
+        const mimeTypeMatch = image.match(/^data:(image\/[^;]+);base64,/i);
+        parts.push({
+          inlineData: {
+            mimeType: mimeTypeMatch?.[1] || "image/jpeg",
+            data: dataUrlToBase64(image)
+          }
+        });
+      });
       const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${store.textModel}:generateContent`, {
         method: "POST",
         headers: buildGeminiGatewayHeaders(store.apiKey),
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: contentMsg }] }],
+          contents: [{ role: "user", parts }],
           generationConfig: {
             temperature: 0.4
           }
@@ -1046,6 +1105,12 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
     if (isCustomOpenAI && store.apiBaseUrl && store.apiKey) {
       let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
+      const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+        { type: "text", text: contentMsg }
+      ];
+      imageInputs.forEach(image => {
+        userContent.push({ type: "image_url", image_url: { url: image } });
+      });
 
       const res = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
         method: "POST",
@@ -1057,7 +1122,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
           model: store.textModel,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: contentMsg }
+            { role: "user", content: userContent }
           ]
         })
       }, PROMPT_REQUEST_TIMEOUT_MS);
@@ -1076,12 +1141,23 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       throw new Error("Missing built-in Gemini API Key. For public deployments, use the in-app API settings instead of bundling a key into the frontend.");
     }
 
+    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
+    imageInputs.forEach(image => {
+      const mimeTypeMatch = image.match(/^data:(image\/[^;]+);base64,/i);
+      parts.push({
+        inlineData: {
+          mimeType: mimeTypeMatch?.[1] || "image/jpeg",
+          data: dataUrlToBase64(image)
+        }
+      });
+    });
+
     const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${store.textModel || "gemini-2.0-flash"}:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ parts: [{ text: contentMsg }] }]
+        contents: [{ parts }]
       })
     }, PROMPT_REQUEST_TIMEOUT_MS);
 
@@ -1118,13 +1194,15 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
   const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
   const hasImageInputs = imageInputs.length > 0;
   const resolvedModel = resolveImageModel(store.imageModel, resolution, platformPreset);
+  const sourceImageDimensions = task.sourceImage ? await measureImageDimensions(task.sourceImage) : null;
+  const resolvedAspectRatio = resolveAspectRatioForImage2(task, aspectRatio, sourceImageDimensions);
   useAppStore.getState().updateTask(taskId, {
     lastUsedImageModel: resolvedModel.actualModel
   });
 
   let promptForGeneration = effectivePromptText;
   if (resolvedModel.resolutionSupport === "soft") {
-    promptForGeneration = appendSoftResolutionHint(promptForGeneration, resolution, aspectRatio);
+    promptForGeneration = appendSoftResolutionHint(promptForGeneration, resolution, resolvedAspectRatio);
   } else if (resolvedModel.resolutionSupport === "none") {
     throw createStageError("当前平台或模型不支持所选分辨率，请切换模型或改用较低分辨率。", "Image Generation");
   }
@@ -1137,7 +1215,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
     if (isGeminiGateway) {
       const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
-        { text: hasImageInputs ? buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio) : promptForGeneration }
+        { text: hasImageInputs ? buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) : promptForGeneration }
       ];
 
       if (hasImageInputs) {
@@ -1159,7 +1237,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         }
       };
 
-      const geminiAspectRatio = getGeminiAspectRatio(aspectRatio);
+      const geminiAspectRatio = getGeminiAspectRatio(resolvedAspectRatio);
       if (geminiAspectRatio) {
         (generationConfig.imageConfig as Record<string, unknown>).aspectRatio = geminiAspectRatio;
       }
@@ -1198,7 +1276,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
-      const yunwuSize = getYunwuDocumentedImageSize(aspectRatio);
+      const yunwuSize = getYunwuDocumentedImageSize(resolvedAspectRatio);
 
       if (hasImageInputs) {
         const formData = new FormData();
@@ -1254,7 +1332,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         const formData = new FormData();
         formData.append("model", resolvedModel.actualModel);
         formData.append("prompt", promptForGeneration);
-        formData.append("size", getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution));
+        formData.append("size", getRequestedImageSize(resolvedModel.actualModel, resolvedAspectRatio, resolution));
         formData.append("quality", getOpenAIImageQuality(task));
         formData.append("n", "1");
 
@@ -1277,10 +1355,10 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       if (isComflyResponsesImageModel(resolvedModel.actualModel, platformPreset) && hasImageInputs) {
         const requestBody: Record<string, unknown> = {
           model: resolvedModel.actualModel,
-          prompt: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio),
+          prompt: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio),
           image: imageInputs,
         };
-        Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, aspectRatio));
+        Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, resolvedAspectRatio));
 
         const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
           method: "POST",
@@ -1296,7 +1374,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
       if (hasImageInputs) {
         const content = [
-          { type: "text", text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio) },
+          { type: "text", text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) },
           ...imageInputs.map(image => ({ type: "image_url", image_url: { url: image } }))
         ];
 
@@ -1306,7 +1384,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         };
 
         if (platformPreset === "comfly-chat") {
-          Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, aspectRatio));
+          Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, resolvedAspectRatio));
         }
 
         const res = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
@@ -1336,9 +1414,9 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       };
 
       if (platformPreset === "comfly-chat") {
-        Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, aspectRatio));
+        Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, resolvedAspectRatio));
       } else if (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e")) {
-        requestBody.size = getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution);
+        requestBody.size = getRequestedImageSize(resolvedModel.actualModel, resolvedAspectRatio, resolution);
         requestBody.quality = getOpenAIImageQuality(task);
       }
 
@@ -1361,7 +1439,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
     if (hasImageInputs) {
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
-        { text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio) }
+        { text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) }
       ];
 
       imageInputs.forEach(image => {
@@ -1412,7 +1490,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
     if (resolvedModel.resolutionSupport === "hard") {
       params.sampleImageSize = getGeminiSampleImageSize(resolution);
-      const geminiAspectRatio = getGeminiAspectRatio(aspectRatio);
+      const geminiAspectRatio = getGeminiAspectRatio(resolvedAspectRatio);
       if (geminiAspectRatio) params.aspectRatio = geminiAspectRatio;
     }
 
@@ -1455,7 +1533,7 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
   for (let index = 0; index < targetBatchCount; index += 1) {
     try {
       const generatedImage = await runSingleImageGeneration(taskId);
-      const createdImage = await createTaskResultImage(generatedImage);
+      const createdImage = await createTaskResultImage(generatedImage, task.activeResultSessionId);
       images.push(createdImage);
       options.onImage?.(createdImage, [...images], failedCount);
     } catch (error) {

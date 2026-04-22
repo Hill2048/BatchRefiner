@@ -26,6 +26,7 @@ export interface TaskResultImage {
   previewSrc?: string;
   originalSrc?: string;
   sourceType?: 'preview' | 'original' | 'base64';
+  sessionId?: string;
   width?: number;
   height?: number;
   generationTimeMs?: number;
@@ -49,6 +50,7 @@ export interface Task {
   lastUsedImageModel?: string;
   resultImageWidth?: number;
   resultImageHeight?: number;
+  activeResultSessionId?: string;
   batchCount?: BatchCount;
   requestedBatchCount?: BatchCount;
   failedResultCount?: number;

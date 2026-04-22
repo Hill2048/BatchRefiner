@@ -48,6 +48,17 @@ test('buildComflyResolutionFields keeps explicit size for gpt-image-2', () => {
   assert.equal(fields.aspect_ratio, '3:2');
 });
 
+test('getRequestedImageSize derives image2 size from source image when aspect ratio is auto', () => {
+  const size = getRequestedImageSize('gpt-image-2', 'auto', '1K', 1200, 1600);
+  assert.equal(size, '880x1184');
+});
+
+test('buildComflyResolutionFields writes derived source aspect ratio when auto is selected', () => {
+  const fields = buildComflyResolutionFields('gpt-image-2', '1K', 'auto', 1200, 1600);
+  assert.equal(fields.size, '880x1184');
+  assert.equal(fields.aspect_ratio, '3:4');
+});
+
 test('getRequestedImageSize keeps gpt-image-2 sizes within 3840 edge limit', () => {
   const size = getRequestedImageSize('gpt-image-2', '1:1', '4K');
   const [widthText, heightText] = size.split('x');

@@ -58,6 +58,7 @@ export function normalizeResultImages(task: Task): TaskResultImage[] {
   if (task.resultImages?.length) {
     return task.resultImages.map((result) => ({
       ...result,
+      sessionId: result.sessionId,
       createdAt: result.createdAt || task.updatedAt || task.createdAt || Date.now(),
     }));
   }
@@ -71,6 +72,7 @@ export function normalizeResultImages(task: Task): TaskResultImage[] {
       previewSrc: task.resultImagePreview,
       originalSrc: task.resultImageOriginal || task.resultImage,
       sourceType: task.resultImageSourceType,
+      sessionId: undefined,
       width: task.resultImageWidth,
       height: task.resultImageHeight,
       createdAt: task.updatedAt || task.createdAt || Date.now(),
@@ -86,6 +88,7 @@ export function migrateTask(task: Task): Task {
     requestedBatchCount: task.requestedBatchCount || task.batchCount || 'x1',
     failedResultCount: task.failedResultCount || 0,
     exportedResultIds: task.exportedResultIds || [],
+    activeResultSessionId: task.activeResultSessionId,
     resultImage: resultImages[0]?.src,
     resultImagePreview: resultImages[0]?.previewSrc,
     resultImageOriginal: resultImages[0]?.originalSrc,
@@ -139,6 +142,7 @@ export function normalizeIncomingTask(taskInfo: Omit<Task, 'id' | 'createdAt' | 
     createdAt: now,
     updatedAt: now,
     resultImages: taskInfo.resultImages || [],
+    activeResultSessionId: taskInfo.activeResultSessionId,
     requestedBatchCount: taskInfo.requestedBatchCount || taskInfo.batchCount || 'x1',
     failedResultCount: taskInfo.failedResultCount || 0,
     exportedResultIds: taskInfo.exportedResultIds || [],
