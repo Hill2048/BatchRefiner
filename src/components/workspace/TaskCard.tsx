@@ -191,7 +191,7 @@ export const TaskCard = React.memo(function TaskCard({
   ].filter(Boolean);
   const showCollapsedHeaderMedia = !isActive;
   const lowerSectionClass = 'rounded-[18px] bg-[#FCFBF8] px-3 py-2.5 transition-all duration-200 ease-out';
-  const textDisplayClass = 'rounded-[14px] bg-white/92 px-3 py-2.5 text-[12.3px] leading-relaxed text-text-secondary transition-all duration-200 ease-out hover:bg-white hover:-translate-y-[1px]';
+  const textDisplayClass = 'rounded-[14px] bg-white/92 px-3 py-2 text-[12.3px] leading-relaxed text-text-secondary transition-all duration-200 ease-out hover:bg-white hover:-translate-y-[1px]';
   const textEditorClass = 'min-h-[120px] rounded-[14px] border border-black/8 bg-white px-3 py-2.5 shadow-none transition-all duration-200 ease-out hover:border-black/12 focus-visible:border-black/18 focus-visible:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] resize-y';
   const overlayCheckboxClass = 'h-5 w-5 shrink-0 cursor-pointer rounded-[6px] border border-black/14 bg-white/80 accent-[#D97757] shadow-sm backdrop-blur-sm transition-colors hover:border-black/24';
 
@@ -391,12 +391,6 @@ export const TaskCard = React.memo(function TaskCard({
 
         <div className="shrink-0 pt-0.5">{getStatusDisplay()}</div>
       </div>
-
-      {task.description ? (
-        <div className={`${compact ? 'mt-1.5' : 'mt-2'} text-[11.55px] leading-relaxed text-text-secondary ${compact ? 'truncate' : ''}`}>
-          {task.description}
-        </div>
-      ) : null}
     </div>
   );
 
@@ -655,7 +649,7 @@ export const TaskCard = React.memo(function TaskCard({
                   </div>
                 ) : (
                   <div
-                    className={`${textDisplayClass} cursor-text line-clamp-5`}
+                    className={`${textDisplayClass} max-h-[104px] cursor-text overflow-hidden line-clamp-4`}
                     onMouseDown={activateDescEditor}
                   >
                     {task.description || '暂无生成指令'}
@@ -684,7 +678,7 @@ export const TaskCard = React.memo(function TaskCard({
                     />
                   ) : (
                     <div
-                      className={`${textDisplayClass} cursor-text font-mono text-[11.55px] text-black/70 line-clamp-7`}
+                      className={`${textDisplayClass} max-h-[116px] cursor-text overflow-hidden font-mono text-[11.55px] text-black/70 line-clamp-5`}
                       onMouseDown={activatePromptEditor}
                     >
                       {task.promptText}
