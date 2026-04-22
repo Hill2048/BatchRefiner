@@ -65,6 +65,7 @@ export interface ProjectData {
   projectName: string;
   platformPreset: PlatformPreset;
   downloadDirectoryName?: string;
+  enablePromptOptimization?: boolean;
   globalSkillText: string;
   globalTargetText: string;
   globalReferenceImages: string[];

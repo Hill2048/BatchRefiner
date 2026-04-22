@@ -40,6 +40,7 @@ export const initialProjectState: ProjectData = {
   projectName: '未命名项目',
   platformPreset: 'yunwu',
   downloadDirectoryName: '',
+  enablePromptOptimization: true,
   globalSkillText: DEFAULT_SKILL_TEXT,
   globalTargetText: '',
   globalReferenceImages: [],
@@ -120,6 +121,7 @@ export function recoverInterruptedTasks(tasks: Task[] = []) {
 export function withDefaultSkill<T extends Partial<ProjectData>>(state: T) {
   return {
     ...state,
+    enablePromptOptimization: state.enablePromptOptimization !== false,
     globalSkillText: state.globalSkillText?.trim() ? state.globalSkillText : DEFAULT_SKILL_TEXT,
     skillFileName: state.skillFileName?.trim() ? state.skillFileName : DEFAULT_SKILL_FILE_NAME,
     globalBatchCount: (state.globalBatchCount || 'x1') as BatchCount,

@@ -22,6 +22,7 @@ import { useAppStore } from "@/store";
 import { useState, useRef } from "react";
 import { processBatch, generateTaskPrompt, haltBatch } from "@/lib/batchRunner";
 import { toast } from "sonner";
+import pLimit from "p-limit";
 import { SettingsDialog } from "../SettingsDialog";
 import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { MarkdownEditorDialog } from "../MarkdownEditorDialog";
@@ -38,6 +39,8 @@ import {
   supportsProjectFileSave,
   writeProjectFile,
 } from "@/lib/projectFileSave";
+import { getResultImageBlob } from "@/lib/resultImageCache";
+import { getTaskBatchFileName } from "@/lib/resultImageFileName";
 
 function SidebarProgress() {
   const tasksCount = useAppStore(state => state.tasks.length);
@@ -66,16 +69,7 @@ function SidebarProgress() {
 }
 
 async function resultImageToBlob(resultImage: string) {
-  if (resultImage.startsWith("data:")) {
-    const response = await fetch(resultImage);
-    return response.blob();
-  }
-
-  const response = await fetch(resultImage);
-  if (!response.ok) {
-    throw new Error(`下载结果图失败：HTTP ${response.status}`);
-  }
-  return response.blob();
+  return getResultImageBlob(resultImage);
 }
 
 function getExportableTaskImages(task: Task) {
@@ -129,6 +123,7 @@ export function Sidebar({
   const globalAspectRatio = useAppStore((state) => state.globalAspectRatio);
   const globalResolution = useAppStore((state) => state.globalResolution);
   const globalBatchCount = useAppStore((state) => state.globalBatchCount);
+  const enablePromptOptimization = useAppStore((state) => state.enablePromptOptimization !== false);
   const imageModel = useAppStore((state) => state.imageModel);
   const globalParamsLabel = getGlobalParamsLabel(imageModel);
   const textModel = useAppStore((state) => state.textModel);
@@ -397,10 +392,31 @@ export function Sidebar({
     const isReExport = tasksToExport.length === 0;
 
     const getFilename = (task: (typeof tasksToExport)[number], imageIndex: number) => {
-      let filename = exportTemplate || "{task_id}_{title}";
-      filename = filename.replace("{task_id}", task.index.toString().padStart(3, "0"));
-      filename = filename.replace("{title}", task.title.substring(0, 30).replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, ""));
-      return `${filename || `task_${task.index.toString().padStart(3, "0")}`}_${String(imageIndex + 1).padStart(2, "0")}`;
+      return getTaskBatchFileName(task.index, imageIndex, 'jpg');
+    };
+
+    const exportJobs = finalTasksToExport.flatMap((task) =>
+      getExportableTaskImages(task).map((result, imageIndex) => ({
+        task,
+        result,
+        imageIndex,
+        filename: `${getFilename(task, imageIndex)}.jpg`,
+      }))
+    );
+    const exportConcurrency = pLimit(4);
+    const exportedIdsByTask = new Map<string, Set<string>>(
+      finalTasksToExport.map((task) => [task.id, new Set(task.exportedResultIds || [])])
+    );
+    let progressCount = 0;
+    const progressToastId = toast.loading(
+      useSelected
+        ? `正在准备所选结果图 0/${exportJobs.length}`
+        : `正在准备结果图 0/${exportJobs.length}`
+    );
+    const updateProgressToast = (prefix: string) => {
+      toast.loading(`${prefix} ${progressCount}/${exportJobs.length}`, {
+        id: progressToastId,
+      });
     };
 
     const downloadDirectoryHandle = await getDownloadDirectoryHandle();
@@ -412,60 +428,85 @@ export function Sidebar({
         }
 
         let successCount = 0;
+        await Promise.all(
+          exportJobs.map((job) =>
+            exportConcurrency(async () => {
+              const blob = await resultImageToBlob(job.result.originalSrc || job.result.src);
+              await writeBlobToDirectory(downloadDirectoryHandle, job.filename, blob);
+              exportedIdsByTask.get(job.task.id)?.add(job.result.id);
+              successCount += 1;
+              progressCount += 1;
+              updateProgressToast('正在写入结果图');
+            })
+          )
+        );
+
         for (const task of finalTasksToExport) {
-          const results = getExportableTaskImages(task);
-          const exportedIds = new Set(task.exportedResultIds || []);
-          for (let index = 0; index < results.length; index += 1) {
-            const result = results[index];
-            const blob = await resultImageToBlob(result.originalSrc || result.src);
-            await writeBlobToDirectory(downloadDirectoryHandle, `${getFilename(task, index)}.jpg`, blob);
-            exportedIds.add(result.id);
-            successCount++;
-          }
-          store.updateTask(task.id, { exported: true, exportedResultIds: Array.from(exportedIds) });
+          store.updateTask(task.id, {
+            exported: true,
+            exportedResultIds: Array.from(exportedIdsByTask.get(task.id) || []),
+          });
         }
 
         toast.success(
           useSelected
             ? `${isReExport ? "已重新导出" : "已导出"}所选任务中的 ${successCount} 张结果图到指定目录`
             : `${isReExport ? "已重新导出" : "已写入"} ${successCount} 张结果图到指定目录`
+          , { id: progressToastId }
         );
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入指定目录失败，已回退为 ZIP 下载。";
-        toast.error(message);
+        toast.error(message, { id: progressToastId });
       }
     }
 
-    toast.info(useSelected ? "正在打包所选结果图，请稍候..." : "正在打包结果图，请稍候...");
     const JSZip = (await import("jszip")).default;
     const { saveAs } = await import("file-saver");
     const zip = new JSZip();
 
     let exportedCount = 0;
-    for (const task of finalTasksToExport) {
-      const results = getExportableTaskImages(task);
-      const exportedIds = new Set(task.exportedResultIds || []);
-      for (let index = 0; index < results.length; index += 1) {
-        const result = results[index];
-        try {
-          const blob = await resultImageToBlob(result.originalSrc || result.src);
-          zip.file(`${getFilename(task, index)}.jpg`, blob);
-          exportedIds.add(result.id);
-          exportedCount++;
-        } catch (error) {
-          console.error("Export image error", error);
-        }
-      }
-      store.updateTask(task.id, { exported: true, exportedResultIds: Array.from(exportedIds) });
+    const preparedFiles = await Promise.all(
+      exportJobs.map((job) =>
+        exportConcurrency(async () => {
+          try {
+            const blob = await resultImageToBlob(job.result.originalSrc || job.result.src);
+            progressCount += 1;
+            updateProgressToast('正在读取结果图');
+            return { ...job, blob };
+          } catch (error) {
+            console.error("Export image error", error);
+            return null;
+          }
+        })
+      )
+    );
+
+    for (const preparedFile of preparedFiles) {
+      if (!preparedFile) continue;
+      zip.file(preparedFile.filename, preparedFile.blob);
+      exportedIdsByTask.get(preparedFile.task.id)?.add(preparedFile.result.id);
+      exportedCount += 1;
     }
 
+    for (const task of finalTasksToExport) {
+      store.updateTask(task.id, {
+        exported: true,
+        exportedResultIds: Array.from(exportedIdsByTask.get(task.id) || []),
+      });
+    }
+
+    toast.loading(
+      useSelected ? '正在打包所选结果图…' : '正在打包结果图…',
+      { id: progressToastId }
+    );
     const blob = await zip.generateAsync({ type: "blob" });
     saveAs(blob, `Batch_${projectName}_Results.zip`);
     toast.success(
       useSelected
         ? `${isReExport ? "已重新导出" : "成功导出"}所选任务中的 ${exportedCount} 张结果图`
         : `${isReExport ? "已重新导出" : "成功导出"} ${exportedCount} 张结果图`
+      , { id: progressToastId }
     );
   };
 
@@ -612,9 +653,30 @@ export function Sidebar({
         <div className={`flex flex-col gap-6 ${compact ? 'pt-2 pb-5' : 'pt-3 pb-6'} px-1`}>
           {/* Global Skill / Style */}
           <div className="flex flex-col perspective-1000 relative">
-            <h3 className="text-[12.6px] font-medium text-text-secondary mb-3">提示词Skills</h3>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-[12.6px] font-medium text-text-secondary">提示词Skills</h3>
+              <button
+                type="button"
+                onClick={() => setProjectFields({ enablePromptOptimization: !enablePromptOptimization })}
+                className="inline-flex shrink-0 items-center gap-2 rounded-full border border-black/8 bg-[#FCFBF8] px-2.5 py-1 transition-colors hover:border-black/14"
+                title={enablePromptOptimization ? '先优化提示词再出图' : '直接使用当前文本出图'}
+              >
+                <span className="text-[10.5px] font-medium text-text-secondary">优化</span>
+                <div
+                  className={`relative h-5 w-9 rounded-full transition-colors ${
+                    enablePromptOptimization ? 'bg-button-main' : 'bg-black/10'
+                  }`}
+                >
+                  <div
+                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                      enablePromptOptimization ? 'translate-x-[18px]' : 'translate-x-0.5'
+                    }`}
+                  />
+                </div>
+              </button>
+            </div>
             
-            {skillFileName && !isSkillEditing ? (
+            {!enablePromptOptimization ? null : skillFileName && !isSkillEditing ? (
                <div 
                  className="flex flex-col items-center justify-center gap-2 p-6 border border-border/60 rounded-2xl bg-[#F5F4F0] relative group cursor-pointer hover:border-button-main transition-all duration-500 ease-out transform-gpu animate-in fade-in"
                  onDoubleClick={() => setIsMarkdownEditorOpen(true)}
@@ -627,7 +689,7 @@ export function Sidebar({
                   </div>
                   <div className="text-[10.5px] text-text-secondary absolute bottom-2">双击打开大编辑器</div>
                </div>
-            ) : (
+            ) : enablePromptOptimization ? (
                <div className="relative transition-all duration-500 ease-out transform-gpu animate-in fade-in zoom-in-95">
                   <Textarea
                     placeholder="例如：保持极简风格，使用清新的色调，4K高清摄影机..."
@@ -654,7 +716,7 @@ export function Sidebar({
                      setIsSkillEditing(false); // Reset to card view when new file uploaded
                   }} />
                </div>
-            )}
+            ) : null}
           </div>
 
           <div className="flex flex-col">
@@ -839,12 +901,14 @@ export function Sidebar({
                     </Button>
                   } />
                   <PopoverContent align="end" sideOffset={12} className="w-[180px] p-2 flex flex-col gap-1 rounded-[14px] bg-card border border-border/80 shadow-xl">
-                     <div 
-                        className="flex items-center gap-2.5 px-3 py-2.5 text-[13.65px] font-medium text-text-primary hover:bg-black/5 rounded-lg cursor-pointer transition-colors"
-                        onClick={() => handleRunBatch('prompts')}
-                     >
-                       <MessageSquare className="w-3.5 h-3.5 opacity-70" /> 仅生成提示词
-                     </div>
+                     {enablePromptOptimization ? (
+                       <div 
+                          className="flex items-center gap-2.5 px-3 py-2.5 text-[13.65px] font-medium text-text-primary hover:bg-black/5 rounded-lg cursor-pointer transition-colors"
+                          onClick={() => handleRunBatch('prompts')}
+                       >
+                         <MessageSquare className="w-3.5 h-3.5 opacity-70" /> 仅生成提示词
+                       </div>
+                     ) : null}
                      <div 
                         className="flex items-center gap-2.5 px-3 py-2.5 text-[13.65px] font-medium text-text-primary hover:bg-black/5 rounded-lg cursor-pointer transition-colors"
                         onClick={() => handleRunBatch('images')}

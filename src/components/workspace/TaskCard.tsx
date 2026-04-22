@@ -13,6 +13,8 @@ import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { GenerateParamsSelector } from '../GenerateParamsSelector';
 import { useAutoSaveTextEditor } from './useAutoSaveTextEditor';
+import { getResultImageBlob, primeTaskResultImageCache } from '@/lib/resultImageCache';
+import { getTaskBatchFileName } from '@/lib/resultImageFileName';
 
 type TaskCardProps = {
   taskId: string;
@@ -30,6 +32,42 @@ function hasImageFiles(dataTransfer?: DataTransfer | null) {
 
 function preventNativeImageDrag(e: React.DragEvent<HTMLImageElement>) {
   e.preventDefault();
+}
+
+function getCollapsedTextClass(text: string | undefined, shortLines: number, mediumLines: number, longLines: number) {
+  const content = (text || '').trim();
+  const lineCount = content ? content.split(/\r?\n/).filter(Boolean).length : 0;
+  const weightedLength = content.length + lineCount * 16;
+
+  if (weightedLength <= 36) {
+    return Math.min(shortLines + 1, mediumLines);
+  }
+
+  if (weightedLength <= 140) {
+    return mediumLines;
+  }
+
+  return longLines;
+}
+
+function getEditorHeightClass(text: string | undefined, shortClass: string, mediumClass: string, longClass: string) {
+  const content = (text || '').trim();
+  const lineCount = content ? content.split(/\r?\n/).filter(Boolean).length : 0;
+  const weightedLength = content.length + lineCount * 18;
+
+  if (weightedLength <= 48) return shortClass;
+  if (weightedLength <= 180) return mediumClass;
+  return longClass;
+}
+
+function shouldShowCollapsedFade(text: string | undefined, maxLines: number) {
+  const content = (text || '').trim();
+  if (!content) return false;
+
+  const explicitLines = content.split(/\r?\n/).filter(Boolean).length;
+  const estimatedWrappedLines = Math.ceil(content.length / 26);
+
+  return Math.max(explicitLines, estimatedWrappedLines) > maxLines;
 }
 
 type ViewerMode = 'result' | 'source';
@@ -54,6 +92,7 @@ export const TaskCard = React.memo(function TaskCard({
   const globalAspectRatio = useAppStore(state => state.globalAspectRatio);
   const globalResolution = useAppStore(state => state.globalResolution);
   const globalBatchCount = useAppStore(state => state.globalBatchCount);
+  const enablePromptOptimization = useAppStore(state => state.enablePromptOptimization !== false);
   const imageModel = useAppStore(state => state.imageModel);
 
   if (!task) return null;
@@ -87,6 +126,12 @@ export const TaskCard = React.memo(function TaskCard({
       setViewerMode('result');
     }
   }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage]);
+
+  React.useEffect(() => {
+    void primeTaskResultImageCache(
+      resultImages.flatMap((result) => [result.src, result.previewSrc, result.originalSrc])
+    );
+  }, [resultImages]);
 
   const activeResult = resultImages[selectedResultIndex] || primaryResult;
   const coverImageSrc = primaryResult?.src || task.sourceImage;
@@ -138,13 +183,8 @@ export const TaskCard = React.memo(function TaskCard({
   const downloadResultImage = async (resultSrc: string, fileName: string) => {
     try {
       const { saveAs } = await import('file-saver');
-      if (resultSrc.startsWith('http')) {
-        const res = await fetch(resultSrc);
-        const blob = await res.blob();
-        saveAs(blob, fileName);
-      } else {
-        saveAs(resultSrc, fileName);
-      }
+      const blob = await getResultImageBlob(resultSrc);
+      saveAs(blob, fileName);
     } catch {
       window.open(resultSrc, '_blank');
     }
@@ -191,9 +231,27 @@ export const TaskCard = React.memo(function TaskCard({
   ].filter(Boolean);
   const showCollapsedHeaderMedia = !isActive;
   const lowerSectionClass = 'rounded-[18px] bg-[#FCFBF8] px-3 py-2.5 transition-all duration-200 ease-out';
-  const textDisplayClass = 'rounded-[14px] bg-white/92 px-3 py-2 text-[12.3px] leading-relaxed text-text-secondary transition-all duration-200 ease-out hover:bg-white hover:-translate-y-[1px]';
-  const textEditorClass = 'min-h-[120px] rounded-[14px] border border-black/8 bg-white px-3 py-2.5 shadow-none transition-all duration-200 ease-out hover:border-black/12 focus-visible:border-black/18 focus-visible:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] resize-y';
+  const textSectionClass = 'flex flex-col gap-1.5 px-0.5';
+  const textLabelClass = 'px-0.5 text-[9.45px] font-bold uppercase tracking-wider text-black/42';
+  const textDisplayClass = 'rounded-[14px] border border-black/[0.07] bg-white px-3 py-2.5 text-[12.3px] leading-[1.75] text-black/70 transition-all duration-200 ease-out hover:border-black/[0.12] hover:bg-white';
+  const textEditorClass = 'rounded-[14px] border border-black/[0.08] bg-white px-3 py-2.5 text-[12.3px] leading-[1.75] text-black/70 shadow-none transition-all duration-200 ease-out hover:border-black/[0.12] focus-visible:border-black/[0.16] focus-visible:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] resize-y';
   const overlayCheckboxClass = 'h-5 w-5 shrink-0 cursor-pointer rounded-[6px] border border-black/14 bg-white/80 accent-[#D97757] shadow-sm backdrop-blur-sm transition-colors hover:border-black/24';
+  const descriptionCollapsedLines = getCollapsedTextClass(task.description, 2, 3, 5);
+  const promptCollapsedLines = getCollapsedTextClass(task.promptText, 3, 4, 6);
+  const descriptionEditorHeightClass = getEditorHeightClass(task.description, 'min-h-[96px]', 'min-h-[156px]', 'min-h-[228px]');
+  const promptEditorHeightClass = getEditorHeightClass(task.promptText, 'min-h-[112px]', 'min-h-[188px]', 'min-h-[272px]');
+  const collapsedPreviewText = enablePromptOptimization
+    ? (task.description || '').trim()
+    : ((task.promptText || task.description || '').trim());
+  const collapsedPreviewLineClamp = enablePromptOptimization ? 'line-clamp-2' : 'line-clamp-3';
+  const shouldFadeCollapsedPreview = shouldShowCollapsedFade(collapsedPreviewText, enablePromptOptimization ? 2 : 3);
+  const collapsedLineClassMap: Record<number, string> = {
+    2: 'line-clamp-2',
+    3: 'line-clamp-3',
+    4: 'line-clamp-4',
+    5: 'line-clamp-5',
+    6: 'line-clamp-6',
+  };
 
   const activateDescEditor = (e: React.MouseEvent) => {
     promptEditor.closeEditor(true);
@@ -251,7 +309,7 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
           )}
 
-          <div className="absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-3">
+          <div className="absolute left-3 right-3 top-3 flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <div className="drag-handle inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/72 text-black/70 shadow-sm backdrop-blur-sm transition-colors hover:bg-white" {...attributes} {...listeners}>
                 <GripVertical className="h-4 w-4" />
@@ -348,7 +406,7 @@ export const TaskCard = React.memo(function TaskCard({
                   className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-text-secondary shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
                   onClick={(e) => {
                     e.stopPropagation();
-                    downloadResultImage(activeResult.src, `${task.title || 'result'}-${selectedResultIndex + 1}.png`);
+                    downloadResultImage(activeResult.src, getTaskBatchFileName(task.index, selectedResultIndex, 'png'));
                   }}
                   title="下载结果图"
                 >
@@ -378,11 +436,6 @@ export const TaskCard = React.memo(function TaskCard({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-[10.5px] text-black/48">
               <span className="font-mono">#{task.index.toString().padStart(3, '0')}</span>
-              {showProgressBadge ? (
-              <span className="inline-flex items-center rounded-full border border-black/8 bg-black/[0.03] px-2 py-0.5 text-[10px] text-black/50">
-                已返回 {resultProgress.completed}/{resultProgress.requested}
-              </span>
-            ) : null}
           </div>
           <div className="mt-1.5 text-[13.8px] font-serif font-medium leading-tight text-foreground">
             {task.title}
@@ -403,7 +456,7 @@ export const TaskCard = React.memo(function TaskCard({
       style={style}
       className={`p-0 gap-0 bg-white flex overflow-hidden cursor-pointer transition-all duration-300 ease-out relative group
       ${isListMode ? 'flex-col sm:flex-row sm:items-center min-h-[140px]' : 'flex-col'}
-      ${isActive ? (isListMode ? 'border-border/50 shadow-[0_8px_30px_rgb(0,0,0,0.08)] rounded-2xl h-auto items-stretch' : 'md:col-span-2 md:row-span-2 shadow-[0_12px_40px_-5px_rgba(0,0,0,0.12)] scale-[1.01] rounded-[24px] z-40 border border-transparent') : 'border border-border/40 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-border/80 rounded-2xl hover:-translate-y-0.5'}
+      ${isActive ? (isListMode ? 'border border-black/8 shadow-[0_8px_30px_rgb(0,0,0,0.08)] rounded-2xl h-auto items-stretch' : 'md:col-span-2 md:row-span-2 shadow-[0_12px_40px_-5px_rgba(0,0,0,0.12)] scale-[1.01] rounded-[24px] z-40 border border-black/8') : 'border border-black/8 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-black/14 rounded-2xl hover:-translate-y-0.5'}
       ${isSelected ? 'ring-2 ring-button-main ring-offset-2' : ''}
       ${isFileDropTarget ? 'ring-2 ring-button-main/70 ring-offset-2 shadow-[0_12px_40px_-5px_rgba(223,122,87,0.22)]' : ''}`}
       onClick={(e) => {
@@ -512,10 +565,27 @@ export const TaskCard = React.memo(function TaskCard({
         {!isActive ? renderInfoHeader(true) : null}
 
         {!isActive ? (
-          <div className="mt-1 flex flex-wrap items-center gap-2 min-h-[20px] px-0.5">
-            {compactParamParts.length > 0 ? (
-              <div className="inline-flex items-center rounded-full border border-black/8 bg-[#FCFBF8] px-2.5 py-1 text-[10.5px] text-black/55">
-                {compactParamParts.join(' / ')}
+          <div className="mt-1 flex min-h-[20px] flex-col gap-2 px-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              {showProgressBadge ? (
+                <div className="inline-flex items-center rounded-full border border-black/8 bg-black/[0.03] px-2.5 py-1 text-[10.5px] text-black/55">
+                  已返回 {resultProgress.completed}/{resultProgress.requested}
+                </div>
+              ) : null}
+              {compactParamParts.length > 0 ? (
+                <div className="inline-flex items-center rounded-full border border-black/8 bg-[#FCFBF8] px-2.5 py-1 text-[10.5px] text-black/55">
+                  {compactParamParts.join(' / ')}
+                </div>
+              ) : null}
+            </div>
+            {collapsedPreviewText ? (
+              <div className="relative overflow-hidden rounded-[12px] bg-transparent pr-1">
+                <div className={`text-[11.55px] leading-[1.65] text-black/58 ${collapsedPreviewLineClamp}`}>
+                  {collapsedPreviewText}
+                </div>
+                {shouldFadeCollapsedPreview ? (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white via-white/82 via-45% to-transparent" />
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -635,32 +705,40 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
 
             <div className="flex flex-col gap-2 px-3">
-              <div ref={descriptionEditor.containerRef} className={`flex flex-col gap-1.5 ${lowerSectionClass}`}>
-                <span className="text-[9.45px] font-bold text-black/42 px-0.5 uppercase tracking-wider">生成指令</span>
-                {descriptionEditor.isEditing ? (
-                  <div className="flex flex-col gap-2">
-                    <Textarea
-                      ref={descriptionEditor.textareaRef}
-                      value={descriptionEditor.localValue}
-                      onChange={(e) => descriptionEditor.setLocalValue(e.target.value)}
-                      placeholder="输入这条任务的处理要求..."
-                      className={`${textEditorClass} animate-in fade-in zoom-in-[0.99] duration-200 text-[12.6px] leading-relaxed text-text-secondary`}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    className={`${textDisplayClass} max-h-[104px] cursor-text overflow-hidden line-clamp-4`}
-                    onMouseDown={activateDescEditor}
-                  >
-                    {task.description || '暂无生成指令'}
-                  </div>
-                )}
-              </div>
+              {enablePromptOptimization ? (
+                <div ref={descriptionEditor.containerRef} className={textSectionClass}>
+                  <span className={textLabelClass}>生成指令</span>
+                  {descriptionEditor.isEditing ? (
+                    <div className="flex flex-col gap-2">
+                      <Textarea
+                        ref={descriptionEditor.textareaRef}
+                        value={descriptionEditor.localValue}
+                        onChange={(e) => descriptionEditor.setLocalValue(e.target.value)}
+                        placeholder="输入这条任务的处理要求..."
+                        className={`${textEditorClass} ${descriptionEditorHeightClass} animate-in fade-in zoom-in-[0.99] duration-200`}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className={`${textDisplayClass} cursor-text overflow-hidden ${collapsedLineClassMap[descriptionCollapsedLines]} ${
+                        descriptionCollapsedLines === 3
+                          ? 'max-h-[82px]'
+                          : descriptionCollapsedLines === 5
+                            ? 'max-h-[126px]'
+                            : 'max-h-[64px]'
+                      }`}
+                      onMouseDown={activateDescEditor}
+                    >
+                      {task.description || '暂无生成指令'}
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
               {task.promptText ? (
-                <div ref={promptEditor.containerRef} className={`flex flex-col gap-1.5 ${lowerSectionClass}`}>
+                <div ref={promptEditor.containerRef} className={textSectionClass}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[9.45px] font-bold text-black/42 px-0.5 uppercase tracking-wider">AI 提示词</span>
+                    <span className={textLabelClass}>AI 提示词</span>
                     <span className={`text-[9.45px] px-2 py-0.5 rounded-full border uppercase tracking-wider ${
                       task.promptSource === 'manual'
                         ? 'text-[#9A6700] bg-[#FFF7DB] border-[#F0D27A]'
@@ -674,11 +752,17 @@ export const TaskCard = React.memo(function TaskCard({
                       ref={promptEditor.textareaRef}
                       value={promptEditor.localValue}
                       onChange={(e) => promptEditor.setLocalValue(e.target.value)}
-                      className={`${textEditorClass} animate-in fade-in zoom-in-[0.99] duration-200 font-mono text-[11.55px] leading-relaxed text-black/70`}
+                      className={`${textEditorClass} ${promptEditorHeightClass} animate-in fade-in zoom-in-[0.99] duration-200`}
                     />
                   ) : (
                     <div
-                      className={`${textDisplayClass} max-h-[116px] cursor-text overflow-hidden font-mono text-[11.55px] text-black/70 line-clamp-5`}
+                      className={`${textDisplayClass} cursor-text overflow-hidden ${collapsedLineClassMap[promptCollapsedLines]} ${
+                        promptCollapsedLines === 4
+                          ? 'max-h-[98px]'
+                          : promptCollapsedLines === 6
+                            ? 'max-h-[144px]'
+                            : 'max-h-[74px]'
+                      }`}
                       onMouseDown={activatePromptEditor}
                     >
                       {task.promptText}
@@ -689,9 +773,11 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
 
             <div className="mt-0.5 flex items-center justify-between gap-2 px-3">
-              <Button variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
-                <Eye className="w-3 h-3 mr-1 opacity-70" /> 预览提示词
-              </Button>
+              {enablePromptOptimization ? (
+                <Button variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
+                  <Eye className="w-3 h-3 mr-1 opacity-70" /> 预览提示词
+                </Button>
+              ) : <div />}
               <Button className="h-7 px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11.55px] font-medium disabled:opacity-50" onClick={(e) => { e.stopPropagation(); processSingleTask(task.id); }} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
                 执行此项 ({getBatchCountNumber(effectiveBatchCount)} 张)
               </Button>

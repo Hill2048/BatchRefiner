@@ -3,6 +3,8 @@ import { useAppStore } from "@/store";
 import pLimit from "p-limit";
 import { toast } from "sonner";
 import { getBatchCountNumber, getEffectiveBatchCount } from "./taskResults";
+import { getExecutablePromptText, isPromptOptimizationEnabled } from "./promptExecution";
+import { primeTaskResultImageCache } from "./resultImageCache";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const PROMPT_REQUEST_TIMEOUT_MS = 90_000;
@@ -108,6 +110,18 @@ function getEffectiveAspectRatio(task: Task) {
 function getEffectiveTaskBatchCount(task: Task): BatchCount {
   const store = useAppStore.getState();
   return getEffectiveBatchCount(task, store.globalBatchCount);
+}
+
+function shouldOptimizePrompts() {
+  return isPromptOptimizationEnabled(useAppStore.getState().enablePromptOptimization);
+}
+
+function getRenderableTaskPrompt(task: Pick<Task, "promptText" | "description">) {
+  return getExecutablePromptText(task);
+}
+
+function getMissingPromptError() {
+  return createStageError("当前任务缺少可执行文本，请先填写生成指令或 AI 提示词。", "Image Generation");
 }
 
 export function taskHasImageInputs(task: Task, globalReferenceImages: string[]) {
@@ -252,7 +266,7 @@ function appendSoftResolutionHint(prompt: string, resolution: string, aspectRati
   return `${prompt}\n\n分辨率：${resolution}\n比例：${aspectRatio}\n尽量贴近以上尺寸要求。`;
 }
 
-function buildImageAwarePrompt(task: Task, imageCount: number, resolution: string, aspectRatio: string) {
+function buildImageAwarePrompt(task: Task, promptText: string, imageCount: number, resolution: string, aspectRatio: string) {
   return [
     buildGenerationConstraints(task, resolution, aspectRatio),
     "",
@@ -260,7 +274,7 @@ function buildImageAwarePrompt(task: Task, imageCount: number, resolution: strin
     `${imageCount}`,
     "",
     "[Prompt]",
-    task.promptText || "N/A",
+    promptText,
   ].join("\n");
 }
 
@@ -379,6 +393,7 @@ async function measureImageDimensions(src: string): Promise<ImageDimensions | nu
 
 async function createTaskResultImage(result: GeneratedImageResult): Promise<TaskResultImage> {
   const dimensions = await measureImageDimensions(result.src);
+  void primeTaskResultImageCache([result.src, result.previewSrc, result.originalSrc]);
   return {
     id: crypto.randomUUID(),
     src: result.src,
@@ -620,6 +635,14 @@ async function retryWrap<T>(fn: () => Promise<T>, maxRetries = 2, delay = 1500):
 
 export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
   const store = useAppStore.getState();
+  const promptOptimizationEnabled = shouldOptimizePrompts();
+
+  if (mode === "prompts" && !promptOptimizationEnabled) {
+    toast.info("提示词优化已关闭");
+    store.setBatchRunning(false);
+    return;
+  }
+
   store.setBatchRunning(true);
 
   if ("Notification" in window && Notification.permission === "default") {
@@ -647,7 +670,7 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
     try {
       if (mode === "all" || mode === "prompts") {
         const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
-        if (currentTask && !currentTask.promptText) {
+        if (currentTask && promptOptimizationEnabled && !currentTask.promptText) {
           useAppStore.getState().updateTask(task.id, { status: "Prompting" });
           const generatedPrompt = await retryWrap(() => generateTaskPrompt(task.id));
           useAppStore.getState().updateTask(task.id, { promptText: generatedPrompt, promptSource: "auto", errorLog: undefined });
@@ -658,7 +681,8 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
 
       if (mode === "all" || mode === "images") {
         const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
-        if (currentTask && currentTask.promptText && !(currentTask.resultImages?.length)) {
+        const renderablePromptText = currentTask ? getRenderableTaskPrompt(currentTask) : null;
+        if (currentTask && renderablePromptText && !(currentTask.resultImages?.length)) {
           useAppStore.getState().updateTask(task.id, { status: "Rendering", errorLog: undefined });
           const generatedBatch = await retryWrap(() => runImageGeneration(task.id));
           if (generatedBatch.images.length === 0) {
@@ -682,6 +706,8 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
               stage: "Image Generation",
             } : undefined,
           });
+        } else if (currentTask && !renderablePromptText && !(currentTask.resultImages?.length)) {
+          throw getMissingPromptError();
         } else if (currentTask && currentTask.resultImages?.length) {
           useAppStore.getState().updateTask(task.id, { status: "Success" });
         }
@@ -737,11 +763,15 @@ export async function processSingleTask(taskId: string) {
     const currentTask = useAppStore.getState().tasks.find(x => x.id === taskId);
     if (!currentTask) return;
 
-    let promptText = currentTask.promptText;
-    if (!promptText) {
+    let promptText = getRenderableTaskPrompt(currentTask);
+    if (!promptText && shouldOptimizePrompts()) {
       store.updateTask(taskId, { status: "Prompting", errorLog: undefined });
       promptText = await retryWrap(() => generateTaskPrompt(taskId));
       store.updateTask(taskId, { promptText, promptSource: "auto", errorLog: undefined });
+    }
+
+    if (!promptText) {
+      throw getMissingPromptError();
     }
 
     store.updateTask(taskId, { status: "Rendering", errorLog: undefined });
@@ -872,7 +902,8 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
 async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageResult> {
   const store = useAppStore.getState();
   const task = store.tasks.find(t => t.id === taskId);
-  if (!task || !task.promptText) throw new Error("Task or prompt missing");
+  const effectivePromptText = task ? getRenderableTaskPrompt(task) : null;
+  if (!task || !effectivePromptText) throw getMissingPromptError();
 
   const platformPreset = getPlatformPreset();
   const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey;
@@ -886,7 +917,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
     lastUsedImageModel: resolvedModel.actualModel
   });
 
-  let promptForGeneration = task.promptText;
+  let promptForGeneration = effectivePromptText;
   if (resolvedModel.resolutionSupport === "soft") {
     promptForGeneration = appendSoftResolutionHint(promptForGeneration, resolution, aspectRatio);
   } else if (resolvedModel.resolutionSupport === "none") {
@@ -901,7 +932,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
     if (isGeminiGateway) {
       const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
-        { text: hasImageInputs ? buildImageAwarePrompt(task, imageInputs.length, resolution, aspectRatio) : promptForGeneration }
+        { text: hasImageInputs ? buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio) : promptForGeneration }
       ];
 
       if (hasImageInputs) {
@@ -965,7 +996,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       if (isComflyResponsesImageModel(resolvedModel.actualModel, platformPreset) && hasImageInputs) {
         const requestBody: Record<string, unknown> = {
           model: resolvedModel.actualModel,
-          prompt: buildImageAwarePrompt(task, imageInputs.length, resolution, aspectRatio),
+          prompt: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio),
           image: imageInputs,
           size: getRequestedImageSize(resolvedModel.actualModel, aspectRatio, resolution),
         };
@@ -996,7 +1027,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
       if (hasImageInputs) {
         const content = [
-          { type: "text", text: buildImageAwarePrompt(task, imageInputs.length, resolution, aspectRatio) },
+          { type: "text", text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio) },
           ...imageInputs.map(image => ({ type: "image_url", image_url: { url: image } }))
         ];
 
@@ -1075,7 +1106,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
     if (hasImageInputs) {
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
-        { text: buildImageAwarePrompt(task, imageInputs.length, resolution, aspectRatio) }
+        { text: buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, aspectRatio) }
       ];
 
       imageInputs.forEach(image => {

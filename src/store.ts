@@ -199,6 +199,7 @@ export const useAppStore = create<AppState>()(
         globalTargetText: state.globalTargetText,
         globalReferenceImages: state.globalReferenceImages,
         skillFileName: state.skillFileName,
+        enablePromptOptimization: state.enablePromptOptimization,
         imageModel: state.imageModel,
         textModel: state.textModel,
         globalAspectRatio: state.globalAspectRatio,

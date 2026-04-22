@@ -50,6 +50,7 @@ test('withDefaultSkill fills empty defaults', () => {
   });
 
   assert.equal(result.globalBatchCount, 'x1');
+  assert.equal(result.enablePromptOptimization, true);
   assert.ok(result.globalSkillText);
   assert.ok(result.skillFileName);
 });
