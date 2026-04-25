@@ -19,6 +19,8 @@ export interface ProjectExportPayload<T extends Record<string, any>> {
 export function sanitizeProjectSnapshot<T extends Record<string, any>>(state: T) {
   const nextState = { ...state };
   delete nextState.apiKey;
+  delete nextState.textApiKey;
+  delete nextState.imageApiKey;
   delete nextState.apiBaseUrl;
   delete nextState.textApiBaseUrl;
   delete nextState.imageApiBaseUrl;
@@ -32,6 +34,8 @@ export function mergeProjectSnapshotWithGlobalConfig<T extends Record<string, an
   return {
     ...projectState,
     apiKey: globalState.apiKey || "",
+    textApiKey: globalState.textApiKey || globalState.apiKey || "",
+    imageApiKey: globalState.imageApiKey || globalState.apiKey || "",
     apiBaseUrl: globalState.apiBaseUrl || "",
     textApiBaseUrl: globalState.textApiBaseUrl || globalState.apiBaseUrl || "",
     imageApiBaseUrl: globalState.imageApiBaseUrl || globalState.apiBaseUrl || "",

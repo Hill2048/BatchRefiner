@@ -10,6 +10,8 @@ export interface PlatformApiConfig {
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
   apiKey: string;
+  textApiKey?: string;
+  imageApiKey?: string;
   textModel: string;
   imageModel: string;
 }

@@ -24,7 +24,9 @@ type ResultState = {
 
 type ModelItem = {
   id?: unknown;
+  name?: unknown;
   supported_endpoint_types?: unknown;
+  supportedGenerationMethods?: unknown;
 };
 
 const PLATFORM_PRESETS: Array<{
@@ -109,6 +111,8 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       textApiBaseUrl: 'https://yunwu.ai',
       imageApiBaseUrl: 'https://yunwu.ai',
       apiKey: '',
+      textApiKey: '',
+      imageApiKey: '',
       textModel: 'gemini-3.1-flash-lite-preview',
       imageModel: 'gemini-3.1-flash-image-preview',
     },
@@ -117,6 +121,8 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       textApiBaseUrl: 'https://ai.comfly.chat',
       imageApiBaseUrl: 'https://ai.comfly.chat',
       apiKey: '',
+      textApiKey: '',
+      imageApiKey: '',
       textModel: 'gemini-3.1-flash-lite-preview',
       imageModel: 'gemini-3.1-flash-image-preview',
     },
@@ -125,6 +131,8 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
       apiKey: '',
+      textApiKey: '',
+      imageApiKey: '',
       textModel: 'gpt-4o',
       imageModel: 'gpt-image-2',
     },
@@ -133,6 +141,8 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
       apiKey: '',
+      textApiKey: '',
+      imageApiKey: '',
       textModel: 'gemini-2.5-flash',
       imageModel: 'imagen-3.0-generate-001',
     },
@@ -141,6 +151,8 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
       apiKey: '',
+      textApiKey: '',
+      imageApiKey: '',
       textModel: '',
       imageModel: '',
     },
@@ -165,6 +177,8 @@ function normalizePlatformConfig(config: PlatformApiConfigMap[PlatformPreset]): 
     ...config,
     textApiBaseUrl: config.textApiBaseUrl ?? config.apiBaseUrl,
     imageApiBaseUrl: config.imageApiBaseUrl ?? config.apiBaseUrl,
+    textApiKey: config.textApiKey ?? config.apiKey,
+    imageApiKey: config.imageApiKey ?? config.apiKey,
   };
 }
 
@@ -200,14 +214,21 @@ function splitModelOptions(items: ModelItem[]) {
   const imageModels: string[] = [];
 
   items.forEach((item) => {
-    const id = typeof item?.id === 'string' ? item.id.trim() : '';
+    const id = typeof item?.id === 'string'
+      ? item.id.trim()
+      : typeof item?.name === 'string'
+        ? item.name.trim().replace(/^models\//, '')
+        : '';
     if (!id) return;
 
     const endpointTypes = Array.isArray(item?.supported_endpoint_types)
       ? item.supported_endpoint_types.filter((value): value is string => typeof value === 'string')
       : [];
+    const generationMethods = Array.isArray(item?.supportedGenerationMethods)
+      ? item.supportedGenerationMethods.filter((value): value is string => typeof value === 'string')
+      : [];
 
-    if (looksLikeImageModel(id, endpointTypes)) {
+    if (looksLikeImageModel(id, [...endpointTypes, ...generationMethods])) {
       imageModels.push(id);
     } else {
       textModels.push(id);
@@ -258,6 +279,73 @@ function StatusBox({ tone, message }: { tone: 'success' | 'error'; message: stri
   return <div className={className}>{message}</div>;
 }
 
+const mergedInputClassName = "h-11 border-0 bg-transparent px-3 text-[13.65px] shadow-none focus-visible:ring-0";
+
+function ModelInput({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+}) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const filteredOptions = React.useMemo(() => {
+    const keyword = value.trim().toLowerCase();
+    const filtered = keyword
+      ? options.filter((option) => option.toLowerCase().includes(keyword))
+      : options;
+    return filtered.slice(0, 12);
+  }, [options, value]);
+
+  return (
+    <div className="relative">
+      <Input
+        type="text"
+        value={value}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setIsOpen(true);
+        }}
+        className={`${mergedInputClassName} pr-8`}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        aria-label="展开模型列表"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setIsOpen((current) => !current)}
+        className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-[10px] text-text-secondary transition-colors hover:bg-black/5"
+      >
+        ▼
+      </button>
+      {isOpen && filteredOptions.length > 0 ? (
+        <div className="absolute left-2 right-2 top-[calc(100%-2px)] z-50 max-h-48 overflow-y-auto rounded-xl border border-border/80 bg-white p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.18)]">
+          {filteredOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(option);
+                setIsOpen(false);
+              }}
+              className="block w-full rounded-lg px-3 py-2 text-left text-[13.65px] text-text-primary transition-colors hover:bg-[#F5F4F0]"
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const store = useAppStore();
   const generationLogs = useAppStore((state) => state.generationLogs);
@@ -267,7 +355,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   );
 
   const [platformPreset, setPlatformPreset] = React.useState<PlatformPreset>(store.platformPreset || 'yunwu');
-  const [apiKey, setApiKey] = React.useState(store.apiKey);
+  const [textApiKey, setTextApiKey] = React.useState(store.textApiKey || store.apiKey);
+  const [imageApiKey, setImageApiKey] = React.useState(store.imageApiKey || store.apiKey);
   const [apiBaseUrl, setApiBaseUrl] = React.useState(store.apiBaseUrl);
   const [textApiBaseUrl, setTextApiBaseUrl] = React.useState(store.textApiBaseUrl || store.apiBaseUrl);
   const [imageApiBaseUrl, setImageApiBaseUrl] = React.useState(store.imageApiBaseUrl || store.apiBaseUrl);
@@ -289,7 +378,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const applyPlatformConfigToForm = React.useCallback((preset: PlatformPreset, configs: PlatformApiConfigMap) => {
     const next = configs[preset];
     setPlatformPreset(preset);
-    setApiKey(next.apiKey);
+    setTextApiKey(next.textApiKey || next.apiKey);
+    setImageApiKey(next.imageApiKey || next.apiKey);
     setApiBaseUrl(next.apiBaseUrl);
     setTextApiBaseUrl(next.textApiBaseUrl || next.apiBaseUrl);
     setImageApiBaseUrl(next.imageApiBaseUrl || next.apiBaseUrl);
@@ -304,12 +394,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         apiBaseUrl: textApiBaseUrl || apiBaseUrl,
         textApiBaseUrl,
         imageApiBaseUrl,
-        apiKey,
+        apiKey: textApiKey,
+        textApiKey,
+        imageApiKey,
         textModel: localTextModel,
         imageModel: localImageModel,
       },
     };
-  }, [apiBaseUrl, apiKey, imageApiBaseUrl, localImageModel, localTextModel, platformPreset, textApiBaseUrl]);
+  }, [apiBaseUrl, imageApiBaseUrl, imageApiKey, localImageModel, localTextModel, platformPreset, textApiBaseUrl, textApiKey]);
 
   React.useEffect(() => {
     const nextConfigs = mergePlatformConfigs(store.platformConfigs);
@@ -361,6 +453,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         textApiBaseUrl: data.textApiBaseUrl || data.apiBaseUrl,
         imageApiBaseUrl: data.imageApiBaseUrl || data.apiBaseUrl,
         apiKey: data.apiKey,
+        textApiKey: data.textApiKey || data.apiKey,
+        imageApiKey: data.imageApiKey || data.apiKey,
         textModel: data.textModel,
         imageModel: data.imageModel,
       },
@@ -376,14 +470,40 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setRemoteImageModels(next.imageModels);
   }, []);
 
-  const fetchComflyModels = React.useCallback(async () => {
-    const baseUrls = Array.from(new Set([
-      textApiBaseUrl || apiBaseUrl,
-      imageApiBaseUrl || textApiBaseUrl || apiBaseUrl,
-    ].filter(Boolean)));
+  const fetchRemoteModels = React.useCallback(async () => {
+    const baseUrlEntries = [
+      { baseUrl: textApiBaseUrl || apiBaseUrl, apiKey: textApiKey },
+      { baseUrl: imageApiBaseUrl || textApiBaseUrl || apiBaseUrl, apiKey: imageApiKey || textApiKey },
+    ].filter((entry) => entry.baseUrl && entry.apiKey);
+
+    if (platformPreset === 'gemini-native') {
+      const apiKey = textApiKey || imageApiKey;
+      if (!apiKey.trim()) {
+        throw new Error('请先填写 API Key');
+      }
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}`, {
+        method: 'GET',
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error?.message || data?.message || '模型列表获取失败');
+      }
+
+      return Array.isArray(data?.models) ? (data.models as ModelItem[]) : [];
+    }
+
+    if (!baseUrlEntries.length) {
+      throw new Error('请先填写 API 地址和 API Key');
+    }
+
+    const uniqueEntries = Array.from(
+      new Map(baseUrlEntries.map((entry) => [`${entry.baseUrl}\n${entry.apiKey}`, entry])).values(),
+    );
     const results = await Promise.all(
-      baseUrls.map(async (baseUrl) => {
-    const response = await fetch(`${normalizeComflyBaseUrl(baseUrl)}/models`, {
+      uniqueEntries.map(async ({ baseUrl, apiKey }) => {
+    const response = await fetch(`${normalizeOpenAIBaseUrl(baseUrl)}/models`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey.trim()}`,
@@ -406,12 +526,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       }
     });
     return Array.from(byId.values());
-  }, [apiBaseUrl, apiKey, imageApiBaseUrl, textApiBaseUrl]);
+  }, [apiBaseUrl, imageApiBaseUrl, imageApiKey, platformPreset, textApiBaseUrl, textApiKey]);
 
   const loadRemoteModels = async () => {
     setIsLoadingModels(true);
     try {
-      const items = await fetchComflyModels();
+      const items = await fetchRemoteModels();
       setRemoteModels(items);
       toast.success(`已拉取 ${items.length} 个模型`);
     } catch (error: any) {
@@ -429,7 +549,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       const modelToTest = localTextModel || 'gemini-2.5-flash';
 
       if (isComfly) {
-        const items = await fetchComflyModels();
+        const items = await fetchRemoteModels();
         setRemoteModels(items);
 
         const hasConfiguredModel = items.some((item) => item?.id === modelToTest);
@@ -442,7 +562,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         return;
       }
 
-      let apiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToTest}:generateContent?key=${apiKey}`;
+      let apiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToTest}:generateContent?key=${textApiKey}`;
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       let body = JSON.stringify({ contents: [{ parts: [{ text: 'Say hello' }] }] });
 
@@ -452,10 +572,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         if (baseUrl.endsWith('/v1')) baseUrl = baseUrl.replace(/\/v1$/, '/v1beta');
         if (!baseUrl.endsWith('/v1beta') && !baseUrl.includes('/v1beta/')) baseUrl += '/v1beta';
         apiEndpoint = `${baseUrl}/models/${modelToTest}:generateContent`;
-        headers.Authorization = `Bearer ${apiKey}`;
+        headers.Authorization = `Bearer ${textApiKey}`;
       } else if (textBaseUrl.trim()) {
         apiEndpoint = `${normalizeOpenAIBaseUrl(textBaseUrl)}/chat/completions`;
-        headers.Authorization = `Bearer ${apiKey}`;
+        headers.Authorization = `Bearer ${textApiKey}`;
         body = JSON.stringify({
           model: modelToTest,
           messages: [{ role: 'user', content: 'Say hello' }],
@@ -485,7 +605,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setQuotaResult({ status: 'idle', msg: '正在查询...' });
 
     try {
-      const snapshot = await fetchPlatformQuota(platformPreset, textApiBaseUrl || apiBaseUrl, apiKey);
+      const snapshot = await fetchPlatformQuota(platformPreset, textApiBaseUrl || apiBaseUrl, textApiKey);
       const msg = formatQuotaSummary(snapshot);
       setQuotaResult({ status: 'success', msg });
       toast.success(msg);
@@ -544,6 +664,8 @@ const handleExportCurrentConfig = async () => {
         textApiBaseUrl: currentConfig.textApiBaseUrl,
         imageApiBaseUrl: currentConfig.imageApiBaseUrl,
         apiKey: currentConfig.apiKey,
+        textApiKey: currentConfig.textApiKey,
+        imageApiKey: currentConfig.imageApiKey,
         textModel: currentConfig.textModel,
         imageModel: currentConfig.imageModel,
         exportedAt: new Date().toISOString(),
@@ -610,7 +732,8 @@ const handleExportCurrentConfig = async () => {
     const parsedConcurrency = parseInt(maxConcurrency, 10);
     const nextPlatformConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
 
-    store.setApiKey(apiKey);
+    store.setTextApiKey(textApiKey);
+    store.setImageApiKey(imageApiKey);
     store.setApiBaseUrl(textApiBaseUrl || apiBaseUrl);
     store.setTextApiBaseUrl(textApiBaseUrl);
     store.setImageApiBaseUrl(imageApiBaseUrl);
@@ -675,91 +798,91 @@ const handleExportCurrentConfig = async () => {
             </Select>
           </Section>
 
-          <Section title="默认模型">
-            <div className="mt-2 flex flex-col gap-1">
-              <label className="text-[12.6px] font-medium text-text-secondary">文本模型</label>
-              <Input
-                type="text"
-                list="text-model-list"
-                value={localTextModel}
-                onChange={(e) => setLocalTextModel(e.target.value)}
-                className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
-                placeholder="gemini-3.1-flash-lite-preview"
-              />
-              <datalist id="text-model-list">
-                {textModelOptions.map((model) => (
-                  <option key={model} value={model} />
-                ))}
-              </datalist>
-            </div>
-
-            <div className="mt-2 flex flex-col gap-1">
-              <label className="text-[12.6px] font-medium text-text-secondary">图片模型</label>
-              <Input
-                type="text"
-                list="image-model-list"
-                value={localImageModel}
-                onChange={(e) => setLocalImageModel(e.target.value)}
-                className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
-                placeholder="gemini-3.1-flash-image-preview"
-              />
-              <datalist id="image-model-list">
-                {imageModelOptions.map((model) => (
-                  <option key={model} value={model} />
-                ))}
-              </datalist>
-            </div>
-          </Section>
-
           <Section title="接口配置">
-            <div className="mt-1 flex flex-col gap-1">
+            <div className="mt-1 flex flex-col gap-5">
               <input type="text" name="fake-username" autoComplete="username" tabIndex={-1} aria-hidden="true" className="hidden" />
               <input type="password" name="fake-password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" className="hidden" />
 
-              <label className="text-[13.65px] font-medium text-text-secondary">文本 API Base URL</label>
-              <Input
-                type="text"
-                name="batch-refiner-text-api-base"
-                autoComplete="off"
-                placeholder="例如: https://ai.comfly.chat"
-                value={textApiBaseUrl}
-                onChange={(e) => {
-                  setTextApiBaseUrl(e.target.value);
-                  setApiBaseUrl(e.target.value);
-                }}
-                className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
-              />
+              <div className="flex flex-col gap-2">
+                <label className="text-[12.6px] font-medium text-text-secondary">文本 API</label>
+                <div className="rounded-xl border border-border bg-white shadow-sm transition-colors focus-within:border-button-main/40 focus-within:ring-2 focus-within:ring-button-main/20">
+                  <Input
+                    type="text"
+                    name="batch-refiner-text-api-base"
+                    autoComplete="off"
+                    placeholder="文本 API 地址，例如 https://ai.comfly.chat"
+                    value={textApiBaseUrl}
+                    onChange={(e) => {
+                      setTextApiBaseUrl(e.target.value);
+                      setApiBaseUrl(e.target.value);
+                    }}
+                    className={mergedInputClassName}
+                  />
+                  <div className="h-px bg-border/70" />
+                  <Input
+                    type="text"
+                    name="batch-refiner-text-api-key"
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    data-form-type="other"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    placeholder="文本 API Key，用于提示词和文本模型"
+                    value={textApiKey}
+                    onChange={(e) => setTextApiKey(e.target.value)}
+                    className={mergedInputClassName}
+                  />
+                  <div className="h-px bg-border/70" />
+                  <ModelInput
+                    value={localTextModel}
+                    onChange={setLocalTextModel}
+                    options={textModelOptions}
+                    placeholder="文本模型，例如 gemini-3.1-flash-lite-preview"
+                  />
+                </div>
+              </div>
 
-              <label className="mt-3 text-[13.65px] font-medium text-text-secondary">生图 API Base URL</label>
-              <Input
-                type="text"
-                name="batch-refiner-image-api-base"
-                autoComplete="off"
-                placeholder="留空时可与文本 API 地址相同"
-                value={imageApiBaseUrl}
-                onChange={(e) => setImageApiBaseUrl(e.target.value)}
-                className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
-              />
+              <div className="flex flex-col gap-2">
+                <label className="text-[12.6px] font-medium text-text-secondary">生图 API</label>
+                <div className="rounded-xl border border-border bg-white shadow-sm transition-colors focus-within:border-button-main/40 focus-within:ring-2 focus-within:ring-button-main/20">
+                  <Input
+                    type="text"
+                    name="batch-refiner-image-api-base"
+                    autoComplete="off"
+                    placeholder="生图 API 地址，留空则使用文本 API 地址"
+                    value={imageApiBaseUrl}
+                    onChange={(e) => setImageApiBaseUrl(e.target.value)}
+                    className={mergedInputClassName}
+                  />
+                  <div className="h-px bg-border/70" />
+                  <Input
+                    type="text"
+                    name="batch-refiner-image-api-key"
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    data-form-type="other"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    placeholder="生图 API Key，留空则使用文本 API Key"
+                    value={imageApiKey}
+                    onChange={(e) => setImageApiKey(e.target.value)}
+                    className={mergedInputClassName}
+                  />
+                  <div className="h-px bg-border/70" />
+                  <ModelInput
+                    value={localImageModel}
+                    onChange={setLocalImageModel}
+                    options={imageModelOptions}
+                    placeholder="图片模型，例如 gemini-3.1-flash-image-preview"
+                  />
+                </div>
+              </div>
 
-              <label className="mt-3 text-[13.65px] font-medium text-text-secondary">API Key</label>
-              <Input
-                type="text"
-                name="batch-refiner-api-key"
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                data-form-type="other"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                placeholder="AIzaSy... / sk-..."
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="font-mono rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
-                style={{ WebkitTextSecurity: 'disc' } as React.CSSProperties}
-              />
-
-              <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-black/5 bg-black/[0.03] p-3 shadow-inner">
+              <div className="mt-1 flex flex-col gap-2 rounded-2xl border border-black/5 bg-black/[0.03] p-3 shadow-inner">
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
                     variant="outline"
@@ -775,23 +898,21 @@ const handleExportCurrentConfig = async () => {
                       variant="outline"
                       size="sm"
                       onClick={checkQuota}
-                      disabled={isCheckingQuota || !apiKey.trim()}
+                      disabled={isCheckingQuota || !textApiKey.trim()}
                       className="h-8 rounded-xl border-none bg-white text-[12.6px] text-text-primary shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all hover:bg-black/5"
                     >
                       {isCheckingQuota ? '查询中...' : '查询额度'}
                     </Button>
                   )}
-                  {isComfly && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={loadRemoteModels}
-                      disabled={isLoadingModels || !apiKey.trim()}
-                      className="h-8 rounded-xl border-none bg-white text-[12.6px] text-text-primary shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all hover:bg-black/5"
-                    >
-                      {isLoadingModels ? '拉取中...' : '拉取模型'}
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadRemoteModels}
+                    disabled={isLoadingModels || (!textApiKey.trim() && !imageApiKey.trim())}
+                    className="h-8 rounded-xl border-none bg-white text-[12.6px] text-text-primary shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all hover:bg-black/5"
+                  >
+                    {isLoadingModels ? '拉取中...' : '拉取模型'}
+                  </Button>
                 </div>
 
                 {testResult.status === 'success' ? <StatusBox tone="success" message={testResult.msg} /> : null}

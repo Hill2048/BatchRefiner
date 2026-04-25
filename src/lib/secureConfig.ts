@@ -18,6 +18,8 @@ export interface ApiConfigPayload {
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
   apiKey: string;
+  textApiKey?: string;
+  imageApiKey?: string;
   textModel: string;
   imageModel: string;
   exportedAt: string;
@@ -42,22 +44,30 @@ interface ChunkedProtectedConfigEnvelope {
   type: "batch-refiner-protected-config";
   version: 3;
   algorithm: "chunked-obfuscation";
-  payload: Omit<ApiConfigPayload, "apiKey">;
+  payload: Omit<ApiConfigPayload, "apiKey" | "textApiKey" | "imageApiKey">;
   keyData: {
     nonce: string;
     order: number[];
     chunks: string[];
   };
+  textKeyData?: ChunkedProtectedConfigEnvelope["keyData"];
+  imageKeyData?: ChunkedProtectedConfigEnvelope["keyData"];
 }
+
+type ProtectedKeyBundle = {
+  apiKey: ChunkedProtectedConfigEnvelope["keyData"];
+  textApiKey?: ChunkedProtectedConfigEnvelope["keyData"];
+  imageApiKey?: ChunkedProtectedConfigEnvelope["keyData"];
+};
 
 interface MultiChunkedProtectedConfigEnvelope {
   type: "batch-refiner-protected-config";
   version: 4;
   algorithm: "chunked-obfuscation-multi";
   payload: Omit<MultiPlatformApiConfigPayload, "platformConfigs"> & {
-    platformConfigs: Record<PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey">>;
+    platformConfigs: Record<PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey" | "textApiKey" | "imageApiKey">>;
   };
-  keyDataByPlatform: Record<PlatformPreset, ChunkedProtectedConfigEnvelope["keyData"]>;
+  keyDataByPlatform: Record<PlatformPreset, ChunkedProtectedConfigEnvelope["keyData"] | ProtectedKeyBundle>;
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -161,7 +171,14 @@ export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatform
 
     const keyDataByPlatform = Object.fromEntries(
       await Promise.all(
-        platformEntries.map(async ([platform, config]) => [platform, await obfuscateApiKey(config.apiKey)]),
+        platformEntries.map(async ([platform, config]) => [
+          platform,
+          {
+            apiKey: await obfuscateApiKey(config.apiKey),
+            textApiKey: await obfuscateApiKey(config.textApiKey || config.apiKey),
+            imageApiKey: await obfuscateApiKey(config.imageApiKey || config.apiKey),
+          },
+        ]),
       ),
     ) as MultiChunkedProtectedConfigEnvelope["keyDataByPlatform"];
 
@@ -181,13 +198,15 @@ export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatform
     return JSON.stringify(envelope, null, 2);
   }
 
-  const { apiKey, ...restPayload } = payload;
+  const { apiKey, textApiKey, imageApiKey, ...restPayload } = payload;
   const envelope: ChunkedProtectedConfigEnvelope = {
     type: "batch-refiner-protected-config",
     version: 3,
     algorithm: "chunked-obfuscation",
     payload: restPayload,
     keyData: await obfuscateApiKey(apiKey),
+    textKeyData: await obfuscateApiKey(textApiKey || apiKey),
+    imageKeyData: await obfuscateApiKey(imageApiKey || apiKey),
   };
 
   return JSON.stringify(envelope, null, 2);
@@ -207,25 +226,39 @@ export async function decryptApiConfig(input: string) {
 
   if (parsed.version === 3) {
     const apiKey = await restoreApiKey(parsed.keyData);
+    const textApiKey = parsed.textKeyData ? await restoreApiKey(parsed.textKeyData) : apiKey;
+    const imageApiKey = parsed.imageKeyData ? await restoreApiKey(parsed.imageKeyData) : apiKey;
     return {
       ...parsed.payload,
       apiKey,
+      textApiKey,
+      imageApiKey,
     } as ApiConfigPayload | MultiPlatformApiConfigPayload;
   }
 
   if (parsed.version === 4) {
     const platformEntries = Object.entries(parsed.payload.platformConfigs) as Array<
-      [PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey">]
+      [PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey" | "textApiKey" | "imageApiKey">]
     >;
     const platformConfigs = Object.fromEntries(
       await Promise.all(
-        platformEntries.map(async ([platform, config]) => [
-          platform,
-          {
-            ...config,
-            apiKey: await restoreApiKey(parsed.keyDataByPlatform[platform]),
-          },
-        ]),
+        platformEntries.map(async ([platform, config]) => {
+          const keyData = parsed.keyDataByPlatform[platform];
+          const legacyKeyData = "chunks" in keyData ? keyData : keyData.apiKey;
+          const apiKey = await restoreApiKey(legacyKeyData);
+          const textApiKey = "chunks" in keyData || !keyData.textApiKey ? apiKey : await restoreApiKey(keyData.textApiKey);
+          const imageApiKey = "chunks" in keyData || !keyData.imageApiKey ? apiKey : await restoreApiKey(keyData.imageApiKey);
+
+          return [
+            platform,
+            {
+              ...config,
+              apiKey,
+              textApiKey,
+              imageApiKey,
+            },
+          ];
+        }),
       ),
     ) as PlatformApiConfigMap;
 

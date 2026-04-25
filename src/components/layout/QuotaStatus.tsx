@@ -97,8 +97,8 @@ function renderYunwuQuota(snapshot: Extract<PlatformQuotaSnapshot, { platform: "
 }
 
 export function QuotaStatus() {
-  const apiKey = useAppStore((state) => state.apiKey);
-  const apiBaseUrl = useAppStore((state) => state.apiBaseUrl);
+  const apiKey = useAppStore((state) => state.textApiKey || state.apiKey);
+  const apiBaseUrl = useAppStore((state) => state.textApiBaseUrl || state.apiBaseUrl);
   const platformPreset = useAppStore((state) => state.platformPreset);
   const [snapshot, setSnapshot] = React.useState<PlatformQuotaSnapshot | null>(null);
   const [status, setStatus] = React.useState<"idle" | "loading" | "success" | "error">("idle");

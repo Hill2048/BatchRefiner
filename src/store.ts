@@ -66,6 +66,8 @@ interface AppState extends ProjectData {
   exportTemplate: string;
   selectedTaskIds: string[];
   apiKey: string;
+  textApiKey: string;
+  imageApiKey: string;
   apiBaseUrl: string;
   textApiBaseUrl: string;
   imageApiBaseUrl: string;
@@ -87,6 +89,8 @@ interface AppState extends ProjectData {
   selectAllTasks: () => void;
   clearTaskSelection: () => void;
   setApiKey: (key: string) => void;
+  setTextApiKey: (key: string) => void;
+  setImageApiKey: (key: string) => void;
   setApiBaseUrl: (url: string) => void;
   setTextApiBaseUrl: (url: string) => void;
   setImageApiBaseUrl: (url: string) => void;
@@ -109,6 +113,8 @@ export const useAppStore = create<AppState>()(
       exportTemplate: '{task_id}_{title}',
       selectedTaskIds: [],
       apiKey: '',
+      textApiKey: '',
+      imageApiKey: '',
       apiBaseUrl: 'https://yunwu.ai',
       textApiBaseUrl: 'https://yunwu.ai',
       imageApiBaseUrl: 'https://yunwu.ai',
@@ -199,7 +205,9 @@ export const useAppStore = create<AppState>()(
         })),
 
       clearTaskSelection: () => set({ selectedTaskIds: [] }),
-      setApiKey: (key) => set({ apiKey: key }),
+      setApiKey: (key) => set({ apiKey: key, textApiKey: key, imageApiKey: key }),
+      setTextApiKey: (key) => set({ textApiKey: key, apiKey: key }),
+      setImageApiKey: (key) => set({ imageApiKey: key }),
       setApiBaseUrl: (url) => set({ apiBaseUrl: url }),
       setTextApiBaseUrl: (url) => set({ textApiBaseUrl: url }),
       setImageApiBaseUrl: (url) => set({ imageApiBaseUrl: url }),
@@ -263,6 +271,8 @@ export const useAppStore = create<AppState>()(
         maxConcurrency: state.maxConcurrency,
         exportTemplate: state.exportTemplate,
         apiKey: state.apiKey,
+        textApiKey: state.textApiKey,
+        imageApiKey: state.imageApiKey,
         apiBaseUrl: state.apiBaseUrl,
         textApiBaseUrl: state.textApiBaseUrl,
         imageApiBaseUrl: state.imageApiBaseUrl,

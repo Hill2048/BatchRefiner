@@ -9,6 +9,8 @@ export const initialPlatformConfigs: PlatformApiConfigMap = {
     textApiBaseUrl: 'https://yunwu.ai',
     imageApiBaseUrl: 'https://yunwu.ai',
     apiKey: '',
+    textApiKey: '',
+    imageApiKey: '',
     textModel: 'gemini-3.1-flash-lite-preview',
     imageModel: 'gemini-3.1-flash-image-preview',
   },
@@ -17,6 +19,8 @@ export const initialPlatformConfigs: PlatformApiConfigMap = {
     textApiBaseUrl: 'https://ai.comfly.chat',
     imageApiBaseUrl: 'https://ai.comfly.chat',
     apiKey: '',
+    textApiKey: '',
+    imageApiKey: '',
     textModel: 'gemini-3.1-flash-lite-preview',
     imageModel: 'gemini-3.1-flash-image-preview',
   },
@@ -25,6 +29,8 @@ export const initialPlatformConfigs: PlatformApiConfigMap = {
     textApiBaseUrl: '',
     imageApiBaseUrl: '',
     apiKey: '',
+    textApiKey: '',
+    imageApiKey: '',
     textModel: 'gpt-4o',
     imageModel: 'gpt-image-2',
   },
@@ -33,6 +39,8 @@ export const initialPlatformConfigs: PlatformApiConfigMap = {
     textApiBaseUrl: '',
     imageApiBaseUrl: '',
     apiKey: '',
+    textApiKey: '',
+    imageApiKey: '',
     textModel: 'gemini-2.5-flash',
     imageModel: 'imagen-3.0-generate-001',
   },
@@ -41,6 +49,8 @@ export const initialPlatformConfigs: PlatformApiConfigMap = {
     textApiBaseUrl: '',
     imageApiBaseUrl: '',
     apiKey: '',
+    textApiKey: '',
+    imageApiKey: '',
     textModel: '',
     imageModel: '',
   },
@@ -161,6 +171,7 @@ export function recoverInterruptedTasks(tasks: Task[] = []) {
 }
 
 export function withDefaultSkill<T extends Partial<ProjectData> & { apiBaseUrl?: string }>(state: T) {
+  const legacyApiKey = (state as T & { apiKey?: string }).apiKey || '';
   return {
     ...state,
     enablePromptOptimization: state.enablePromptOptimization !== false,
@@ -171,6 +182,8 @@ export function withDefaultSkill<T extends Partial<ProjectData> & { apiBaseUrl?:
     generationLogs: state.generationLogs || [],
     textApiBaseUrl: state.textApiBaseUrl || state.apiBaseUrl,
     imageApiBaseUrl: state.imageApiBaseUrl || state.apiBaseUrl,
+    textApiKey: (state as T & { textApiKey?: string }).textApiKey || legacyApiKey,
+    imageApiKey: (state as T & { imageApiKey?: string }).imageApiKey || legacyApiKey,
   };
 }
 

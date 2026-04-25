@@ -375,6 +375,14 @@ function getImageApiBaseUrl(store: { apiBaseUrl?: string; imageApiBaseUrl?: stri
   return (store.imageApiBaseUrl || store.apiBaseUrl || store.textApiBaseUrl || "").trim();
 }
 
+function getTextApiKey(store: { apiKey?: string; textApiKey?: string }) {
+  return (store.textApiKey || store.apiKey || "").trim();
+}
+
+function getImageApiKey(store: { apiKey?: string; imageApiKey?: string; textApiKey?: string }) {
+  return (store.imageApiKey || store.textApiKey || store.apiKey || "").trim();
+}
+
 function isGeminiGatewayPreset(platformPreset: PlatformPreset) {
   return platformPreset === "gemini-native";
 }
@@ -558,9 +566,10 @@ function assertImageInputSupport(task: Task) {
   const store = useAppStore.getState();
   const platformPreset = getPlatformPreset();
   const imageApiBaseUrl = getImageApiBaseUrl(store);
+  const imageApiKey = getImageApiKey(store);
   if (!taskHasImageInputs(task, store.globalReferenceImages)) return;
 
-  if (!supportsImageInput(store.imageModel, imageApiBaseUrl, store.apiKey, platformPreset)) {
+  if (!supportsImageInput(store.imageModel, imageApiBaseUrl, imageApiKey, platformPreset)) {
     throw createStageError(
       "当前模型不支持基于原图或参考图生成，请切换到支持图片输入的模型后再执行。",
       "Image Generation"
@@ -1802,8 +1811,9 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
   const contentMsg = buildPromptGenerationText(task, store.globalSkillText || "");
   const platformPreset = getPlatformPreset();
   const textApiBaseUrl = getTextApiBaseUrl(store);
+  const textApiKey = getTextApiKey(store);
   const isYunwuPromptImageModel = isYunwuGptImageModel(store.textModel, platformPreset);
-  const isGeminiGateway = platformPreset === "yunwu" && !!textApiBaseUrl && !!store.apiKey && !isYunwuPromptImageModel;
+  const isGeminiGateway = platformPreset === "yunwu" && !!textApiBaseUrl && !!textApiKey && !isYunwuPromptImageModel;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
   appendGenerationLogEvent(logSessionId, {
     stage: "prompt",
@@ -1857,7 +1867,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
 
       const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${store.textModel}:generateContent`, {
         method: "POST",
-        headers: buildGeminiGatewayHeaders(store.apiKey),
+        headers: buildGeminiGatewayHeaders(textApiKey),
         body: JSON.stringify({
           contents: [{ role: "user", parts }],
           generationConfig: {
@@ -1899,7 +1909,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
       };
     }
 
-    if (isCustomOpenAI && textApiBaseUrl && store.apiKey) {
+    if (isCustomOpenAI && textApiBaseUrl && textApiKey) {
       let baseUrl = textApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
       const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
@@ -1914,7 +1924,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${store.apiKey}`
+          "Authorization": `Bearer ${textApiKey}`
         },
         body: JSON.stringify({
           model: store.textModel,
@@ -2038,7 +2048,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
       });
       const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${store.textModel}:generateContent`, {
         method: "POST",
-        headers: buildGeminiGatewayHeaders(store.apiKey),
+        headers: buildGeminiGatewayHeaders(textApiKey),
         body: JSON.stringify({
           contents: [{ role: "user", parts }],
           generationConfig: {
@@ -2059,7 +2069,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
       };
     }
 
-    if (isCustomOpenAI && textApiBaseUrl && store.apiKey) {
+    if (isCustomOpenAI && textApiBaseUrl && textApiKey) {
       updateTaskProgress(taskId, "Prompting", "请求提示词 API");
       updateTaskProgress(taskId, "Prompting", imageInputs.length > 0 ? "上传提示词图片" : "请求提示词 API");
       let baseUrl = textApiBaseUrl.replace(/\/+$/, "");
@@ -2075,7 +2085,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${store.apiKey}`
+          "Authorization": `Bearer ${textApiKey}`
         },
         body: JSON.stringify({
           model: store.textModel,
@@ -2212,10 +2222,11 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
 
   const platformPreset = getPlatformPreset();
   const imageApiBaseUrl = getImageApiBaseUrl(store);
+  const imageApiKey = getImageApiKey(store);
   const resolution = getEffectiveResolution(task);
   const resolvedModel = resolveImageModel(store.imageModel, resolution, platformPreset);
   const isYunwuGptImage = isYunwuGptImageModel(resolvedModel.actualModel, platformPreset);
-  const isGeminiGateway = platformPreset === "yunwu" && !!imageApiBaseUrl && !!store.apiKey && !isYunwuGptImage;
+  const isGeminiGateway = platformPreset === "yunwu" && !!imageApiBaseUrl && !!imageApiKey && !isYunwuGptImage;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
   const imageRequestTimeoutMs =
     platformPreset === "yunwu" && isYunwuGptImage
@@ -2345,7 +2356,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
 
       const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${resolvedModel.actualModel}:generateContent`, {
         method: "POST",
-        headers: buildGeminiGatewayHeaders(store.apiKey),
+        headers: buildGeminiGatewayHeaders(imageApiKey),
         body: JSON.stringify({
           contents: [{ role: "user", parts }],
           generationConfig
@@ -2381,7 +2392,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
       return finalized;
     }
 
-    if (platformPreset === "yunwu" && isYunwuGptImage && imageApiBaseUrl && store.apiKey) {
+    if (platformPreset === "yunwu" && isYunwuGptImage && imageApiBaseUrl && imageApiKey) {
       let baseUrl = imageApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
@@ -2424,7 +2435,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${store.apiKey}`
+            "Authorization": `Bearer ${imageApiKey}`
           },
           body: formData
         }, imageRequestTimeoutMs, supportsStreamAttempt);
@@ -2496,7 +2507,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${store.apiKey}`
+          "Authorization": `Bearer ${imageApiKey}`
         },
         body: JSON.stringify(requestBody)
       }, imageRequestTimeoutMs, supportsStreamAttempt);
@@ -2556,7 +2567,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${store.apiKey}`
+            "Authorization": `Bearer ${imageApiKey}`
           },
           body: formData
         }, imageRequestTimeoutMs, supportsStreamAttempt);
@@ -2596,7 +2607,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${store.apiKey}`
+            "Authorization": `Bearer ${imageApiKey}`
           },
           body: JSON.stringify(requestBody)
         }, imageRequestTimeoutMs, supportsStreamAttempt);
@@ -2643,7 +2654,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${store.apiKey}`
+            "Authorization": `Bearer ${imageApiKey}`
           },
           body: JSON.stringify(requestBody)
         }, imageRequestTimeoutMs);
@@ -2686,7 +2697,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${store.apiKey}`
+          "Authorization": `Bearer ${imageApiKey}`
         },
         body: JSON.stringify(requestBody)
       }, imageRequestTimeoutMs, supportsStreamAttempt);
