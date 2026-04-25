@@ -15,6 +15,8 @@ export interface ApiConfigPayload {
   version: 1;
   platformPreset: PlatformPreset;
   apiBaseUrl: string;
+  textApiBaseUrl?: string;
+  imageApiBaseUrl?: string;
   apiKey: string;
   textModel: string;
   imageModel: string;
@@ -149,6 +151,8 @@ export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatform
         platform,
         {
           apiBaseUrl: config.apiBaseUrl,
+          textApiBaseUrl: config.textApiBaseUrl,
+          imageApiBaseUrl: config.imageApiBaseUrl,
           textModel: config.textModel,
           imageModel: config.imageModel,
         },

@@ -1,15 +1,19 @@
 import * as React from 'react';
+import { useAppStore } from '@/store';
 
 type UseAutoSaveTextEditorOptions = {
   value: string;
   onSave: (nextValue: string) => void;
+  draftId?: string;
 };
 
-export function useAutoSaveTextEditor({ value, onSave }: UseAutoSaveTextEditorOptions) {
+export function useAutoSaveTextEditor({ value, onSave, draftId }: UseAutoSaveTextEditorOptions) {
   const [localValue, setLocalValue] = React.useState(value);
   const [isEditing, setIsEditing] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const registerDraftFlusher = useAppStore((state) => state.registerDraftFlusher);
+  const unregisterDraftFlusher = useAppStore((state) => state.unregisterDraftFlusher);
 
   React.useEffect(() => {
     setLocalValue(value);
@@ -63,6 +67,12 @@ export function useAutoSaveTextEditor({ value, onSave }: UseAutoSaveTextEditorOp
       textareaRef.current?.setSelectionRange(length, length);
     });
   }, [isEditing]);
+
+  React.useEffect(() => {
+    if (!draftId) return;
+    registerDraftFlusher(draftId, saveIfChanged);
+    return () => unregisterDraftFlusher(draftId);
+  }, [draftId, registerDraftFlusher, saveIfChanged, unregisterDraftFlusher]);
 
   return {
     containerRef,

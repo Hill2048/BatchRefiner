@@ -26,7 +26,7 @@ import pLimit from "p-limit";
 import { SettingsDialog } from "../SettingsDialog";
 import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { MarkdownEditorDialog } from "../MarkdownEditorDialog";
-import { AspectRatio, Resolution, Task } from "@/types";
+import { AspectRatio, Resolution, Task, TaskResultImage } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { optimizeDataUrlForUpload, readImageFileToDataUrl } from "@/lib/taskFileImport";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
@@ -40,8 +40,10 @@ import {
   supportsProjectFileSave,
   writeProjectFile,
 } from "@/lib/projectFileSave";
-import { getResultImageBlob } from "@/lib/resultImageCache";
 import { getTaskBatchFileName } from "@/lib/resultImageFileName";
+import { getResultImageAssetExtension } from "@/lib/resultImageAsset";
+import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from "@/lib/resultImageDownload";
+import { appendGenerationLogEvent } from "@/lib/appLogger";
 
 function SidebarProgress() {
   const tasksCount = useAppStore(state => state.tasks.length);
@@ -69,8 +71,8 @@ function SidebarProgress() {
   );
 }
 
-async function resultImageToBlob(resultImage: string) {
-  return getResultImageBlob(resultImage);
+async function resultImageToBlob(resultImage: TaskResultImage) {
+  return resolveResultImageDownloadBlob(resultImage);
 }
 
 function getExportableTaskImages(task: Task) {
@@ -104,10 +106,12 @@ export function Sidebar({
   className = "",
   style,
   compact = false,
+  showQuickAdd = true,
 }: {
   className?: string,
   style?: React.CSSProperties,
   compact?: boolean,
+  showQuickAdd?: boolean,
   onRequestClose?: () => void,
 }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -138,6 +142,14 @@ export function Sidebar({
   const projectName = useAppStore((state) => state.projectName);
   const projectId = useAppStore((state) => state.projectId);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
+  const generationLogs = useAppStore((state) => state.generationLogs);
+  const getLatestTaskLogSessionId = React.useCallback(
+    (taskId: string) =>
+      generationLogs
+        .filter((session) => session.taskId === taskId)
+        .sort((left, right) => right.createdAt - left.createdAt)[0]?.id,
+    [generationLogs],
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mdInputRef = useRef<HTMLInputElement>(null);
@@ -185,6 +197,7 @@ export function Sidebar({
             ...t, 
             description: globalTargetText || t.description,
             promptText: undefined, // Clear old prompt cache
+            promptInputSignature: undefined,
             resultImage: undefined, // Clear old image results
             resultImages: [],
             failedResultCount: 0,
@@ -400,8 +413,8 @@ export function Sidebar({
     const finalTasksToExport = tasksToExport.length > 0 ? tasksToExport : matchingTasks;
     const isReExport = tasksToExport.length === 0;
 
-    const getFilename = (task: (typeof tasksToExport)[number], imageIndex: number) => {
-      return getTaskBatchFileName(task.index, imageIndex, 'jpg');
+    const getFilename = (task: (typeof tasksToExport)[number], imageIndex: number, extension: string) => {
+      return getTaskBatchFileName(task.index, imageIndex, extension);
     };
 
     const exportJobs = finalTasksToExport.flatMap((task) =>
@@ -409,13 +422,14 @@ export function Sidebar({
         task,
         result,
         imageIndex,
-        filename: `${getFilename(task, imageIndex)}.jpg`,
+        filename: getFilename(task, imageIndex, getResultImageAssetExtension(result)),
       }))
     );
     const exportConcurrency = pLimit(4);
     const exportedIdsByTask = new Map<string, Set<string>>(
       finalTasksToExport.map((task) => [task.id, new Set(task.exportedResultIds || [])])
     );
+    const exportFailures: string[] = [];
     let progressCount = 0;
     const progressToastId = toast.loading(
       useSelected
@@ -440,10 +454,51 @@ export function Sidebar({
         await Promise.all(
           exportJobs.map((job) =>
             exportConcurrency(async () => {
-              const blob = await resultImageToBlob(job.result.originalSrc || job.result.src);
-              await writeBlobToDirectory(downloadDirectoryHandle, job.filename, blob);
-              exportedIdsByTask.get(job.task.id)?.add(job.result.id);
-              successCount += 1;
+              try {
+                const { blob } = await resultImageToBlob(job.result);
+                await writeBlobToDirectory(downloadDirectoryHandle, job.filename, blob);
+                exportedIdsByTask.get(job.task.id)?.add(job.result.id);
+                successCount += 1;
+                const logSessionId = getLatestTaskLogSessionId(job.task.id);
+                if (logSessionId) {
+                  appendGenerationLogEvent(logSessionId, {
+                    stage: 'export',
+                    event: 'export.directory.succeeded',
+                    message: '结果图已写入目录',
+                    data: {
+                      fileName: job.filename,
+                      resultId: job.result.id,
+                    },
+                  });
+                }
+              } catch (error) {
+                const failure = error instanceof ResultImageDownloadError
+                  ? error
+                  : new ResultImageDownloadError({
+                      message: error instanceof Error ? error.message : '写入结果图失败',
+                      stage: 'save',
+                      status: 'save_failed',
+                      sourceType: job.result.downloadSourceType || 'src',
+                      cacheStatus: job.result.downloadCacheStatus || 'failed',
+                    });
+                exportFailures.push(`${job.filename}: ${getResultDownloadDiagnostics(job.result, failure)} / ${failure.message}`);
+                const logSessionId = getLatestTaskLogSessionId(job.task.id);
+                if (logSessionId) {
+                  appendGenerationLogEvent(logSessionId, {
+                    level: 'error',
+                    stage: 'export',
+                    event: 'export.directory.failed',
+                    message: '结果图写入目录失败',
+                    data: {
+                      fileName: job.filename,
+                      resultId: job.result.id,
+                      stage: failure.stage,
+                      status: failure.status,
+                      message: failure.message,
+                    },
+                  });
+                }
+              }
               progressCount += 1;
               updateProgressToast('正在写入结果图');
             })
@@ -457,12 +512,14 @@ export function Sidebar({
           });
         }
 
-        toast.success(
-          useSelected
-            ? `${isReExport ? "已重新导出" : "已导出"}所选任务中的 ${successCount} 张结果图到指定目录`
-            : `${isReExport ? "已重新导出" : "已写入"} ${successCount} 张结果图到指定目录`
-          , { id: progressToastId }
-        );
+        const baseMessage = useSelected
+          ? `${isReExport ? "已重新导出" : "已导出"}所选任务中的 ${successCount} 张结果图到指定目录`
+          : `${isReExport ? "已重新导出" : "已写入"} ${successCount} 张结果图到指定目录`;
+        if (exportFailures.length > 0) {
+          toast.error(`${baseMessage}，失败 ${exportFailures.length} 张：${exportFailures.slice(0, 3).join('；')}`, { id: progressToastId });
+        } else {
+          toast.success(baseMessage, { id: progressToastId });
+        }
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入指定目录失败，已回退为 ZIP 下载。";
@@ -479,12 +536,49 @@ export function Sidebar({
       exportJobs.map((job) =>
         exportConcurrency(async () => {
           try {
-            const blob = await resultImageToBlob(job.result.originalSrc || job.result.src);
+            const { blob } = await resultImageToBlob(job.result);
             progressCount += 1;
             updateProgressToast('正在读取结果图');
+            const logSessionId = getLatestTaskLogSessionId(job.task.id);
+            if (logSessionId) {
+              appendGenerationLogEvent(logSessionId, {
+                stage: 'export',
+                event: 'export.zip.read_succeeded',
+                message: '结果图已加入导出队列',
+                data: {
+                  fileName: job.filename,
+                  resultId: job.result.id,
+                },
+              });
+            }
             return { ...job, blob };
           } catch (error) {
-            console.error("Export image error", error);
+            const failure = error instanceof ResultImageDownloadError
+              ? error
+              : new ResultImageDownloadError({
+                  message: error instanceof Error ? error.message : '读取结果图失败',
+                  stage: 'fetch',
+                  status: 'fetch_failed',
+                  sourceType: job.result.downloadSourceType || 'src',
+                  cacheStatus: job.result.downloadCacheStatus || 'failed',
+                });
+            exportFailures.push(`${job.filename}: ${getResultDownloadDiagnostics(job.result, failure)} / ${failure.message}`);
+            const logSessionId = getLatestTaskLogSessionId(job.task.id);
+            if (logSessionId) {
+              appendGenerationLogEvent(logSessionId, {
+                level: 'error',
+                stage: 'export',
+                event: 'export.zip.read_failed',
+                message: '结果图导出读取失败',
+                data: {
+                  fileName: job.filename,
+                  resultId: job.result.id,
+                  stage: failure.stage,
+                  status: failure.status,
+                  message: failure.message,
+                },
+              });
+            }
             return null;
           }
         })
@@ -511,12 +605,14 @@ export function Sidebar({
     );
     const blob = await zip.generateAsync({ type: "blob" });
     saveAs(blob, `Batch_${projectName}_Results.zip`);
-    toast.success(
-      useSelected
-        ? `${isReExport ? "已重新导出" : "成功导出"}所选任务中的 ${exportedCount} 张结果图`
-        : `${isReExport ? "已重新导出" : "成功导出"} ${exportedCount} 张结果图`
-      , { id: progressToastId }
-    );
+    const zipMessage = useSelected
+      ? `${isReExport ? "已重新导出" : "成功导出"}所选任务中的 ${exportedCount} 张结果图`
+      : `${isReExport ? "已重新导出" : "成功导出"} ${exportedCount} 张结果图`;
+    if (exportFailures.length > 0) {
+      toast.error(`${zipMessage}，失败 ${exportFailures.length} 张：${exportFailures.slice(0, 3).join('；')}`, { id: progressToastId });
+    } else {
+      toast.success(zipMessage, { id: progressToastId });
+    }
   };
 
   const handleExportProject = async () => {
@@ -608,6 +704,7 @@ export function Sidebar({
     <div className={`flex min-h-0 flex-col gap-5 ${compact ? 'py-2' : 'py-4'} ${className}`} style={style}>
       
       {/* 1. Quick Add (Moved to top) */}
+      {showQuickAdd ? (
       <div className="shrink-0 flex flex-col gap-2">
          <h3 className="text-[12.6px] font-medium text-text-secondary px-2">任务快捷导入</h3>
          <div className="relative flex items-end bg-card rounded-2xl border border-transparent focus-within:border-button-main/20 transition-all p-2 gap-1 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
@@ -663,6 +760,7 @@ export function Sidebar({
             </button>
          </div>
       </div>
+      ) : null}
 
       {/* 2. Scrollable Body */}
       <ScrollArea className={`${compact ? '-mx-4 px-4' : '-mx-6 px-6'} flex-1 min-h-0`}>

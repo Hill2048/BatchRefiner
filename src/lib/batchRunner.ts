@@ -4,7 +4,17 @@ import pLimit from "p-limit";
 import { toast } from "sonner";
 import { getBatchCountNumber, getEffectiveBatchCount } from "./taskResults";
 import { getExecutablePromptText, getPreparedPromptText, isPromptOptimizationEnabled } from "./promptExecution";
-import { primeTaskResultImageCache } from "./resultImageCache";
+import { dataUrlToBlob, primeResultImageCache, primeTaskResultImageCache, storeResultImageBlob } from "./resultImageCache";
+import { getResultImageAssetSrc, inferResultImageAssetMetadata, isValidResultImageAssetSrc } from "./resultImageAsset";
+import {
+  appendGenerationLogEvent,
+  buildGenerationTaskSnapshot,
+  buildImageResultSummary,
+  createGenerationLogSession,
+  finishGenerationLogSession,
+  sanitizeLogData,
+  updateGenerationLogSummary,
+} from "./appLogger";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const PROMPT_REQUEST_TIMEOUT_MS = 90_000;
@@ -44,6 +54,19 @@ interface GeneratedImageResult {
   sourceType: "preview" | "original" | "base64";
   previewSrc?: string;
   originalSrc?: string;
+  assetSrc?: string;
+  assetMimeType?: string;
+  assetExtension?: string;
+  downloadSourceType?: "original" | "src" | "data_url";
+  downloadCacheStatus?: "primed" | "miss" | "failed";
+  normalizationStatus?: "ok" | "invalid_source" | "download_unreachable";
+  downloadStatus?: "ready" | "fetch_failed" | "cache_failed" | "save_failed" | "invalid_source";
+  downloadFailureStage?: "normalize" | "fetch" | "cache" | "save";
+  downloadFailureReason?: string;
+  assetWidth?: number;
+  assetHeight?: number;
+  requestedWidth?: number;
+  requestedHeight?: number;
   generationTimeMs?: number;
 }
 
@@ -54,6 +77,161 @@ interface GeneratedBatchResult {
 
 interface RunImageGenerationOptions {
   onImage?: (image: TaskResultImage, images: TaskResultImage[], failedCount: number) => void;
+  logSessionId?: string;
+}
+
+interface GeneratedPromptResult {
+  promptText: string;
+  inputSignature: string;
+  logSessionId?: string;
+}
+
+interface GenerationLogContext {
+  logSessionId?: string;
+  triggerId?: string;
+  mode?: "prompt-preview" | "prompt-batch" | "image-single" | "image-batch" | "all-batch";
+}
+
+function getRequestPathLabel(url: string) {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+function summarizePromptImages(imageInputs: string[]) {
+  return imageInputs.map((image, index) => ({
+    index,
+    sourceType: image.startsWith('data:image/') ? 'data_url' : image.startsWith('blob:') ? 'blob' : 'url',
+    length: image.length,
+    preview: typeof image === 'string' ? image.slice(0, 64) : '',
+  }));
+}
+
+function summarizeTextForLog(text: string, previewLength = 180) {
+  return {
+    length: text.length,
+    preview: text.slice(0, previewLength),
+  };
+}
+
+async function summarizeGenerationImageInputs(task: Task, imageInputs: string[]) {
+  const sources = getTaskImageInputsDetailed(task, useAppStore.getState().globalReferenceImages);
+  const summaries = await Promise.all(
+    imageInputs.map(async (image, index) => {
+      const dimensions = await measureImageDimensions(image);
+      const mimeMatch = image.match(/^data:(image\/[^;]+);base64,/i);
+      return {
+        index,
+        role: sources[index]?.type || 'reference',
+        mime: mimeMatch?.[1] || 'image/unknown',
+        length: image.length,
+        width: dimensions?.width,
+        height: dimensions?.height,
+        preview: image.slice(0, 48),
+      };
+    }),
+  );
+  return summaries;
+}
+
+function summarizeJsonImageRequestBody(payload: Record<string, unknown>, promptText?: string) {
+  const summary: Record<string, unknown> = {
+    keys: Object.keys(payload),
+  };
+
+  if (typeof payload.model === "string") summary.model = payload.model;
+  if (typeof payload.size === "string") summary.size = payload.size;
+  if (typeof payload.quality === "string") summary.quality = payload.quality;
+  if (typeof payload.response_format === "string") summary.responseFormat = payload.response_format;
+  if (typeof payload.n === "number" || typeof payload.n === "string") summary.n = payload.n;
+  if (typeof payload.sampleCount === "number") summary.sampleCount = payload.sampleCount;
+  if (typeof payload.aspect_ratio === "string") summary.aspectRatio = payload.aspect_ratio;
+
+  if (Array.isArray(payload.image)) {
+    summary.imageCount = payload.image.length;
+  } else if (payload.image) {
+    summary.hasImage = true;
+  }
+
+  if (payload.messages) {
+    summary.hasMessages = true;
+  }
+
+  if (payload.contents) {
+    summary.hasContents = true;
+  }
+
+  if (payload.parameters && typeof payload.parameters === "object") {
+    summary.parameters = sanitizeLogData(payload.parameters);
+  }
+
+  if (promptText) {
+    summary.prompt = summarizeTextForLog(promptText);
+  } else if (typeof payload.prompt === "string") {
+    summary.prompt = summarizeTextForLog(payload.prompt);
+  }
+
+  return sanitizeLogData(summary) as Record<string, unknown>;
+}
+
+function summarizeFormDataForLog(fields: Record<string, unknown>, promptText?: string) {
+  const summary: Record<string, unknown> = {
+    ...fields,
+  };
+  if (promptText) {
+    summary.prompt = summarizeTextForLog(promptText);
+  }
+  return sanitizeLogData(summary) as Record<string, unknown>;
+}
+
+function summarizeGeneratedImageResponse(result: GeneratedImageResult) {
+  return sanitizeLogData({
+    sourceType: result.sourceType,
+    hasPreviewSrc: Boolean(result.previewSrc),
+    hasOriginalSrc: Boolean(result.originalSrc),
+    responseKind: result.src.startsWith("data:image/")
+      ? "data_url"
+      : result.src.startsWith("http")
+        ? "url"
+        : result.src.startsWith("blob:")
+          ? "blob"
+          : "unknown",
+    srcPreview: result.src.slice(0, 120),
+    requestedWidth: result.requestedWidth,
+    requestedHeight: result.requestedHeight,
+    generationTimeMs: result.generationTimeMs,
+  }) as Record<string, unknown>;
+}
+
+function buildResultSizeComparison(image: TaskResultImage) {
+  const requestedWidth = image.requestedWidth;
+  const requestedHeight = image.requestedHeight;
+  const actualWidth = image.assetWidth || image.width;
+  const actualHeight = image.assetHeight || image.height;
+
+  return sanitizeLogData({
+    requestedWidth,
+    requestedHeight,
+    requestedSize:
+      requestedWidth && requestedHeight ? `${requestedWidth}x${requestedHeight}` : undefined,
+    actualWidth,
+    actualHeight,
+    actualSize:
+      actualWidth && actualHeight ? `${actualWidth}x${actualHeight}` : undefined,
+  }) as Record<string, unknown>;
+}
+
+interface PromptInputSignatureContext {
+  globalReferenceImages?: string[];
+  globalSkillText?: string;
+  enablePromptOptimization?: boolean;
+  textModel?: string;
+  platformPreset?: PlatformPreset;
+  apiBaseUrl?: string;
+  textApiBaseUrl?: string;
 }
 
 function getBuiltInGeminiApiKey() {
@@ -75,9 +253,54 @@ function isGptImageModel(model?: string) {
   return normalized.startsWith("gpt-image") || normalized === "image2";
 }
 
-function isFlexibleGptImage2Model(model?: string) {
+function isDocumentedImage2Model(model?: string) {
   const normalized = getNormalizedModelName(model);
   return normalized === "image2" || normalized.startsWith("gpt-image-2");
+}
+
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+export function buildPromptInputSignature(
+  task: Pick<Task, "description" | "referenceImages">,
+  context: PromptInputSignatureContext,
+) {
+  const signaturePayload = {
+    description: task.description?.trim() || "",
+    referenceImages: task.referenceImages || [],
+    globalReferenceImages: context.globalReferenceImages || [],
+    globalSkillText: context.globalSkillText?.trim() || "",
+    enablePromptOptimization: context.enablePromptOptimization !== false,
+    textModel: context.textModel || "",
+    platformPreset: context.platformPreset,
+    apiBaseUrl: context.textApiBaseUrl || context.apiBaseUrl || "",
+  };
+
+  return stableStringify(signaturePayload);
+}
+
+export function getTaskPromptInputSignature(task: Pick<Task, "description" | "referenceImages">): string {
+  const store = useAppStore.getState();
+  return buildPromptInputSignature(task, store);
+}
+
+export function isTaskPromptCurrent(task: Pick<Task, "description" | "referenceImages" | "promptText" | "promptInputSignature">) {
+  const promptText = task.promptText?.trim();
+  if (!promptText) return false;
+  return task.promptInputSignature === getTaskPromptInputSignature(task);
 }
 
 function isComflyResponsesImageModel(model?: string, platformPreset?: PlatformPreset) {
@@ -144,6 +367,14 @@ function getPlatformPreset() {
   return (useAppStore.getState().platformPreset || "comfly-chat") as PlatformPreset;
 }
 
+function getTextApiBaseUrl(store: { apiBaseUrl?: string; textApiBaseUrl?: string }) {
+  return (store.textApiBaseUrl || store.apiBaseUrl || "").trim();
+}
+
+function getImageApiBaseUrl(store: { apiBaseUrl?: string; imageApiBaseUrl?: string; textApiBaseUrl?: string }) {
+  return (store.imageApiBaseUrl || store.apiBaseUrl || store.textApiBaseUrl || "").trim();
+}
+
 function isGeminiGatewayPreset(platformPreset: PlatformPreset) {
   return platformPreset === "gemini-native";
 }
@@ -171,7 +402,7 @@ function normalizeImageQuality(value?: ImageQuality | string): ImageQuality {
   }
 }
 
-function getEffectiveImageQuality(task: Task): ImageQuality {
+function getEffectiveImageQuality(task: Pick<Task, "imageQuality">): ImageQuality {
   const store = useAppStore.getState();
   return normalizeImageQuality(task.imageQuality || store.globalImageQuality || "auto");
 }
@@ -210,6 +441,18 @@ function getTaskImageInputs(task: Task, globalReferenceImages: string[]) {
   if (task.sourceImage) images.push(task.sourceImage);
   if (task.referenceImages?.length) images.push(...task.referenceImages);
   if (globalReferenceImages.length) images.push(...globalReferenceImages);
+  return images;
+}
+
+function getTaskImageInputsDetailed(task: Task, globalReferenceImages: string[]) {
+  const images: Array<{ type: 'source' | 'reference' | 'global_reference'; src: string }> = [];
+  if (task.sourceImage) images.push({ type: 'source', src: task.sourceImage });
+  if (task.referenceImages?.length) {
+    images.push(...task.referenceImages.map((src) => ({ type: 'reference' as const, src })));
+  }
+  if (globalReferenceImages.length) {
+    images.push(...globalReferenceImages.map((src) => ({ type: 'global_reference' as const, src })));
+  }
   return images;
 }
 
@@ -314,9 +557,10 @@ export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey
 function assertImageInputSupport(task: Task) {
   const store = useAppStore.getState();
   const platformPreset = getPlatformPreset();
+  const imageApiBaseUrl = getImageApiBaseUrl(store);
   if (!taskHasImageInputs(task, store.globalReferenceImages)) return;
 
-  if (!supportsImageInput(store.imageModel, store.apiBaseUrl, store.apiKey, platformPreset)) {
+  if (!supportsImageInput(store.imageModel, imageApiBaseUrl, store.apiKey, platformPreset)) {
     throw createStageError(
       "当前模型不支持基于原图或参考图生成，请切换到支持图片输入的模型后再执行。",
       "Image Generation"
@@ -404,11 +648,30 @@ function looksLikeBase64Image(value: string) {
   return /^[A-Za-z0-9+/=\r\n]+$/.test(normalized);
 }
 
-function extractBase64ImageFromPayload(payload: unknown): string | null {
+function extractBase64MimeTypeFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const directKeys = ["mime_type", "mimeType", "content_type", "contentType"];
+  for (const key of directKeys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim().startsWith("image/")) {
+      return value.trim().toLowerCase();
+    }
+  }
+
+  for (const value of Object.values(record)) {
+    const candidate = extractBase64MimeTypeFromPayload(value);
+    if (candidate) return candidate;
+  }
+
+  return null;
+}
+
+function extractBase64ImageFromPayload(payload: unknown): { base64: string; mimeType?: string } | null {
   if (!payload) return null;
 
   if (typeof payload === "string") {
-    return looksLikeBase64Image(payload) ? payload.trim() : null;
+    return looksLikeBase64Image(payload) ? { base64: payload.trim() } : null;
   }
 
   if (Array.isArray(payload)) {
@@ -425,7 +688,10 @@ function extractBase64ImageFromPayload(payload: unknown): string | null {
     for (const key of directKeys) {
       const value = record[key];
       if (typeof value === "string" && looksLikeBase64Image(value)) {
-        return value.trim();
+        return {
+          base64: value.trim(),
+          mimeType: extractBase64MimeTypeFromPayload(payload) || undefined,
+        };
       }
     }
 
@@ -497,7 +763,8 @@ function classifyImageSourceType(candidate: string) {
 function extractImageResultFromResponse(payload: unknown): GeneratedImageResult | null {
   const rawBase64 = extractBase64ImageFromPayload(payload);
   if (rawBase64) {
-    const src = rawBase64.startsWith("data:image/") ? rawBase64 : `data:image/png;base64,${rawBase64}`;
+    const mimeType = rawBase64.mimeType || "image/png";
+    const src = rawBase64.base64.startsWith("data:image/") ? rawBase64.base64 : `data:${mimeType};base64,${rawBase64.base64}`;
     return {
       src,
       sourceType: "base64",
@@ -533,26 +800,125 @@ async function measureImageDimensions(src: string): Promise<ImageDimensions | nu
   });
 }
 
+async function cacheDownloadableResultSources(result: GeneratedImageResult) {
+  const preferredDownloadSrc = result.src;
+  if (!preferredDownloadSrc) return;
+
+  try {
+    if (preferredDownloadSrc.startsWith("data:")) {
+      const blob = dataUrlToBlob(preferredDownloadSrc);
+      await storeResultImageBlob(preferredDownloadSrc, blob);
+      if (result.src && result.src !== preferredDownloadSrc) {
+        await storeResultImageBlob(result.src, blob);
+      }
+      return;
+    }
+
+    await primeTaskResultImageCache([preferredDownloadSrc]);
+  } catch {
+    // Cache warmup is best-effort and should not block the main flow.
+  }
+}
+
 async function createTaskResultImage(result: GeneratedImageResult, sessionId?: string): Promise<TaskResultImage> {
-  const dimensions = await measureImageDimensions(result.src);
-  void primeTaskResultImageCache([result.src, result.previewSrc, result.originalSrc]);
+  const assetSrc = result.src;
+  const hasValidAssetSrc = isValidResultImageAssetSrc(assetSrc);
+  const dimensions = hasValidAssetSrc ? await measureImageDimensions(assetSrc) : null;
+  let downloadCacheStatus = result.downloadCacheStatus;
+  let normalizationStatus = result.normalizationStatus;
+  let downloadStatus = result.downloadStatus;
+  let downloadFailureStage = result.downloadFailureStage;
+  let downloadFailureReason = result.downloadFailureReason;
+
+  if (!hasValidAssetSrc) {
+    downloadCacheStatus = 'failed';
+    normalizationStatus = 'invalid_source';
+    downloadStatus = 'invalid_source';
+    downloadFailureStage = 'normalize';
+    downloadFailureReason = '结果图源无效';
+  } else if (!downloadCacheStatus) {
+    if (assetSrc.startsWith("data:")) {
+      const blob = dataUrlToBlob(assetSrc);
+      await storeResultImageBlob(assetSrc, blob);
+      if (result.src && result.src !== assetSrc) {
+        await storeResultImageBlob(result.src, blob);
+      }
+      downloadCacheStatus = 'primed';
+      const assetMetadata = inferResultImageAssetMetadata(assetSrc, blob);
+      result.assetMimeType = result.assetMimeType || assetMetadata.mimeType;
+      result.assetExtension = result.assetExtension || assetMetadata.extension;
+    } else {
+      downloadCacheStatus = await primeResultImageCache(assetSrc);
+    }
+  }
+
+  if (hasValidAssetSrc) {
+    await cacheDownloadableResultSources({ ...result, assetSrc });
+  }
+  void primeTaskResultImageCache([assetSrc, result.src, result.previewSrc, result.originalSrc]);
+  const assetWidth = result.assetWidth || dimensions?.width;
+  const assetHeight = result.assetHeight || dimensions?.height;
+  const assetMetadata = inferResultImageAssetMetadata(assetSrc);
+  normalizationStatus =
+    normalizationStatus ||
+    (hasValidAssetSrc ? "ok" : "invalid_source");
+  downloadStatus =
+    downloadStatus ||
+    (normalizationStatus === 'invalid_source'
+      ? 'invalid_source'
+      : downloadCacheStatus === 'failed'
+        ? 'cache_failed'
+        : 'ready');
+  downloadFailureStage =
+    downloadFailureStage ||
+    (normalizationStatus === 'invalid_source'
+      ? 'normalize'
+      : downloadCacheStatus === 'failed'
+        ? 'cache'
+        : undefined);
+  downloadFailureReason =
+    downloadFailureReason ||
+    (normalizationStatus === 'invalid_source'
+      ? '结果图源无效'
+      : downloadCacheStatus === 'failed'
+        ? '结果图缓存预热失败'
+        : undefined);
   return {
     id: crypto.randomUUID(),
     src: result.src,
     previewSrc: result.previewSrc,
     originalSrc: result.originalSrc,
+    assetSrc,
     sourceType: result.sourceType,
+    downloadSourceType: result.downloadSourceType || (assetSrc.startsWith('data:') ? 'data_url' : "src"),
+    downloadCacheStatus,
+    normalizationStatus,
+    downloadStatus,
+    downloadFailureStage,
+    downloadFailureReason,
+    assetMimeType: result.assetMimeType || assetMetadata.mimeType,
+    assetExtension: result.assetExtension || assetMetadata.extension,
     sessionId,
-    width: dimensions?.width,
-    height: dimensions?.height,
+    width: assetWidth,
+    height: assetHeight,
+    assetWidth,
+    assetHeight,
+    requestedWidth: result.requestedWidth,
+    requestedHeight: result.requestedHeight,
     generationTimeMs: result.generationTimeMs,
     createdAt: Date.now(),
   };
 }
 
-function finalizeGeneratedImageResult(result: GeneratedImageResult, startedAt: number): GeneratedImageResult {
+function finalizeGeneratedImageResult(
+  result: GeneratedImageResult,
+  startedAt: number,
+  expectedDimensions?: ImageDimensions | null,
+): GeneratedImageResult {
   return {
     ...result,
+    requestedWidth: expectedDimensions?.width,
+    requestedHeight: expectedDimensions?.height,
     generationTimeMs: Math.max(0, Date.now() - startedAt),
   };
 }
@@ -567,10 +933,10 @@ function buildTaskImageUpdatePayload(task: Task, images: TaskResultImage[], fail
     resultImages: mergedImages,
     resultImage: primaryResult?.src,
     resultImagePreview: primaryResult?.previewSrc,
-    resultImageOriginal: primaryResult?.originalSrc,
+    resultImageOriginal: primaryResult?.originalSrc || primaryResult?.src,
     resultImageSourceType: primaryResult?.sourceType,
-    resultImageWidth: primaryResult?.width,
-    resultImageHeight: primaryResult?.height,
+    resultImageWidth: primaryResult?.assetWidth || primaryResult?.width,
+    resultImageHeight: primaryResult?.assetHeight || primaryResult?.height,
     requestedBatchCount: getEffectiveTaskBatchCount(task),
     failedResultCount: failedCount,
   };
@@ -594,6 +960,37 @@ function updateTaskProgress(taskId: string, status: TaskStatus, progressStage: s
     progressStage,
     errorLog: undefined,
   });
+}
+
+function ensureGenerationLogSession(taskId: string, context: GenerationLogContext = {}) {
+  if (context.logSessionId) return context.logSessionId;
+  const task = useAppStore.getState().tasks.find((item) => item.id === taskId);
+  return createGenerationLogSession({
+    mode: context.mode || 'image-single',
+    task,
+    triggerId: context.triggerId,
+  });
+}
+
+function logGenerationEvent(
+  taskId: string,
+  stage: "prepare" | "prompt" | "image" | "download" | "export" | "writeback",
+  event: string,
+  message: string,
+  context: GenerationLogContext = {},
+  data?: Record<string, unknown>,
+  options?: { level?: "debug" | "info" | "warn" | "error"; incrementAttempt?: boolean },
+) {
+  const sessionId = ensureGenerationLogSession(taskId, context);
+  appendGenerationLogEvent(sessionId, {
+    stage,
+    event,
+    message,
+    data,
+    level: options?.level,
+    incrementAttempt: options?.incrementAttempt,
+  });
+  return sessionId;
 }
 
 function withStreamFlag(body: BodyInit | null | undefined, contentType?: string | null) {
@@ -843,10 +1240,6 @@ function getOpenAIImageSize(aspectRatio: string) {
   return "1024x1024";
 }
 
-function getYunwuDocumentedImageSize(aspectRatio: string) {
-  return getOpenAIImageSize(aspectRatio);
-}
-
 function parseAspectRatioValue(aspectRatio: string) {
   if (!aspectRatio || aspectRatio === "auto") return 1;
   const parts = aspectRatio.split(":");
@@ -919,8 +1312,32 @@ function getImage2ImageSize(aspectRatio: string, resolution: string) {
   return `${width}x${height}`;
 }
 
-function getOpenAIImageQuality(task: Task) {
-  return getEffectiveImageQuality(task);
+export function getOpenAIImageQuality(
+  task: Pick<Task, "imageQuality">,
+  context?: {
+    model?: string;
+    endpoint?: "edits" | "generations";
+    platformPreset?: PlatformPreset;
+  },
+) {
+  const quality = getEffectiveImageQuality(task);
+  if (isDocumentedImage2Model(context?.model)) {
+    return quality === "auto" ? undefined : quality;
+  }
+
+  switch (quality) {
+    case "high":
+      return "hd";
+    case "low":
+    case "medium":
+      return "standard";
+    default:
+      return undefined;
+  }
+}
+
+function getImage2ResponseFormat(model?: string) {
+  return isDocumentedImage2Model(model) ? "b64_json" : undefined;
 }
 
 function parseCustomImageSize(resolution: string) {
@@ -943,16 +1360,57 @@ function parseCustomImageSize(resolution: string) {
   return `${width}x${height}`;
 }
 
+function parseDimensionString(size?: string | null): ImageDimensions | null {
+  const match = String(size || "").trim().match(/^(\d+)x(\d+)$/i);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
 function isExactImage2Size(resolution: string) {
   return Boolean(parseCustomImageSize(resolution));
 }
 
-function getRequestedImageSize(modelName: string, aspectRatio: string, resolution: string) {
-  if (isComflyResponsesImageModel(modelName, "comfly-chat") || isFlexibleGptImage2Model(modelName)) {
+export function getRequestedImageSize(modelName: string, aspectRatio: string, resolution: string) {
+  if (isComflyResponsesImageModel(modelName, "comfly-chat") || isDocumentedImage2Model(modelName)) {
     return parseCustomImageSize(resolution) || getImage2ImageSize(aspectRatio, resolution);
   }
 
   return getOpenAIImageSize(aspectRatio);
+}
+
+export function buildOpenAIImageRequestFields(
+  task: Pick<Task, "imageQuality">,
+  context: {
+    model: string;
+    endpoint: "edits" | "generations";
+    platformPreset: PlatformPreset;
+    aspectRatio: string;
+    resolution: string;
+  },
+) {
+  const normalizedModel = getNormalizedModelName(context.model);
+  const isOpenAIImageModel = isGptImageModel(normalizedModel) || normalizedModel.startsWith("dall-e");
+  if (!isOpenAIImageModel) return {} as Record<string, string>;
+
+  const fields: Record<string, string> = {
+    size: getRequestedImageSize(context.model, context.aspectRatio, context.resolution),
+  };
+  const quality = getOpenAIImageQuality(task, {
+    model: context.model,
+    endpoint: context.endpoint,
+    platformPreset: context.platformPreset,
+  });
+  if (quality) {
+    fields.quality = quality;
+  }
+  const responseFormat = getImage2ResponseFormat(context.model);
+  if (responseFormat) {
+    fields.response_format = responseFormat;
+  }
+  return fields;
 }
 
 function buildComflyResolutionFields(modelName: string, resolution: string, aspectRatio: string) {
@@ -983,7 +1441,10 @@ function extractImageResultFromResponsesApi(payload: any): GeneratedImageResult 
   const base64Image = imageOutput?.result;
   if (typeof base64Image === "string" && base64Image.trim()) {
     const mimeType = imageOutput?.mime_type || "image/png";
-    const src = `data:${mimeType};base64,${base64Image}`;
+    const trimmedBase64Image = base64Image.trim();
+    const src = trimmedBase64Image.startsWith("data:image/")
+      ? trimmedBase64Image
+      : `data:${mimeType};base64,${trimmedBase64Image}`;
     return {
       src,
       sourceType: "base64",
@@ -1030,6 +1491,7 @@ async function retryWrap<T>(fn: () => Promise<T>, maxRetries = 2, delay = 1500):
 export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
   const store = useAppStore.getState();
   const promptOptimizationEnabled = shouldOptimizePrompts();
+  const triggerId = crypto.randomUUID();
 
   if (mode === "prompts" && !promptOptimizationEnabled) {
     toast.info("提示词优化已关闭");
@@ -1058,16 +1520,46 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
   const limit = pLimit(store.maxConcurrency || 3);
   const promises = tasksToProcess.map(task => limit(async () => {
     if (!useAppStore.getState().isBatchRunning) return;
+    const logMode = mode === "prompts" ? "prompt-batch" : mode === "images" ? "image-batch" : "all-batch";
+    const logSessionId = createGenerationLogSession({
+      mode: logMode,
+      task,
+      triggerId,
+      summary: {
+        requestCount: getBatchCountNumber(getEffectiveTaskBatchCount(task)),
+      },
+    });
+    appendGenerationLogEvent(logSessionId, {
+      stage: "prepare",
+      event: "task.batch.started",
+      message: "批量任务开始",
+      data: buildGenerationTaskSnapshot(task, {
+        mode,
+        platformPreset: getPlatformPreset(),
+        textModel: store.textModel,
+        imageModel: store.imageModel,
+        enablePromptOptimization: promptOptimizationEnabled,
+        globalReferenceImageCount: store.globalReferenceImages.length,
+      }),
+    });
 
     window.dispatchEvent(new CustomEvent("scroll-to-task", { detail: { id: task.id } }));
 
     try {
       if (mode === "all" || mode === "prompts") {
         const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
-        if (currentTask && promptOptimizationEnabled && !currentTask.promptText?.trim()) {
+        if (currentTask && promptOptimizationEnabled && !isTaskPromptCurrent(currentTask)) {
           updateTaskProgress(task.id, "Prompting", "准备提示词");
-          const generatedPrompt = await retryWrap(() => generateTaskPrompt(task.id));
-          useAppStore.getState().updateTask(task.id, { promptText: generatedPrompt, promptSource: "auto", errorLog: undefined, progressStage: undefined });
+          const generatedPrompt = await retryWrap(() =>
+            generateTaskPrompt(task.id, { logSessionId, triggerId, mode: logMode }),
+          );
+          useAppStore.getState().updateTask(task.id, {
+            promptText: generatedPrompt.promptText,
+            promptInputSignature: generatedPrompt.inputSignature,
+            promptSource: "auto",
+            errorLog: undefined,
+            progressStage: undefined,
+          });
         }
       }
 
@@ -1087,6 +1579,7 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
             errorLog: undefined,
           });
           const generatedBatch = await runImageGeneration(task.id, {
+            logSessionId,
             onImage: (_image, images, failedCount) => {
               updateTaskWithGeneratedImages(task.id, images, failedCount, "Rendering");
             },
@@ -1105,11 +1598,21 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
               stage: "Image Generation",
             } : undefined,
           });
+          finishGenerationLogSession(logSessionId, generatedBatch.failedCount > 0 ? "partial_success" : "success", {
+            resultCount: generatedBatch.images.length,
+            failedCount: generatedBatch.failedCount,
+            requestCount: getBatchCountNumber(getEffectiveTaskBatchCount(currentTask)),
+          });
         } else if (currentTask && !executablePromptText) {
           throw getMissingPromptError();
         }
       } else {
         useAppStore.getState().updateTask(task.id, { status: "Success" });
+        finishGenerationLogSession(logSessionId, "success", {
+          promptGenerated: promptOptimizationEnabled,
+          resultCount: 0,
+          failedCount: 0,
+        });
       }
     } catch (error: any) {
       if (!useAppStore.getState().isBatchRunning) return;
@@ -1122,6 +1625,19 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
           time: Date.now(),
           stage: error.stage || "Unknown"
         }
+      });
+      appendGenerationLogEvent(logSessionId, {
+        level: "error",
+        stage: mode === "prompts" ? "prompt" : "image",
+        event: "task.batch.failed",
+        message: "批量任务失败",
+        data: {
+          stage: error?.stage || "Unknown",
+          error: sanitizeLogData(error),
+        },
+      });
+      finishGenerationLogSession(logSessionId, "error", {
+        errorMessage: error?.message || "Error occurred",
       });
     }
   }));
@@ -1151,25 +1667,58 @@ export function haltBatch() {
     return t;
   });
   store.setProjectFields({ tasks });
+  store.generationLogs
+    .filter((session) => session.status === "running")
+    .forEach((session) => {
+      finishGenerationLogSession(session.id, "halted", {
+        errorMessage: "已被用户手动中断",
+      });
+    });
 }
 
 export async function processSingleTask(taskId: string) {
   const store = useAppStore.getState();
   const task = store.tasks.find(t => t.id === taskId);
   if (!task) return;
+  const logSessionId = createGenerationLogSession({
+    mode: "image-single",
+    task,
+    summary: {
+      requestCount: getBatchCountNumber(getEffectiveTaskBatchCount(task)),
+    },
+  });
+  appendGenerationLogEvent(logSessionId, {
+    stage: "prepare",
+    event: "task.single.started",
+    message: "单任务执行开始",
+    data: buildGenerationTaskSnapshot(task, {
+      platformPreset: getPlatformPreset(),
+      textModel: store.textModel,
+      imageModel: store.imageModel,
+      enablePromptOptimization: shouldOptimizePrompts(),
+      globalReferenceImageCount: store.globalReferenceImages.length,
+    }),
+  });
 
   try {
     const currentTask = useAppStore.getState().tasks.find(x => x.id === taskId);
     if (!currentTask) return;
 
     let promptText = getExecutionReadyTaskPrompt(currentTask);
-    if (!promptText && shouldOptimizePrompts()) {
+    if (shouldOptimizePrompts() && !isTaskPromptCurrent(currentTask)) {
       updateTaskProgress(taskId, "Prompting", "准备提示词");
-      promptText = await retryWrap(() => generateTaskPrompt(taskId));
-      store.updateTask(taskId, { promptText, promptSource: "auto", errorLog: undefined, progressStage: undefined });
+      const generatedPrompt = await retryWrap(() => generateTaskPrompt(taskId, { logSessionId, mode: "image-single" }));
+      promptText = generatedPrompt.promptText;
+      store.updateTask(taskId, {
+        promptText,
+        promptInputSignature: generatedPrompt.inputSignature,
+        promptSource: "auto",
+        errorLog: undefined,
+        progressStage: undefined,
+      });
       promptText = getExecutionReadyTaskPrompt(useAppStore.getState().tasks.find(x => x.id === taskId) || {
         promptText,
-        description: currentTask.description
+        description: currentTask.description,
       });
     }
 
@@ -1187,6 +1736,7 @@ export async function processSingleTask(taskId: string) {
       errorLog: undefined,
     });
     const generatedBatch = await runImageGeneration(taskId, {
+      logSessionId,
       onImage: (_image, images, failedCount) => {
         updateTaskWithGeneratedImages(taskId, images, failedCount, "Rendering");
       },
@@ -1205,34 +1755,94 @@ export async function processSingleTask(taskId: string) {
       } : undefined,
       status: "Success"
     });
+    finishGenerationLogSession(logSessionId, generatedBatch.failedCount > 0 ? "partial_success" : "success", {
+      promptLength: promptText?.length || 0,
+      resultCount: generatedBatch.images.length,
+      failedCount: generatedBatch.failedCount,
+      requestCount: getBatchCountNumber(getEffectiveTaskBatchCount(currentTask)),
+    });
   } catch (error: any) {
     store.updateTask(taskId, {
       status: "Error",
       progressStage: undefined,
       errorLog: { message: error.message || "Error occurred", time: Date.now(), stage: error.stage }
     });
+    appendGenerationLogEvent(logSessionId, {
+      level: "error",
+      stage: error?.stage === "Prompt Generation" ? "prompt" : "image",
+      event: "task.single.failed",
+      message: "单任务执行失败",
+      data: {
+        stage: error?.stage,
+        error: sanitizeLogData(error),
+      },
+    });
+    finishGenerationLogSession(logSessionId, "error", {
+      errorMessage: error?.message || "Error occurred",
+    });
   }
 }
 
-export async function generateTaskPrompt(taskId: string): Promise<string> {
+export async function generateTaskPrompt(taskId: string, context: GenerationLogContext = {}): Promise<GeneratedPromptResult> {
   const store = useAppStore.getState();
   const task = store.tasks.find(t => t.id === taskId);
   if (!task) throw new Error("Task not found");
+  const inputSignature = getTaskPromptInputSignature(task);
+  const logSessionId = ensureGenerationLogSession(taskId, {
+    mode: context.mode || "prompt-preview",
+    triggerId: context.triggerId,
+    logSessionId: context.logSessionId,
+  });
+  const ownsSession = !context.logSessionId;
+  const promptStartedAt = Date.now();
 
   updateTaskProgress(taskId, "Prompting", "整理提示词输入");
   const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
   const systemPrompt = "你负责根据用户输入整理出一段可直接用于生图或改图的最终提示词，不强制英文，不额外解释。";
   const contentMsg = buildPromptGenerationText(task, store.globalSkillText || "");
   const platformPreset = getPlatformPreset();
+  const textApiBaseUrl = getTextApiBaseUrl(store);
   const isYunwuPromptImageModel = isYunwuGptImageModel(store.textModel, platformPreset);
-  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuPromptImageModel;
+  const isGeminiGateway = platformPreset === "yunwu" && !!textApiBaseUrl && !!store.apiKey && !isYunwuPromptImageModel;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
+  appendGenerationLogEvent(logSessionId, {
+    stage: "prompt",
+    event: "prompt.started",
+    message: "开始生成提示词",
+    data: buildGenerationTaskSnapshot(task, {
+      mode: context.mode || "prompt-preview",
+      platformPreset,
+      textModel: store.textModel,
+      imageModel: store.imageModel,
+      imageInputCount: imageInputs.length,
+      imageInputs: summarizePromptImages(imageInputs),
+      globalReferenceImageCount: store.globalReferenceImages.length,
+      hasSkill: Boolean((store.globalSkillText || "").trim()),
+      hasDescription: Boolean((task.description || "").trim()),
+    }),
+  });
 
   try {
     {
     if (isGeminiGateway) {
-      const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
+      const geminiBaseUrl = normalizeGeminiBaseUrl(textApiBaseUrl);
+      appendGenerationLogEvent(logSessionId, {
+        stage: "prompt",
+        event: "prompt.images.normalize",
+        message: "开始整理提示词图片",
+        data: { imageInputCount: imageInputs.length },
+      });
       const normalizedImageInputs = await normalizePromptImageInputs(taskId, imageInputs);
+      appendGenerationLogEvent(logSessionId, {
+        stage: "prompt",
+        event: "prompt.request.started",
+        message: "开始请求提示词 API",
+        data: {
+          requestPath: getRequestPathLabel(`${geminiBaseUrl}/models/${store.textModel}:generateContent`),
+          model: store.textModel,
+          imageInputCount: normalizedImageInputs.length,
+        },
+      });
       updateTaskProgress(taskId, "Prompting", "请求提示词 API");
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
       normalizedImageInputs.forEach(image => {
@@ -1262,11 +1872,35 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       }
 
       const json = await res.json();
-      return json.candidates?.[0]?.content?.parts?.map((part: any) => part.text).filter(Boolean).join("\n").trim() || "Generated prompt fallback";
+      const promptText = json.candidates?.[0]?.content?.parts?.map((part: any) => part.text).filter(Boolean).join("\n").trim() || "Generated prompt fallback";
+      updateGenerationLogSummary(logSessionId, {
+        promptGenerated: true,
+        promptLength: promptText.length,
+      });
+      appendGenerationLogEvent(logSessionId, {
+        stage: "prompt",
+        event: "prompt.completed",
+        message: "提示词生成完成",
+        data: {
+          promptLength: promptText.length,
+          elapsedMs: Date.now() - promptStartedAt,
+        },
+      });
+      if (ownsSession) {
+        finishGenerationLogSession(logSessionId, "success", {
+          promptGenerated: true,
+          promptLength: promptText.length,
+        });
+      }
+      return {
+        promptText,
+        inputSignature,
+        logSessionId,
+      };
     }
 
-    if (isCustomOpenAI && store.apiBaseUrl && store.apiKey) {
-      let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
+    if (isCustomOpenAI && textApiBaseUrl && store.apiKey) {
+      let baseUrl = textApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
       const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
         { type: "text", text: contentMsg }
@@ -1297,7 +1931,31 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       }
 
       const json = await res.json();
-      return json.choices?.[0]?.message?.content?.trim() || "Generated prompt fallback";
+      const promptText = json.choices?.[0]?.message?.content?.trim() || "Generated prompt fallback";
+      updateGenerationLogSummary(logSessionId, {
+        promptGenerated: true,
+        promptLength: promptText.length,
+      });
+      appendGenerationLogEvent(logSessionId, {
+        stage: "prompt",
+        event: "prompt.completed",
+        message: "提示词生成完成",
+        data: {
+          promptLength: promptText.length,
+          elapsedMs: Date.now() - promptStartedAt,
+        },
+      });
+      if (ownsSession) {
+        finishGenerationLogSession(logSessionId, "success", {
+          promptGenerated: true,
+          promptLength: promptText.length,
+        });
+      }
+      return {
+        promptText,
+        inputSignature,
+        logSessionId,
+      };
     }
 
     const apiKey = getBuiltInGeminiApiKey();
@@ -1333,7 +1991,31 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
     }
 
     const json = await res.json();
-    return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Generated prompt fallback";
+    const promptText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Generated prompt fallback";
+    updateGenerationLogSummary(logSessionId, {
+      promptGenerated: true,
+      promptLength: promptText.length,
+    });
+    appendGenerationLogEvent(logSessionId, {
+      stage: "prompt",
+      event: "prompt.completed",
+      message: "提示词生成完成",
+      data: {
+        promptLength: promptText.length,
+        elapsedMs: Date.now() - promptStartedAt,
+      },
+    });
+    if (ownsSession) {
+      finishGenerationLogSession(logSessionId, "success", {
+        promptGenerated: true,
+        promptLength: promptText.length,
+      });
+    }
+    return {
+      promptText,
+      inputSignature,
+      logSessionId,
+    };
     }
 
     if (isGeminiGateway) {
@@ -1341,7 +2023,7 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
         updateTaskProgress(taskId, "Prompting", "读取提示词图片");
       }
       updateTaskProgress(taskId, "Prompting", imageInputs.length > 0 ? "上传提示词图片" : "请求提示词 API");
-      const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
+      const geminiBaseUrl = normalizeGeminiBaseUrl(textApiBaseUrl);
       const normalizedImageInputs = await Promise.all(imageInputs.map(imageInputToDataUrl));
       updateTaskProgress(taskId, "Prompting", "请求提示词 API");
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: contentMsg }];
@@ -1371,13 +2053,16 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       }
 
       const json = await res.json();
-      return json.candidates?.[0]?.content?.parts?.map((part: any) => part.text).filter(Boolean).join("\n").trim() || "Generated prompt fallback";
+      return {
+        promptText: json.candidates?.[0]?.content?.parts?.map((part: any) => part.text).filter(Boolean).join("\n").trim() || "Generated prompt fallback",
+        inputSignature,
+      };
     }
 
-    if (isCustomOpenAI && store.apiBaseUrl && store.apiKey) {
+    if (isCustomOpenAI && textApiBaseUrl && store.apiKey) {
       updateTaskProgress(taskId, "Prompting", "请求提示词 API");
       updateTaskProgress(taskId, "Prompting", imageInputs.length > 0 ? "上传提示词图片" : "请求提示词 API");
-      let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
+      let baseUrl = textApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
       const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
         { type: "text", text: contentMsg }
@@ -1407,7 +2092,31 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
       }
 
       const json = await res.json();
-      return json.choices?.[0]?.message?.content?.trim() || "Generated prompt fallback";
+      const promptText = json.choices?.[0]?.message?.content?.trim() || "Generated prompt fallback";
+      updateGenerationLogSummary(logSessionId, {
+        promptGenerated: true,
+        promptLength: promptText.length,
+      });
+      appendGenerationLogEvent(logSessionId, {
+        stage: "prompt",
+        event: "prompt.completed",
+        message: "提示词生成完成",
+        data: {
+          promptLength: promptText.length,
+          elapsedMs: Date.now() - promptStartedAt,
+        },
+      });
+      if (ownsSession) {
+        finishGenerationLogSession(logSessionId, "success", {
+          promptGenerated: true,
+          promptLength: promptText.length,
+        });
+      }
+      return {
+        promptText,
+        inputSignature,
+        logSessionId,
+      };
     }
 
     const apiKey = getBuiltInGeminiApiKey();
@@ -1447,25 +2156,66 @@ export async function generateTaskPrompt(taskId: string): Promise<string> {
     }
 
     const json = await res.json();
-    return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Generated prompt fallback";
+    const promptText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Generated prompt fallback";
+    updateGenerationLogSummary(logSessionId, {
+      promptGenerated: true,
+      promptLength: promptText.length,
+    });
+    appendGenerationLogEvent(logSessionId, {
+      stage: "prompt",
+      event: "prompt.completed",
+      message: "提示词生成完成",
+      data: {
+        promptLength: promptText.length,
+        elapsedMs: Date.now() - promptStartedAt,
+      },
+    });
+    if (ownsSession) {
+      finishGenerationLogSession(logSessionId, "success", {
+        promptGenerated: true,
+        promptLength: promptText.length,
+      });
+    }
+    return {
+      promptText,
+      inputSignature,
+      logSessionId,
+    };
   } catch (e: any) {
+    appendGenerationLogEvent(logSessionId, {
+      level: "error",
+      stage: "prompt",
+      event: "prompt.failed",
+      message: "提示词生成失败",
+      data: {
+        error: sanitizeLogData(e),
+        elapsedMs: Date.now() - promptStartedAt,
+      },
+    });
+    if (ownsSession) {
+      finishGenerationLogSession(logSessionId, "error", {
+        errorMessage: e?.message || "Prompt generation failed",
+      });
+    }
     throw createStageError(e.message, "Prompt Generation");
   }
 }
 
-async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageResult> {
+async function runSingleImageGeneration(taskId: string, context: GenerationLogContext = {}): Promise<GeneratedImageResult> {
   const store = useAppStore.getState();
   const task = store.tasks.find(t => t.id === taskId);
   const effectivePromptText = task ? getRenderableTaskPrompt(task) : null;
   if (!task || !effectivePromptText) throw getMissingPromptError();
   const startedAt = Date.now();
+  const logSessionId = ensureGenerationLogSession(taskId, context);
   updateTaskProgress(taskId, "Rendering", "准备参数");
 
   const platformPreset = getPlatformPreset();
+  const imageApiBaseUrl = getImageApiBaseUrl(store);
   const resolution = getEffectiveResolution(task);
   const resolvedModel = resolveImageModel(store.imageModel, resolution, platformPreset);
   const isYunwuGptImage = isYunwuGptImageModel(resolvedModel.actualModel, platformPreset);
-  const isGeminiGateway = platformPreset === "yunwu" && !!store.apiBaseUrl && !!store.apiKey && !isYunwuGptImage;
+  const isGeminiGateway = platformPreset === "yunwu" && !!imageApiBaseUrl && !!store.apiKey && !isYunwuGptImage;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
   const imageRequestTimeoutMs =
     platformPreset === "yunwu" && isYunwuGptImage
@@ -1480,8 +2230,56 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
   }
   const sourceImageDimensions = task.sourceImage ? await measureImageDimensions(task.sourceImage) : null;
   const resolvedAspectRatio = resolveAspectRatioForImage2(task, aspectRatio, sourceImageDimensions);
+  const expectedOutputSize =
+    (isGptImageModel(resolvedModel.actualModel) ||
+      resolvedModel.actualModel.startsWith("dall-e") ||
+      isComflyResponsesImageModel(resolvedModel.actualModel, platformPreset))
+      ? getRequestedImageSize(resolvedModel.actualModel, resolvedAspectRatio, resolution)
+      : null;
+  const expectedOutputDimensions = parseDimensionString(expectedOutputSize);
+  const openAIImageRequestFields =
+    ((platformPreset === "yunwu" && isYunwuGptImage) || isCustomOpenAI) &&
+    (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e"))
+      ? buildOpenAIImageRequestFields(task, {
+          model: resolvedModel.actualModel,
+          endpoint: hasImageInputs ? "edits" : "generations",
+          platformPreset,
+          aspectRatio: resolvedAspectRatio,
+          resolution,
+        })
+      : {};
+  const requestQuality = typeof openAIImageRequestFields.quality === "string" ? openAIImageRequestFields.quality : undefined;
+  const requestResponseFormat =
+    typeof openAIImageRequestFields.response_format === "string"
+      ? openAIImageRequestFields.response_format
+      : undefined;
   useAppStore.getState().updateTask(taskId, {
     lastUsedImageModel: resolvedModel.actualModel
+  });
+  const imageInputSummary = hasImageInputs ? await summarizeGenerationImageInputs(task, imageInputs) : [];
+  appendGenerationLogEvent(logSessionId, {
+    stage: "image",
+    event: "image.prepare.completed",
+    message: "生图参数准备完成",
+    data: {
+      platformPreset,
+      model: resolvedModel.actualModel,
+      requestedModel: resolvedModel.requestedModel,
+      resolvedAspectRatio,
+      resolution,
+      size: expectedOutputSize,
+      uiQuality: getEffectiveImageQuality(task),
+      quality: requestQuality || "auto",
+      responseFormat: requestResponseFormat || "default",
+      timeoutMs: imageRequestTimeoutMs,
+      hasImageInputs,
+      imageInputCount: imageInputs.length,
+      imageInputs: imageInputSummary,
+      supportsStreamAttempt,
+      expectedOutputDimensions: expectedOutputDimensions
+        ? `${expectedOutputDimensions.width}x${expectedOutputDimensions.height}`
+        : undefined,
+    },
   });
 
   let promptForGeneration = effectivePromptText;
@@ -1498,7 +2296,7 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
     if (isGeminiGateway) {
       updateTaskProgress(taskId, "Rendering", hasImageInputs ? "上传到 API" : "请求 API");
-      const geminiBaseUrl = normalizeGeminiBaseUrl(store.apiBaseUrl);
+      const geminiBaseUrl = normalizeGeminiBaseUrl(imageApiBaseUrl);
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
         { text: hasImageInputs ? buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) : promptForGeneration }
       ];
@@ -1527,6 +2325,24 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         (generationConfig.imageConfig as Record<string, unknown>).aspectRatio = geminiAspectRatio;
       }
 
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.request.started",
+        message: "开始请求生图 API",
+        data: {
+          requestPath: getRequestPathLabel(`${geminiBaseUrl}/models/${resolvedModel.actualModel}:generateContent`),
+          method: "POST",
+          requestType: "gemini_gateway_generate_content",
+          body: summarizeJsonImageRequestBody(
+            {
+              contents: [{ role: "user", parts }],
+              generationConfig,
+            },
+            hasImageInputs ? buildImageAwarePrompt(task, promptForGeneration, imageInputs.length, resolution, resolvedAspectRatio) : promptForGeneration,
+          ),
+        },
+      });
+
       const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${resolvedModel.actualModel}:generateContent`, {
         method: "POST",
         headers: buildGeminiGatewayHeaders(store.apiKey),
@@ -1551,31 +2367,59 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
 
       const mimeType = inlineImagePart.inlineData.mimeType || "image/png";
       const src = `data:${mimeType};base64,${inlineImagePart.inlineData.data}`;
-      return finalizeGeneratedImageResult({
+      const finalized = finalizeGeneratedImageResult({
         src,
         sourceType: "base64",
         originalSrc: src
-      }, startedAt);
+      }, startedAt, expectedOutputDimensions);
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.response.received",
+        message: "生图结果已返回",
+        data: summarizeGeneratedImageResponse(finalized),
+      });
+      return finalized;
     }
 
-    if (platformPreset === "yunwu" && isYunwuGptImage && store.apiBaseUrl && store.apiKey) {
-      let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
+    if (platformPreset === "yunwu" && isYunwuGptImage && imageApiBaseUrl && store.apiKey) {
+      let baseUrl = imageApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
-      const yunwuSize = getYunwuDocumentedImageSize(resolvedAspectRatio);
+      const isImage2Request = isDocumentedImage2Model(resolvedModel.actualModel);
 
       if (hasImageInputs) {
         updateTaskProgress(taskId, "Rendering", "上传到 API");
         const formData = new FormData();
         formData.append("model", resolvedModel.actualModel);
         formData.append("prompt", promptForGeneration);
-        formData.append("size", yunwuSize);
-        formData.append("n", "1");
+        Object.entries(openAIImageRequestFields).forEach(([key, value]) => {
+          formData.append(key, value);
+        });
+        if (!isImage2Request) {
+          formData.append("n", "1");
+        }
 
         for (let index = 0; index < imageInputs.length; index += 1) {
           const fileValue = await imageInputToFileValue(imageInputs[index], `reference-${index + 1}`);
           formData.append("image", fileValue);
         }
+
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.request.started",
+          message: "开始请求生图 API",
+          data: {
+            requestPath: getRequestPathLabel(`${baseUrl}/images/edits`),
+            method: "POST",
+            requestType: "openai_image_edits",
+            body: summarizeFormDataForLog({
+              model: resolvedModel.actualModel,
+              ...openAIImageRequestFields,
+              ...(isImage2Request ? {} : { n: 1 }),
+              imageCount: imageInputs.length,
+            }, promptForGeneration),
+          },
+        });
 
         const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
           method: "POST",
@@ -1585,17 +2429,69 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
           body: formData
         }, imageRequestTimeoutMs, supportsStreamAttempt);
 
-        return finalizeGeneratedImageResult(extracted, startedAt);
+        const finalized = finalizeGeneratedImageResult(extracted, startedAt, expectedOutputDimensions);
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.response.received",
+          message: "生图结果已返回",
+          data: summarizeGeneratedImageResponse(finalized),
+        });
+        return finalized;
       }
 
       updateTaskProgress(taskId, "Rendering", "请求 API");
       const requestBody: Record<string, unknown> = {
         model: resolvedModel.actualModel,
         prompt: promptForGeneration,
-        size: yunwuSize,
-        n: 1,
+        ...openAIImageRequestFields,
+        ...(isImage2Request ? {} : { n: 1 }),
       };
 
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.request.started",
+        message: "开始请求生图 API",
+        data: {
+          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          method: "POST",
+          requestType: "openai_image_generations",
+          body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
+        },
+      });
+
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.request.started",
+        message: "开始请求生图 API",
+        data: {
+          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          method: "POST",
+          requestType: "openai_image_generations",
+          body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
+        },
+      });
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.request.started",
+        message: "寮€濮嬭姹傜敓鍥?API",
+        data: {
+          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          method: "POST",
+          requestType: "openai_image_generations",
+          body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
+        },
+      });
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.request.started",
+        message: "寮€濮嬭姹傜敓鍥?API",
+        data: {
+          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          method: "POST",
+          requestType: "openai_image_generations",
+          body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
+        },
+      });
       const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
         method: "POST",
         headers: {
@@ -1605,11 +2501,18 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         body: JSON.stringify(requestBody)
       }, imageRequestTimeoutMs, supportsStreamAttempt);
 
-      return finalizeGeneratedImageResult(extracted, startedAt);
+      const finalized = finalizeGeneratedImageResult(extracted, startedAt, expectedOutputDimensions);
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.response.received",
+        message: "生图结果已返回",
+        data: summarizeGeneratedImageResponse(finalized),
+      });
+      return finalized;
     }
 
     if (isCustomOpenAI) {
-      let baseUrl = store.apiBaseUrl.replace(/\/+$/, "");
+      let baseUrl = imageApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
 
       if (
@@ -1620,14 +2523,35 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         const formData = new FormData();
         formData.append("model", resolvedModel.actualModel);
         formData.append("prompt", promptForGeneration);
-        formData.append("size", getRequestedImageSize(resolvedModel.actualModel, resolvedAspectRatio, resolution));
-        formData.append("quality", getOpenAIImageQuality(task));
-        formData.append("n", "1");
+        const isImage2Request = isDocumentedImage2Model(resolvedModel.actualModel);
+        Object.entries(openAIImageRequestFields).forEach(([key, value]) => {
+          formData.append(key, value);
+        });
+        if (!isImage2Request) {
+          formData.append("n", "1");
+        }
 
         for (let index = 0; index < imageInputs.length; index += 1) {
           const fileValue = await imageInputToFileValue(imageInputs[index], `reference-${index + 1}`);
           formData.append("image", fileValue);
         }
+
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.request.started",
+          message: "开始请求生图 API",
+          data: {
+            requestPath: getRequestPathLabel(`${baseUrl}/images/edits`),
+            method: "POST",
+            requestType: "openai_image_edits",
+            body: summarizeFormDataForLog({
+              model: resolvedModel.actualModel,
+              ...openAIImageRequestFields,
+              ...(isImage2Request ? {} : { n: 1 }),
+              imageCount: imageInputs.length,
+            }, promptForGeneration),
+          },
+        });
 
         const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
           method: "POST",
@@ -1637,7 +2561,14 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
           body: formData
         }, imageRequestTimeoutMs, supportsStreamAttempt);
 
-        return finalizeGeneratedImageResult(extracted, startedAt);
+        const finalized = finalizeGeneratedImageResult(extracted, startedAt, expectedOutputDimensions);
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.response.received",
+          message: "生图结果已返回",
+          data: summarizeGeneratedImageResponse(finalized),
+        });
+        return finalized;
       }
 
       if (isComflyResponsesImageModel(resolvedModel.actualModel, platformPreset) && hasImageInputs) {
@@ -1649,6 +2580,18 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         };
         Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, resolvedAspectRatio));
 
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.request.started",
+          message: "开始请求生图 API",
+          data: {
+            requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+            method: "POST",
+            requestType: "comfly_image_generations",
+            body: summarizeJsonImageRequestBody(requestBody, String(requestBody.prompt || "")),
+          },
+        });
+
         const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
           method: "POST",
           headers: {
@@ -1658,7 +2601,14 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
           body: JSON.stringify(requestBody)
         }, imageRequestTimeoutMs, supportsStreamAttempt);
 
-        return finalizeGeneratedImageResult(extracted, startedAt);
+        const finalized = finalizeGeneratedImageResult(extracted, startedAt, expectedOutputDimensions);
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.response.received",
+          message: "生图结果已返回",
+          data: summarizeGeneratedImageResponse(finalized),
+        });
+        return finalized;
       }
 
       if (hasImageInputs) {
@@ -1676,6 +2626,18 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         if (platformPreset === "comfly-chat") {
           Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, resolvedAspectRatio));
         }
+
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.request.started",
+          message: "开始请求生图 API",
+          data: {
+            requestPath: getRequestPathLabel(`${baseUrl}/chat/completions`),
+            method: "POST",
+            requestType: "chat_completions_image_aware",
+            body: summarizeJsonImageRequestBody(requestBody),
+          },
+        });
 
         const res = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
           method: "POST",
@@ -1695,20 +2657,28 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         updateTaskProgress(taskId, "Rendering", "解析结果");
         const extracted = extractImageResultFromResponse(json);
         if (!extracted) throw new Error("Could not extract image from image-aware model output");
-        return finalizeGeneratedImageResult(extracted, startedAt);
+        const finalized = finalizeGeneratedImageResult(extracted, startedAt, expectedOutputDimensions);
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.response.received",
+          message: "生图结果已返回",
+          data: summarizeGeneratedImageResponse(finalized),
+        });
+        return finalized;
       }
 
       const requestBody: Record<string, unknown> = {
         model: resolvedModel.actualModel,
         prompt: promptForGeneration,
-        n: 1
       };
 
-      if (platformPreset === "comfly-chat") {
+      if (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e")) {
+        Object.assign(requestBody, openAIImageRequestFields);
+        if (!isDocumentedImage2Model(resolvedModel.actualModel)) {
+          requestBody.n = 1;
+        }
+      } else if (platformPreset === "comfly-chat") {
         Object.assign(requestBody, buildComflyResolutionFields(resolvedModel.actualModel, resolution, resolvedAspectRatio));
-      } else if (isGptImageModel(resolvedModel.actualModel) || resolvedModel.actualModel.startsWith("dall-e")) {
-        requestBody.size = getRequestedImageSize(resolvedModel.actualModel, resolvedAspectRatio, resolution);
-        requestBody.quality = getOpenAIImageQuality(task);
       }
 
       updateTaskProgress(taskId, "Rendering", "请求 API");
@@ -1721,7 +2691,14 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
         body: JSON.stringify(requestBody)
       }, imageRequestTimeoutMs, supportsStreamAttempt);
 
-      return finalizeGeneratedImageResult(extracted, startedAt);
+      const finalized = finalizeGeneratedImageResult(extracted, startedAt, expectedOutputDimensions);
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.response.received",
+        message: "生图结果已返回",
+        data: summarizeGeneratedImageResponse(finalized),
+      });
+      return finalized;
     }
 
     const apiKey = getBuiltInGeminiApiKey();
@@ -1770,11 +2747,18 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
       }
 
       const mimeType = inlineImagePart.inlineData.mimeType || "image/png";
-      return finalizeGeneratedImageResult({
+      const finalized = finalizeGeneratedImageResult({
         src: `data:${mimeType};base64,${inlineImagePart.inlineData.data}`,
         sourceType: "base64",
         originalSrc: `data:${mimeType};base64,${inlineImagePart.inlineData.data}`
-      }, startedAt);
+      }, startedAt, expectedOutputDimensions);
+      appendGenerationLogEvent(logSessionId, {
+        stage: "image",
+        event: "image.response.received",
+        message: "生图结果已返回",
+        data: summarizeGeneratedImageResponse(finalized),
+      });
+      return finalized;
     }
 
     const params: Record<string, unknown> = {
@@ -1808,12 +2792,34 @@ async function runSingleImageGeneration(taskId: string): Promise<GeneratedImageR
     updateTaskProgress(taskId, "Rendering", "解析结果");
     const b64 = json.predictions?.[0]?.bytesBase64Encoded;
     if (!b64) throw new Error("No predictions returned from Imagen");
-    return finalizeGeneratedImageResult({
+    const finalized = finalizeGeneratedImageResult({
       src: `data:image/jpeg;base64,${b64}`,
       sourceType: "base64",
       originalSrc: `data:image/jpeg;base64,${b64}`
-    }, startedAt);
+    }, startedAt, expectedOutputDimensions);
+    appendGenerationLogEvent(logSessionId, {
+      stage: "image",
+      event: "image.response.received",
+      message: "生图结果已返回",
+      data: summarizeGeneratedImageResponse(finalized),
+    });
+    return finalized;
   } catch (e: any) {
+    appendGenerationLogEvent(logSessionId, {
+      level: "error",
+      stage: "image",
+      event: "image.failed",
+      message: "生图请求失败",
+      data: {
+        error: sanitizeLogData(e),
+        model: resolvedModel.actualModel,
+        platformPreset,
+        resolvedAspectRatio,
+        resolution,
+        size: expectedOutputSize,
+        hasImageInputs,
+      },
+    });
     throw createStageError(e.message, "Image Generation");
   }
 }
@@ -1826,19 +2832,92 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
   const targetBatchCount = getBatchCountNumber(getEffectiveTaskBatchCount(task));
   const images: TaskResultImage[] = [];
   let failedCount = 0;
+  const logSessionId = options.logSessionId;
+
+  if (logSessionId) {
+    appendGenerationLogEvent(logSessionId, {
+      stage: "image",
+      event: "image.batch.started",
+      message: "开始执行生图批次",
+      data: {
+        targetBatchCount,
+      },
+    });
+  }
 
   for (let index = 0; index < targetBatchCount; index += 1) {
     try {
-      const generatedImage = await runSingleImageGeneration(taskId);
+      if (logSessionId) {
+        appendGenerationLogEvent(logSessionId, {
+          stage: "image",
+          event: "image.attempt.started",
+          message: `开始第 ${index + 1} 次生图请求`,
+          data: {
+            attempt: index + 1,
+            targetBatchCount,
+          },
+          incrementAttempt: true,
+        });
+      }
+      const generatedImage = await runSingleImageGeneration(taskId, { logSessionId });
       const createdImage = await createTaskResultImage(generatedImage, task.activeResultSessionId);
       images.push(createdImage);
+      if (logSessionId) {
+        appendGenerationLogEvent(logSessionId, {
+          stage: "writeback",
+          event: "image.result.saved",
+          message: `第 ${index + 1} 张结果图已写入`,
+          data: {
+            attempt: index + 1,
+            image: buildImageResultSummary([createdImage])[0],
+            sizeComparison: buildResultSizeComparison(createdImage),
+            totalImages: images.length,
+            failedCount,
+          },
+        });
+      }
       options.onImage?.(createdImage, [...images], failedCount);
     } catch (error) {
       failedCount += 1;
+      if (logSessionId) {
+        appendGenerationLogEvent(logSessionId, {
+          level: "error",
+          stage: "image",
+          event: "image.attempt.failed",
+          message: `第 ${index + 1} 次生图请求失败`,
+          data: {
+            attempt: index + 1,
+            failedCount,
+            error: sanitizeLogData(error),
+          },
+        });
+      }
       if (targetBatchCount === 1) {
         throw error;
       }
     }
+  }
+
+  if (logSessionId) {
+    updateGenerationLogSummary(logSessionId, {
+      resultCount: images.length,
+      failedCount,
+      requestCount: targetBatchCount,
+    });
+    appendGenerationLogEvent(logSessionId, {
+      stage: "writeback",
+      event: "image.batch.completed",
+      message: "生图批次执行完成",
+      data: {
+        resultCount: images.length,
+        failedCount,
+        images: buildImageResultSummary(images),
+        sizeComparisons: images.map((image) => ({
+          id: image.id,
+          ...buildResultSizeComparison(image),
+        })),
+      },
+    });
   }
 
   return { images, failedCount };

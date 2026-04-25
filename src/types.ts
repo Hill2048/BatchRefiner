@@ -7,6 +7,8 @@ export type ImageQuality = 'auto' | 'low' | 'medium' | 'high';
 
 export interface PlatformApiConfig {
   apiBaseUrl: string;
+  textApiBaseUrl?: string;
+  imageApiBaseUrl?: string;
   apiKey: string;
   textModel: string;
   imageModel: string;
@@ -20,15 +22,68 @@ export interface ErrorLog {
   stage?: string;
 }
 
+export type GenerationLogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type GenerationLogStage = 'prepare' | 'prompt' | 'image' | 'download' | 'export' | 'writeback';
+export type GenerationLogMode = 'prompt-preview' | 'prompt-batch' | 'image-single' | 'image-batch' | 'all-batch';
+export type GenerationLogStatus = 'running' | 'success' | 'partial_success' | 'error' | 'halted';
+
+export interface GenerationLogEvent {
+  id: string;
+  time: number;
+  level: GenerationLogLevel;
+  stage: GenerationLogStage;
+  event: string;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
+export interface GenerationLogSummary {
+  promptGenerated?: boolean;
+  promptLength?: number;
+  resultCount?: number;
+  failedCount?: number;
+  requestCount?: number;
+  lastStage?: string;
+  errorMessage?: string;
+}
+
+export interface GenerationLogSession {
+  id: string;
+  triggerId?: string;
+  createdAt: number;
+  finishedAt?: number;
+  taskId?: string;
+  taskIndex?: number;
+  taskTitle?: string;
+  mode: GenerationLogMode;
+  status: GenerationLogStatus;
+  attemptCount: number;
+  events: GenerationLogEvent[];
+  summary?: GenerationLogSummary;
+}
+
 export interface TaskResultImage {
   id: string;
   src: string;
   previewSrc?: string;
   originalSrc?: string;
+  assetSrc?: string;
   sourceType?: 'preview' | 'original' | 'base64';
+  downloadSourceType?: 'original' | 'src' | 'data_url';
+  downloadCacheStatus?: 'primed' | 'miss' | 'failed';
+  normalizationStatus?: 'ok' | 'invalid_source' | 'download_unreachable';
+  downloadStatus?: 'ready' | 'fetch_failed' | 'cache_failed' | 'save_failed' | 'invalid_source';
+  downloadFailureStage?: 'normalize' | 'fetch' | 'cache' | 'save';
+  downloadFailureReason?: string;
+  assetMimeType?: string;
+  assetExtension?: string;
   sessionId?: string;
   width?: number;
   height?: number;
+  assetWidth?: number;
+  assetHeight?: number;
+  requestedWidth?: number;
+  requestedHeight?: number;
   generationTimeMs?: number;
   createdAt: number;
 }
@@ -41,6 +96,7 @@ export interface Task {
   sourceImage?: string;
   referenceImages: string[];
   promptText?: string;
+  promptInputSignature?: string;
   resultImage?: string;
   resultImagePreview?: string;
   resultImageOriginal?: string;
@@ -78,10 +134,13 @@ export interface ProjectData {
   skillFileName: string;
   imageModel: string;
   textModel: string;
+  textApiBaseUrl?: string;
+  imageApiBaseUrl?: string;
   globalAspectRatio?: AspectRatio;
   globalResolution?: Resolution;
   globalImageQuality?: ImageQuality;
   globalBatchCount?: BatchCount;
+  generationLogs: GenerationLogSession[];
   createdAt: number;
   updatedAt: number;
   tasks: Task[];

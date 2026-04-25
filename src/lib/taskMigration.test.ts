@@ -22,6 +22,7 @@ test('migrateTask normalizes legacy result image fields', () => {
     createBaseTask({
       resultImage: 'https://example.com/result.png',
       resultImagePreview: 'https://example.com/preview.png',
+      resultImageOriginal: 'https://example.com/original.png',
       resultImageWidth: 100,
       resultImageHeight: 200,
     }),
@@ -29,7 +30,35 @@ test('migrateTask normalizes legacy result image fields', () => {
 
   assert.equal(migrated.resultImages?.length, 1);
   assert.equal(migrated.resultImages?.[0].src, 'https://example.com/result.png');
+  assert.equal(migrated.resultImages?.[0].assetSrc, 'https://example.com/result.png');
+  assert.equal(migrated.resultImages?.[0].assetWidth, 100);
+  assert.equal(migrated.resultImages?.[0].assetHeight, 200);
+  assert.equal(migrated.resultImages?.[0].downloadSourceType, 'src');
   assert.equal(migrated.requestedBatchCount, 'x1');
+});
+
+test('migrateTask preserves requested size without treating auto-resized output as abnormal', () => {
+  const migrated = migrateTask(
+    createBaseTask({
+      resultImages: [{
+        id: 'result-1',
+        src: 'https://example.com/preview.webp',
+        originalSrc: 'https://example.com/original.webp',
+        width: 1023,
+        height: 1537,
+        requestedWidth: 832,
+        requestedHeight: 1248,
+        createdAt: 1,
+      }],
+    }),
+  );
+
+  assert.equal(migrated.resultImages?.[0].assetWidth, 1023);
+  assert.equal(migrated.resultImages?.[0].assetHeight, 1537);
+  assert.equal(migrated.resultImages?.[0].requestedWidth, 832);
+  assert.equal(migrated.resultImages?.[0].requestedHeight, 1248);
+  assert.equal(migrated.resultImages?.[0].normalizationStatus, 'ok');
+  assert.equal(migrated.resultImages?.[0].downloadStatus, 'ready');
 });
 
 test('recoverInterruptedTasks converts in-flight tasks to error state', () => {

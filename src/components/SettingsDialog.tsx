@@ -15,6 +15,7 @@ import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { GenerationLogDialog } from './logs/GenerationLogDialog';
 
 type ResultState = {
   status: 'idle' | 'success' | 'error';
@@ -105,30 +106,40 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
   return {
     'yunwu': {
       apiBaseUrl: 'https://yunwu.ai',
+      textApiBaseUrl: 'https://yunwu.ai',
+      imageApiBaseUrl: 'https://yunwu.ai',
       apiKey: '',
       textModel: 'gemini-3.1-flash-lite-preview',
       imageModel: 'gemini-3.1-flash-image-preview',
     },
     'comfly-chat': {
       apiBaseUrl: 'https://ai.comfly.chat',
+      textApiBaseUrl: 'https://ai.comfly.chat',
+      imageApiBaseUrl: 'https://ai.comfly.chat',
       apiKey: '',
       textModel: 'gemini-3.1-flash-lite-preview',
       imageModel: 'gemini-3.1-flash-image-preview',
     },
     'openai-compatible': {
       apiBaseUrl: '',
+      textApiBaseUrl: '',
+      imageApiBaseUrl: '',
       apiKey: '',
       textModel: 'gpt-4o',
       imageModel: 'gpt-image-2',
     },
     'gemini-native': {
       apiBaseUrl: '',
+      textApiBaseUrl: '',
+      imageApiBaseUrl: '',
       apiKey: '',
       textModel: 'gemini-2.5-flash',
       imageModel: 'imagen-3.0-generate-001',
     },
     'custom': {
       apiBaseUrl: '',
+      textApiBaseUrl: '',
+      imageApiBaseUrl: '',
       apiKey: '',
       textModel: '',
       imageModel: '',
@@ -141,11 +152,19 @@ function mergePlatformConfigs(configs?: Partial<PlatformApiConfigMap> | null): P
   if (!configs) return defaults;
 
   return {
-    'yunwu': { ...defaults['yunwu'], ...(configs['yunwu'] || {}) },
-    'comfly-chat': { ...defaults['comfly-chat'], ...(configs['comfly-chat'] || {}) },
-    'openai-compatible': { ...defaults['openai-compatible'], ...(configs['openai-compatible'] || {}) },
-    'gemini-native': { ...defaults['gemini-native'], ...(configs['gemini-native'] || {}) },
-    'custom': { ...defaults['custom'], ...(configs['custom'] || {}) },
+    'yunwu': normalizePlatformConfig({ ...defaults['yunwu'], ...(configs['yunwu'] || {}) }),
+    'comfly-chat': normalizePlatformConfig({ ...defaults['comfly-chat'], ...(configs['comfly-chat'] || {}) }),
+    'openai-compatible': normalizePlatformConfig({ ...defaults['openai-compatible'], ...(configs['openai-compatible'] || {}) }),
+    'gemini-native': normalizePlatformConfig({ ...defaults['gemini-native'], ...(configs['gemini-native'] || {}) }),
+    'custom': normalizePlatformConfig({ ...defaults['custom'], ...(configs['custom'] || {}) }),
+  };
+}
+
+function normalizePlatformConfig(config: PlatformApiConfigMap[PlatformPreset]): PlatformApiConfigMap[PlatformPreset] {
+  return {
+    ...config,
+    textApiBaseUrl: config.textApiBaseUrl ?? config.apiBaseUrl,
+    imageApiBaseUrl: config.imageApiBaseUrl ?? config.apiBaseUrl,
   };
 }
 
@@ -241,6 +260,7 @@ function StatusBox({ tone, message }: { tone: 'success' | 'error'; message: stri
 
 export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const store = useAppStore();
+  const generationLogs = useAppStore((state) => state.generationLogs);
   const mergedPlatformConfigs = React.useMemo(
     () => mergePlatformConfigs(store.platformConfigs),
     [store.platformConfigs],
@@ -249,6 +269,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [platformPreset, setPlatformPreset] = React.useState<PlatformPreset>(store.platformPreset || 'yunwu');
   const [apiKey, setApiKey] = React.useState(store.apiKey);
   const [apiBaseUrl, setApiBaseUrl] = React.useState(store.apiBaseUrl);
+  const [textApiBaseUrl, setTextApiBaseUrl] = React.useState(store.textApiBaseUrl || store.apiBaseUrl);
+  const [imageApiBaseUrl, setImageApiBaseUrl] = React.useState(store.imageApiBaseUrl || store.apiBaseUrl);
   const [maxConcurrency, setMaxConcurrency] = React.useState(String(store.maxConcurrency));
   const [localTextModel, setLocalTextModel] = React.useState(store.textModel || 'gemini-3.1-flash-lite-preview');
   const [localImageModel, setLocalImageModel] = React.useState(store.imageModel || 'gemini-3.1-flash-image-preview');
@@ -262,12 +284,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [isLoadingModels, setIsLoadingModels] = React.useState(false);
   const [testResult, setTestResult] = React.useState<ResultState>({ status: 'idle', msg: '' });
   const [quotaResult, setQuotaResult] = React.useState<ResultState>({ status: 'idle', msg: '' });
+  const [isLogDialogOpen, setIsLogDialogOpen] = React.useState(false);
 
   const applyPlatformConfigToForm = React.useCallback((preset: PlatformPreset, configs: PlatformApiConfigMap) => {
     const next = configs[preset];
     setPlatformPreset(preset);
     setApiKey(next.apiKey);
     setApiBaseUrl(next.apiBaseUrl);
+    setTextApiBaseUrl(next.textApiBaseUrl || next.apiBaseUrl);
+    setImageApiBaseUrl(next.imageApiBaseUrl || next.apiBaseUrl);
     setLocalTextModel(next.textModel);
     setLocalImageModel(next.imageModel);
   }, []);
@@ -276,13 +301,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     return {
       ...configs,
       [platformPreset]: {
-        apiBaseUrl,
+        apiBaseUrl: textApiBaseUrl || apiBaseUrl,
+        textApiBaseUrl,
+        imageApiBaseUrl,
         apiKey,
         textModel: localTextModel,
         imageModel: localImageModel,
       },
     };
-  }, [apiBaseUrl, apiKey, localImageModel, localTextModel, platformPreset]);
+  }, [apiBaseUrl, apiKey, imageApiBaseUrl, localImageModel, localTextModel, platformPreset, textApiBaseUrl]);
 
   React.useEffect(() => {
     const nextConfigs = mergePlatformConfigs(store.platformConfigs);
@@ -331,6 +358,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       ...allPlatformConfigs,
       [data.platformPreset]: {
         apiBaseUrl: data.apiBaseUrl,
+        textApiBaseUrl: data.textApiBaseUrl || data.apiBaseUrl,
+        imageApiBaseUrl: data.imageApiBaseUrl || data.apiBaseUrl,
         apiKey: data.apiKey,
         textModel: data.textModel,
         imageModel: data.imageModel,
@@ -348,7 +377,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   }, []);
 
   const fetchComflyModels = React.useCallback(async () => {
-    const response = await fetch(`${normalizeComflyBaseUrl(apiBaseUrl)}/models`, {
+    const baseUrls = Array.from(new Set([
+      textApiBaseUrl || apiBaseUrl,
+      imageApiBaseUrl || textApiBaseUrl || apiBaseUrl,
+    ].filter(Boolean)));
+    const results = await Promise.all(
+      baseUrls.map(async (baseUrl) => {
+    const response = await fetch(`${normalizeComflyBaseUrl(baseUrl)}/models`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey.trim()}`,
@@ -361,7 +396,17 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     }
 
     return Array.isArray(data?.data) ? (data.data as ModelItem[]) : [];
-  }, [apiBaseUrl, apiKey]);
+      }),
+    );
+
+    const byId = new Map<string, ModelItem>();
+    results.flat().forEach((item) => {
+      if (typeof item.id === 'string' && item.id.trim()) {
+        byId.set(item.id, item);
+      }
+    });
+    return Array.from(byId.values());
+  }, [apiBaseUrl, apiKey, imageApiBaseUrl, textApiBaseUrl]);
 
   const loadRemoteModels = async () => {
     setIsLoadingModels(true);
@@ -401,14 +446,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       let body = JSON.stringify({ contents: [{ parts: [{ text: 'Say hello' }] }] });
 
-      if (platformPreset === 'yunwu' && apiBaseUrl.trim()) {
-        let baseUrl = apiBaseUrl.trim().replace(/\/+$/, '');
+      const textBaseUrl = textApiBaseUrl || apiBaseUrl;
+      if (platformPreset === 'yunwu' && textBaseUrl.trim()) {
+        let baseUrl = textBaseUrl.trim().replace(/\/+$/, '');
         if (baseUrl.endsWith('/v1')) baseUrl = baseUrl.replace(/\/v1$/, '/v1beta');
         if (!baseUrl.endsWith('/v1beta') && !baseUrl.includes('/v1beta/')) baseUrl += '/v1beta';
         apiEndpoint = `${baseUrl}/models/${modelToTest}:generateContent`;
         headers.Authorization = `Bearer ${apiKey}`;
-      } else if (apiBaseUrl.trim()) {
-        apiEndpoint = `${normalizeOpenAIBaseUrl(apiBaseUrl)}/chat/completions`;
+      } else if (textBaseUrl.trim()) {
+        apiEndpoint = `${normalizeOpenAIBaseUrl(textBaseUrl)}/chat/completions`;
         headers.Authorization = `Bearer ${apiKey}`;
         body = JSON.stringify({
           model: modelToTest,
@@ -439,7 +485,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setQuotaResult({ status: 'idle', msg: '正在查询...' });
 
     try {
-      const snapshot = await fetchPlatformQuota(platformPreset, apiBaseUrl, apiKey);
+      const snapshot = await fetchPlatformQuota(platformPreset, textApiBaseUrl || apiBaseUrl, apiKey);
       const msg = formatQuotaSummary(snapshot);
       setQuotaResult({ status: 'success', msg });
       toast.success(msg);
@@ -495,6 +541,8 @@ const handleExportCurrentConfig = async () => {
         version: 1,
         platformPreset,
         apiBaseUrl: currentConfig.apiBaseUrl,
+        textApiBaseUrl: currentConfig.textApiBaseUrl,
+        imageApiBaseUrl: currentConfig.imageApiBaseUrl,
         apiKey: currentConfig.apiKey,
         textModel: currentConfig.textModel,
         imageModel: currentConfig.imageModel,
@@ -563,7 +611,9 @@ const handleExportCurrentConfig = async () => {
     const nextPlatformConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
 
     store.setApiKey(apiKey);
-    store.setApiBaseUrl(apiBaseUrl);
+    store.setApiBaseUrl(textApiBaseUrl || apiBaseUrl);
+    store.setTextApiBaseUrl(textApiBaseUrl);
+    store.setImageApiBaseUrl(imageApiBaseUrl);
 
     if (!Number.isNaN(parsedConcurrency) && parsedConcurrency > 0) {
       store.setMaxConcurrency(parsedConcurrency);
@@ -574,6 +624,8 @@ const handleExportCurrentConfig = async () => {
       downloadDirectoryName,
       textModel: localTextModel,
       imageModel: localImageModel,
+      textApiBaseUrl,
+      imageApiBaseUrl,
       platformConfigs: nextPlatformConfigs,
     });
 
@@ -664,14 +716,28 @@ const handleExportCurrentConfig = async () => {
               <input type="text" name="fake-username" autoComplete="username" tabIndex={-1} aria-hidden="true" className="hidden" />
               <input type="password" name="fake-password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" className="hidden" />
 
-              <label className="text-[13.65px] font-medium text-text-secondary">API Base URL</label>
+              <label className="text-[13.65px] font-medium text-text-secondary">文本 API Base URL</label>
               <Input
                 type="text"
-                name="batch-refiner-api-base"
+                name="batch-refiner-text-api-base"
                 autoComplete="off"
                 placeholder="例如: https://ai.comfly.chat"
-                value={apiBaseUrl}
-                onChange={(e) => setApiBaseUrl(e.target.value)}
+                value={textApiBaseUrl}
+                onChange={(e) => {
+                  setTextApiBaseUrl(e.target.value);
+                  setApiBaseUrl(e.target.value);
+                }}
+                className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
+              />
+
+              <label className="mt-3 text-[13.65px] font-medium text-text-secondary">生图 API Base URL</label>
+              <Input
+                type="text"
+                name="batch-refiner-image-api-base"
+                autoComplete="off"
+                placeholder="留空时可与文本 API 地址相同"
+                value={imageApiBaseUrl}
+                onChange={(e) => setImageApiBaseUrl(e.target.value)}
                 className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
               />
 
@@ -790,7 +856,24 @@ const handleExportCurrentConfig = async () => {
             保存设置
           </Button>
         </div>
+        <div className="flex justify-start pt-1">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setIsLogDialogOpen(true)}
+            className="h-auto rounded-xl bg-white px-4 py-2 text-[12.6px] font-medium"
+          >
+            查看生成日志
+          </Button>
+        </div>
       </DialogContent>
+      <GenerationLogDialog
+        open={isLogDialogOpen}
+        onOpenChange={setIsLogDialogOpen}
+        sessions={generationLogs}
+        title="生成日志"
+        allowClear
+      />
     </Dialog>
   );
 }

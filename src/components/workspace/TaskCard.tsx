@@ -6,7 +6,7 @@ import { ChevronRight, Download, Eye, Fullscreen, GripVertical, History, ImageIc
 import { toast } from 'sonner';
 import { Task, TaskResultImage } from '@/types';
 import { useAppStore } from '@/store';
-import { generateTaskPrompt, processSingleTask } from '@/lib/batchRunner';
+import { generateTaskPrompt, getTaskPromptInputSignature, processSingleTask } from '@/lib/batchRunner';
 import { getBatchCountNumber, getCurrentTaskResultImages, getEffectiveBatchCount, getHistoricalTaskResultGroups, getHistoricalTaskResultImages, getPrimaryTaskResult, getTaskResultProgress } from '@/lib/taskResults';
 import { getTaskViewerItems, getTaskViewerMainImage } from '@/lib/taskViewer';
 import { Card } from '../ui/card';
@@ -15,8 +15,16 @@ import { Textarea } from '../ui/textarea';
 import { GenerateParamsSelector } from '../GenerateParamsSelector';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useAutoSaveTextEditor } from './useAutoSaveTextEditor';
-import { getResultImageBlob, primeTaskResultImageCache } from '@/lib/resultImageCache';
 import { getTaskBatchFileName } from '@/lib/resultImageFileName';
+import {
+  getResultImageAssetDimensions,
+  getResultImageAssetExtension,
+  getResultImageAssetSrc,
+  getResultImageDownloadSourceType,
+} from '@/lib/resultImageAsset';
+import { primeTaskResultImageCache } from '@/lib/resultImageCache';
+import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from '@/lib/resultImageDownload';
+import { appendGenerationLogEvent } from '@/lib/appLogger';
 
 type TaskCardProps = {
   taskId: string;
@@ -47,6 +55,17 @@ function triggerDirectDownload(blob: Blob, fileName: string) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+function triggerDirectImageDownload(src: string, fileName: string) {
+  const link = document.createElement('a');
+  link.href = src;
+  link.download = fileName;
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function getCollapsedTextClass(text: string | undefined, shortLines: number, mediumLines: number, longLines: number) {
@@ -147,21 +166,27 @@ export const TaskCard = React.memo(function TaskCard({
   const primaryResult = getPrimaryTaskResult(task);
   const resultProgress = getTaskResultProgress(task, globalBatchCount);
   const effectiveBatchCount = getEffectiveBatchCount(task, globalBatchCount);
-  const isGeneratingVisual = task.status === 'Rendering' || task.status === 'Prompting';
+  const isRenderingVisual = task.status === 'Rendering';
   const isListMode = viewMode === 'list';
   const [selectedResultIndex, setSelectedResultIndex] = React.useState(0);
   const [viewerMode, setViewerMode] = React.useState<ViewerMode>('result');
   const descriptionEditor = useAutoSaveTextEditor({
     value: task.description || '',
+    draftId: `task-description-${task.id}`,
     onSave: (nextValue) => updateTask(task.id, { description: nextValue }),
   });
   const promptEditor = useAutoSaveTextEditor({
     value: task.promptText || '',
-    onSave: (nextValue) => updateTask(task.id, { promptText: nextValue, promptSource: 'manual' }),
+    draftId: `task-prompt-${task.id}`,
+    onSave: (nextValue) => updateTask(task.id, {
+      promptText: nextValue,
+      promptInputSignature: getTaskPromptInputSignature(task),
+      promptSource: 'manual',
+    }),
   });
 
   React.useEffect(() => {
-    if (isGeneratingVisual && task.activeResultSessionId && autoFocusSessionRef.current !== task.activeResultSessionId) {
+    if (isRenderingVisual && task.activeResultSessionId && autoFocusSessionRef.current !== task.activeResultSessionId) {
       autoFocusSessionRef.current = task.activeResultSessionId;
       setSelectedResultIndex(0);
       setViewerMode('result');
@@ -172,12 +197,12 @@ export const TaskCard = React.memo(function TaskCard({
       setSelectedResultIndex(0);
       if (!task.sourceImage) {
         setViewerMode('result');
-      } else if (!isGeneratingVisual && viewerMode !== 'source') {
+      } else if (!isRenderingVisual && viewerMode !== 'source') {
         setViewerMode('source');
       }
       return;
     }
-    if (isGeneratingVisual) {
+    if (isRenderingVisual) {
       const latestIndex = resultImages.length - 1;
       if (selectedResultIndex !== latestIndex && viewerMode === 'result') {
         setSelectedResultIndex(latestIndex);
@@ -189,14 +214,14 @@ export const TaskCard = React.memo(function TaskCard({
       setViewerMode('result');
       return;
     }
-    if (!isGeneratingVisual && viewerMode !== 'source') {
+    if (!isRenderingVisual && viewerMode !== 'source') {
       setViewerMode('result');
     }
-  }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage, isGeneratingVisual, task.activeResultSessionId]);
+  }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage, isRenderingVisual, task.activeResultSessionId]);
 
   React.useEffect(() => {
     void primeTaskResultImageCache(
-      resultImages.flatMap((result) => [result.src, result.previewSrc, result.originalSrc])
+      resultImages.flatMap((result) => [result.assetSrc, result.src, result.previewSrc, result.originalSrc])
     );
   }, [resultImages]);
 
@@ -225,6 +250,7 @@ export const TaskCard = React.memo(function TaskCard({
     src: string;
     title: string;
     fileName: string;
+    result?: TaskResultImage;
   } | null>(null);
 
   React.useEffect(() => {
@@ -296,34 +322,124 @@ export const TaskCard = React.memo(function TaskCard({
     reader.readAsDataURL(file);
   };
 
-  const downloadResultImage = async (resultSrc: string, fileName: string) => {
+  const downloadResultImage = async (result: TaskResultImage, fileName: string) => {
+    const latestLogSession = useAppStore
+      .getState()
+      .generationLogs
+      .filter((session) => session.taskId === task.id)
+      .sort((left, right) => right.createdAt - left.createdAt)[0];
     try {
-      const blob = await getResultImageBlob(resultSrc);
+      const { blob, cacheStatus, status } = await resolveResultImageDownloadBlob(result);
       try {
         const { saveAs } = await import('file-saver');
         saveAs(blob, fileName);
       } catch {
-        triggerDirectDownload(blob, fileName);
+        try {
+          triggerDirectDownload(blob, fileName);
+        } catch (error) {
+          throw new ResultImageDownloadError({
+            message: error instanceof Error ? error.message : '保存结果图失败',
+            stage: 'save',
+            status: 'save_failed',
+            sourceType: getResultImageDownloadSourceType(result),
+            cacheStatus,
+          });
+        }
       }
-    } catch {
-      toast.error('下载失败');
+      if (cacheStatus !== result.downloadCacheStatus || status !== result.downloadStatus) {
+        updateTask(task.id, {
+          resultImages: (task.resultImages || []).map((image) =>
+            image.id === result.id
+              ? {
+                  ...image,
+                  downloadCacheStatus: cacheStatus === 'miss' ? 'primed' : cacheStatus,
+                  downloadStatus: status,
+                  downloadFailureStage: status === 'cache_failed' ? 'cache' : undefined,
+                  downloadFailureReason: status === 'cache_failed' ? '结果图缓存写入失败，但本次下载已完成' : undefined,
+                }
+              : image,
+          ),
+        });
+      }
+      if (latestLogSession) {
+        appendGenerationLogEvent(latestLogSession.id, {
+          stage: 'download',
+          event: 'download.succeeded',
+          message: '结果图下载完成',
+          data: {
+            fileName,
+            resultId: result.id,
+            sourceType: result.downloadSourceType || 'src',
+            cacheStatus,
+            status,
+          },
+        });
+      }
+    } catch (error) {
+      const failure = error instanceof ResultImageDownloadError
+        ? error
+        : new ResultImageDownloadError({
+            message: error instanceof Error ? error.message : '下载失败',
+            stage: 'save',
+            status: 'save_failed',
+            sourceType: getResultImageDownloadSourceType(result),
+            cacheStatus: result.downloadCacheStatus || 'failed',
+          });
+      updateTask(task.id, {
+        resultImages: (task.resultImages || []).map((image) =>
+          image.id === result.id
+            ? {
+                ...image,
+                downloadStatus: failure.status,
+                downloadFailureStage: failure.stage,
+                downloadFailureReason: failure.message,
+                downloadCacheStatus: failure.cacheStatus,
+              }
+            : image,
+        ),
+      });
+      if (latestLogSession) {
+        appendGenerationLogEvent(latestLogSession.id, {
+          level: 'error',
+          stage: 'download',
+          event: 'download.failed',
+          message: '结果图下载失败',
+          data: {
+            fileName,
+            resultId: result.id,
+            stage: failure.stage,
+            status: failure.status,
+            sourceType: failure.sourceType,
+            cacheStatus: failure.cacheStatus,
+            message: failure.message,
+          },
+        });
+      }
+      toast.error(`下载失败：${failure.message}｜${getResultDownloadDiagnostics(result, failure)}`);
     }
   };
+
+  const flushPendingTextChanges = React.useCallback(() => {
+    descriptionEditor.saveIfChanged();
+    promptEditor.saveIfChanged();
+  }, [descriptionEditor, promptEditor]);
 
   const handlePreviewPrompt = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    flushPendingTextChanges();
     const previewPromise = generateTaskPrompt(task.id).then((generatedPrompt) => {
       const latestTask = useAppStore.getState().tasks.find((item) => item.id === task.id);
       const hasAnyResults = Boolean(latestTask?.resultImages?.length || latestTask?.resultImage);
       updateTask(task.id, {
-        promptText: generatedPrompt,
+        promptText: generatedPrompt.promptText,
+        promptInputSignature: generatedPrompt.inputSignature,
         promptSource: 'auto',
         status: hasAnyResults ? 'Success' : 'Idle',
         progressStage: undefined,
         errorLog: undefined,
       });
-      return generatedPrompt;
+      return generatedPrompt.promptText;
     });
 
     toast.promise(previewPromise, {
@@ -334,6 +450,13 @@ export const TaskCard = React.memo(function TaskCard({
 
     await previewPromise;
   };
+
+  const handleRunTask = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    flushPendingTextChanges();
+    void processSingleTask(task.id);
+  }, [flushPendingTextChanges, task.id]);
 
   const getStatusDisplay = () => {
     const promptingLabel = task.progressStage?.trim() || '提示词中';
@@ -417,10 +540,11 @@ export const TaskCard = React.memo(function TaskCard({
 
   const renderUnifiedViewer = () => {
     const mainImageSrc = getTaskViewerMainImage(task, viewerMode, selectedResultIndex);
-    const showResultSize = viewerMode === 'result' && activeResult?.width && activeResult?.height;
+    const activeAssetDimensions = activeResult ? getResultImageAssetDimensions(activeResult) : null;
+    const showResultSize = viewerMode === 'result' && Boolean(activeAssetDimensions);
     const activeResultDuration = formatGenerationTime(activeResult?.generationTimeMs);
     const thumbnailItems = getTaskViewerItems(task) as ThumbnailViewerItem[];
-    const placeholderCount = isGeneratingVisual
+    const placeholderCount = isRenderingVisual
       ? Math.max(0, resultProgress.requested - resultImages.length - resultProgress.failed)
       : 0;
     const placeholderItems: PlaceholderThumbnailItem[] = Array.from({ length: placeholderCount }, (_, index) => ({
@@ -433,7 +557,7 @@ export const TaskCard = React.memo(function TaskCard({
     const visibleThumbnailItems = [...thumbnailItems, ...placeholderItems];
     const hasThumbnailStrip = visibleThumbnailItems.length > 0;
     const hasResolvedActiveResult = viewerMode === 'result' && Boolean(activeResult?.src) && selectedResultIndex < resultImages.length;
-    const shouldAnimateViewerImage = isGeneratingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
+    const shouldAnimateViewerImage = isRenderingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
 
     return (
       <div className="overflow-hidden rounded-t-[22px] rounded-b-none bg-[#FBFAF7] p-0 transition-all duration-300 ease-out">
@@ -463,7 +587,7 @@ export const TaskCard = React.memo(function TaskCard({
               <img
                 src={mainImageSrc}
                 alt={task.title}
-                className={`block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.018] blur-[16px] saturate-[0.88]' : isGeneratingVisual ? 'scale-[1.008]' : ''}`}
+                className={`block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.018] blur-[16px] saturate-[0.88]' : isRenderingVisual ? 'scale-[1.008]' : ''}`}
                 draggable={false}
                 onDragStart={preventNativeImageDrag}
               />
@@ -516,13 +640,13 @@ export const TaskCard = React.memo(function TaskCard({
           <div className="absolute inset-x-0 bottom-0 z-20 flex items-end justify-between gap-3 bg-gradient-to-t from-black/14 via-black/0 to-transparent px-3 pb-3 pt-10">
             <div className="flex min-w-0 flex-1 items-end gap-2">
               {hasThumbnailStrip ? (
-                <div className="flex min-h-[56px] max-w-[220px] items-center gap-2 rounded-[18px] border border-white/70 bg-[rgba(255,255,255,0.88)] px-2.5 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.1)] backdrop-blur-md">
+                <div className="flex min-h-[52px] w-fit max-w-full items-center gap-1.5 overflow-hidden rounded-[18px] border border-white/70 bg-[rgba(255,255,255,0.88)] px-2 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.1)] backdrop-blur-md sm:min-h-[56px] sm:gap-2 sm:px-2.5">
                   {visibleThumbnailItems.map((item) => {
                     if (item.type === 'placeholder') {
                       return (
                         <div
                           key={item.id}
-                          className="relative h-10 w-[54px] shrink-0 overflow-hidden rounded-[12px] border border-black/10 bg-[#f3efe8]"
+                          className="relative h-9 w-12 shrink-0 overflow-hidden rounded-[12px] border border-black/10 bg-[#f3efe8] sm:h-10 sm:w-[54px]"
                           aria-hidden="true"
                         >
                           {task.sourceImage ? (
@@ -567,7 +691,7 @@ export const TaskCard = React.memo(function TaskCard({
                           setSelectedResultIndex(item.resultIndex ?? 0);
                           setViewerMode('result');
                         }}
-                        className={`group/thumb relative h-10 w-[54px] shrink-0 overflow-hidden rounded-[12px] border transition-all duration-200 ease-out ${
+                        className={`group/thumb relative h-9 w-12 shrink-0 overflow-hidden rounded-[12px] border transition-all duration-200 ease-out sm:h-10 sm:w-[54px] ${
                           isActiveThumb
                             ? 'border-[#D97757] bg-white shadow-[0_10px_20px_rgba(217,119,87,0.22)] scale-[1.03]'
                             : 'border-black/8 bg-white/75 hover:-translate-y-[1px] hover:border-black/14 hover:bg-white'
@@ -601,7 +725,7 @@ export const TaskCard = React.memo(function TaskCard({
 
               {showResultSize ? (
                 <div className="rounded-full border border-black/10 bg-white px-2.5 py-1 text-[10px] font-mono font-medium text-black/78 shadow-[0_8px_20px_rgba(0,0,0,0.10)]">
-                  {activeResult.width} × {activeResult.height}
+                  {activeAssetDimensions?.width} × {activeAssetDimensions?.height}
                   {activeResultDuration ? ` / ${activeResultDuration}` : ''}
                 </div>
               ) : null}
@@ -650,9 +774,10 @@ export const TaskCard = React.memo(function TaskCard({
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setPreviewReferenceImage({
-                                        src: image.originalSrc || image.src,
+                                        src: getResultImageAssetSrc(image),
                                         title: `历史结果预览`,
-                                        fileName: getTaskBatchFileName(task.index, index, 'png'),
+                                        fileName: getTaskBatchFileName(task.index, index, getResultImageAssetExtension(image)),
+                                        result: image,
                                       });
                                     }}
                                     title={`查看历史结果 ${index + 1}`}
@@ -670,7 +795,7 @@ export const TaskCard = React.memo(function TaskCard({
                                     className="absolute bottom-1 right-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/62 text-white opacity-0 transition-all hover:bg-black/76 group-hover/history:opacity-100"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      downloadResultImage(image.originalSrc || image.src, getTaskBatchFileName(task.index, index, 'png'));
+                                      downloadResultImage(image, getTaskBatchFileName(task.index, index, getResultImageAssetExtension(image)));
                                     }}
                                     title="下载历史结果"
                                   >
@@ -692,7 +817,7 @@ export const TaskCard = React.memo(function TaskCard({
                   className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-text-secondary shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
                   onClick={(e) => {
                     e.stopPropagation();
-                    downloadResultImage(activeResult.originalSrc || activeResult.src, getTaskBatchFileName(task.index, selectedResultIndex, 'png'));
+                    downloadResultImage(activeResult, getTaskBatchFileName(task.index, selectedResultIndex, getResultImageAssetExtension(activeResult)));
                   }}
                   title="下载结果图"
                 >
@@ -798,7 +923,7 @@ export const TaskCard = React.memo(function TaskCard({
           ${isListMode ? 'w-full h-[180px] sm:w-[180px] sm:h-full' : 'flex-1 w-full aspect-[4/3] rounded-t-2xl'}`}
           style={{ contain: 'paint' }}
         >
-          {isGeneratingVisual && !primaryResult?.src && (
+          {isRenderingVisual && !primaryResult?.src && (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
               <div className={`absolute inset-0 ${primaryResult?.src ? 'bg-white/[0.05] backdrop-blur-[1.5px]' : 'bg-white/14 backdrop-blur-[10px]'}`} />
               <div className={`absolute inset-0 animate-[mist-breathe_3s_ease-in-out_infinite] ${primaryResult?.src ? 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.18),transparent_24%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.12),transparent_24%)]' : 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_30%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.24),transparent_28%)]'}`} />
@@ -854,9 +979,9 @@ export const TaskCard = React.memo(function TaskCard({
             </button>
           </div>
 
-          {primaryResult?.width && primaryResult?.height ? (
+          {primaryResult && getResultImageAssetDimensions(primaryResult) ? (
             <div className="absolute bottom-3 left-3 z-20 rounded-full border border-black/10 bg-white px-3 py-1 text-[10.5px] font-mono font-medium text-black/78 shadow-[0_8px_20px_rgba(0,0,0,0.10)]">
-              {primaryResult.width} × {primaryResult.height}
+              {getResultImageAssetDimensions(primaryResult)?.width} × {getResultImageAssetDimensions(primaryResult)?.height}
               {totalResultDuration ? ` / ${totalResultDuration}` : ''}
             </div>
           ) : null}
@@ -1147,12 +1272,14 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
 
             <div className="mt-0.5 flex items-center justify-between gap-2 px-3">
-              {enablePromptOptimization ? (
-                <Button type="button" variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
-                  <Eye className="w-3 h-3 mr-1 opacity-70" /> 预览提示词
-                </Button>
-              ) : <div />}
-              <Button type="button" className="h-7 px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11.55px] font-medium disabled:opacity-50" onClick={(e) => { e.preventDefault(); e.stopPropagation(); processSingleTask(task.id); }} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
+              <div className="flex items-center gap-1.5">
+                {enablePromptOptimization ? (
+                  <Button type="button" variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
+                    <Eye className="w-3 h-3 mr-1 opacity-70" /> 预览提示词
+                  </Button>
+                ) : null}
+              </div>
+              <Button type="button" className="h-7 px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11.55px] font-medium disabled:opacity-50" onClick={handleRunTask} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
                 执行此项 ({getBatchCountNumber(effectiveBatchCount)} 张)
               </Button>
             </div>
@@ -1187,7 +1314,13 @@ export const TaskCard = React.memo(function TaskCard({
                   <button
                     type="button"
                     className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/6 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-                    onClick={() => triggerDirectDownload(previewReferenceImage.src, previewReferenceImage.fileName)}
+                    onClick={() => {
+                      if (previewReferenceImage.result) {
+                        void downloadResultImage(previewReferenceImage.result, previewReferenceImage.fileName);
+                        return;
+                      }
+                      triggerDirectImageDownload(previewReferenceImage.src, previewReferenceImage.fileName);
+                    }}
                     title="下载图片"
                   >
                     <Download className="h-4 w-4" />
