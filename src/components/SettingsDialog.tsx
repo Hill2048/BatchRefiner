@@ -820,7 +820,7 @@ const handleExportCurrentConfig = async () => {
                   />
                   <div className="h-px bg-border/70" />
                   <Input
-                    type="text"
+                    type="password"
                     name="batch-refiner-text-api-key"
                     autoComplete="off"
                     autoCapitalize="off"
@@ -858,7 +858,7 @@ const handleExportCurrentConfig = async () => {
                   />
                   <div className="h-px bg-border/70" />
                   <Input
-                    type="text"
+                    type="password"
                     name="batch-refiner-image-api-key"
                     autoComplete="off"
                     autoCapitalize="off"
