@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "paseo": {
+      "source": "getpaseo/paseo",
+      "sourceType": "github",
+      "computedHash": "18e8e942c8af5590d029a2fd6b4b18cdb4f8077169c7923f404b229f14cb780f"
+    },
+    "paseo-chat": {
+      "source": "getpaseo/paseo",
+      "sourceType": "github",
+      "computedHash": "af2429f9dd7d295b6e7435127fa88d5632d073ef8c5653aedfba8fb547eb64e7"
+    },
+    "paseo-committee": {
+      "source": "getpaseo/paseo",
+      "sourceType": "github",
+      "computedHash": "2e1ccc2094ed84a8ff86ae55be1b36bb17daffae21042508b80edf039596c0ec"
+    },
+    "paseo-handoff": {
+      "source": "getpaseo/paseo",
+      "sourceType": "github",
+      "computedHash": "f737c8cb0cbf3db9e587d67a4daf58091e76796b4c247516db8b126cb1979959"
+    },
+    "paseo-loop": {
+      "source": "getpaseo/paseo",
+      "sourceType": "github",
+      "computedHash": "b23ee67444ba5a024a53bc46cc20cad60a664ef4f7697f71d3be4b60584b20b4"
+    },
+    "paseo-orchestrate": {
+      "source": "getpaseo/paseo",
+      "sourceType": "github",
+      "computedHash": "cbc49e282f06603be9ac82915cfe6412cb34f3572b096e4553dee8b6b766c17d"
+    }
+  }
+}

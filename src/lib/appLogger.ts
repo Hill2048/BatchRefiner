@@ -12,6 +12,7 @@ import type {
 } from '@/types';
 
 const MAX_GENERATION_LOG_SESSIONS = 500;
+const MAX_EVENTS_PER_SESSION = 200;
 const MAX_STRING_LOG_LENGTH = 500;
 const REDACT_KEYS = ['apiKey', 'authorization', 'token', 'secret', 'signature', 'sig', 'password'];
 
@@ -79,6 +80,11 @@ function trimSessions(sessions: GenerationLogSession[]) {
   return sessions.slice(sessions.length - MAX_GENERATION_LOG_SESSIONS);
 }
 
+function trimEvents(events: GenerationLogEvent[]) {
+  if (events.length <= MAX_EVENTS_PER_SESSION) return events;
+  return events.slice(events.length - MAX_EVENTS_PER_SESSION);
+}
+
 export function createGenerationLogSession(options: {
   mode: GenerationLogMode;
   task?: Pick<Task, 'id' | 'index' | 'title'> | null;
@@ -101,7 +107,6 @@ export function createGenerationLogSession(options: {
 
   useAppStore.setState((state) => ({
     generationLogs: trimSessions([...state.generationLogs, session]),
-    updatedAt: Date.now(),
   }));
 
   return session.id;
@@ -137,10 +142,9 @@ export function appendGenerationLogEvent(
           ...session.summary,
           lastStage: entry.stage,
         },
-        events: [...session.events, event],
+        events: trimEvents([...session.events, event]),
       };
     }),
-    updatedAt: Date.now(),
   }));
 }
 
@@ -157,7 +161,6 @@ export function updateGenerationLogSummary(sessionId: string, summary: Partial<G
           }
         : session,
     ),
-    updatedAt: Date.now(),
   }));
 }
 
@@ -180,14 +183,12 @@ export function finishGenerationLogSession(
           }
         : session,
     ),
-    updatedAt: Date.now(),
   }));
 }
 
 export function clearGenerationLogs() {
   useAppStore.setState(() => ({
     generationLogs: [],
-    updatedAt: Date.now(),
   }));
 }
 
@@ -200,7 +201,14 @@ export function getGenerationLogSessionsForTask(taskId: string) {
 }
 
 export function getLatestGenerationLogSessionForTask(taskId: string) {
-  return getGenerationLogSessionsForTask(taskId)[0] || null;
+  let latestSession: GenerationLogSession | null = null;
+  useAppStore.getState().generationLogs.forEach((session) => {
+    if (session.taskId !== taskId) return;
+    if (!latestSession || session.createdAt > latestSession.createdAt) {
+      latestSession = session;
+    }
+  });
+  return latestSession;
 }
 
 export function getGenerationLogSession(sessionId: string) {

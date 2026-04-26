@@ -2,6 +2,7 @@ import { Download, Folder, Plus, Trash2, Check, PanelLeft } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useAppStore } from '@/store';
 import * as React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import {
   getProjectIndex,
@@ -18,9 +19,13 @@ type TopbarProps = {
 };
 
 export function Topbar({ isCompactLayout = false, onOpenSidebar }: TopbarProps) {
-  const store = useAppStore();
-  const projectName = store.projectName;
-  const projectId = store.projectId;
+  const { projectName, projectId, setProjectFields } = useAppStore(
+    useShallow((state) => ({
+      projectName: state.projectName,
+      projectId: state.projectId,
+      setProjectFields: state.setProjectFields,
+    })),
+  );
   const [localProjectName, setLocalProjectName] = React.useState(projectName || '');
   const [projects, setProjects] = React.useState<ProjectMeta[]>([]);
   const [isPopoverOpen, setIsPopoverOpen] = React.useState(false);
@@ -198,7 +203,7 @@ export function Topbar({ isCompactLayout = false, onOpenSidebar }: TopbarProps) 
                   className="font-serif text-[13.65px] text-text-primary px-2 py-1.5 bg-[#F5F4F0] border border-transparent focus:border-button-main outline-none rounded-lg w-full transition-colors"
                   value={localProjectName}
                   onChange={(e) => setLocalProjectName(e.target.value)}
-                  onBlur={() => store.setProjectFields({ projectName: localProjectName })}
+                  onBlur={() => setProjectFields({ projectName: localProjectName })}
                 />
               </div>
             </PopoverContent>

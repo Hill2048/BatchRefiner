@@ -20,6 +20,7 @@ import { Textarea } from "../ui/textarea";
 import { ScrollArea } from "../ui/scroll-area";
 import { useAppStore } from "@/store";
 import { useState, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { processBatch, generateTaskPrompt, getTaskPromptInputSignature, haltBatch } from "@/lib/batchRunner";
 import { toast } from "sonner";
 import pLimit from "p-limit";
@@ -43,11 +44,23 @@ import {
 import { getTaskBatchFileName } from "@/lib/resultImageFileName";
 import { getResultImageAssetExtension } from "@/lib/resultImageAsset";
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from "@/lib/resultImageDownload";
-import { appendGenerationLogEvent } from "@/lib/appLogger";
+import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from "@/lib/appLogger";
 
 function SidebarProgress() {
-  const tasksCount = useAppStore(state => state.tasks.length);
-  const completedCount = useAppStore(state => state.tasks.filter(t => t.status === "Success").length);
+  const { tasksCount, completedCount } = useAppStore(
+    useShallow((state) => {
+      let completed = 0;
+      state.tasks.forEach((task) => {
+        if (task.status === "Success") {
+          completed += 1;
+        }
+      });
+      return {
+        tasksCount: state.tasks.length,
+        completedCount: completed,
+      };
+    }),
+  );
   const progressPercent = tasksCount === 0 ? 0 : Math.round((completedCount / tasksCount) * 100);
 
   return (
@@ -120,7 +133,12 @@ export function Sidebar({
   const [isSkillEditing, setIsSkillEditing] = useState(false);
   const [isMarkdownEditorOpen, setIsMarkdownEditorOpen] = useState(false);
   
-  const store = useAppStore();
+  const { loadProjectFromJson, updateTask } = useAppStore(
+    useShallow((state) => ({
+      loadProjectFromJson: state.loadProjectFromJson,
+      updateTask: state.updateTask,
+    })),
+  );
   const globalSkillText = useAppStore((state) => state.globalSkillText);
   const skillFileName = useAppStore((state) => state.skillFileName);
   const globalTargetText = useAppStore((state) => state.globalTargetText);
@@ -141,14 +159,10 @@ export function Sidebar({
   const selectedTaskIds = useAppStore((state) => state.selectedTaskIds);
   const projectName = useAppStore((state) => state.projectName);
   const projectId = useAppStore((state) => state.projectId);
+  const tasksCount = useAppStore((state) => state.tasks.length);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
   const getLatestTaskLogSessionId = React.useCallback(
-    (taskId: string) =>
-      useAppStore
-        .getState()
-        .generationLogs
-        .filter((session) => session.taskId === taskId)
-        .sort((left, right) => right.createdAt - left.createdAt)[0]?.id,
+    (taskId: string) => getLatestGenerationLogSessionForTask(taskId)?.id,
     [],
   );
 
@@ -184,8 +198,9 @@ export function Sidebar({
     }
 
     const useSelected = selectedTaskIds.length > 0;
+    const selectedTaskIdSet = new Set(selectedTaskIds);
     const tasksToUpdate = useSelected 
-        ? currentTasks.filter(t => selectedTaskIds.includes(t.id))
+        ? currentTasks.filter(t => selectedTaskIdSet.has(t.id))
         : currentTasks;
 
     if (tasksToUpdate.length === 0) {
@@ -413,8 +428,9 @@ export function Sidebar({
   const handleExportZip = async () => {
     const currentTasks = useAppStore.getState().tasks;
     const useSelected = selectedTaskIds.length > 0;
+    const selectedTaskIdSet = new Set(selectedTaskIds);
     const matchingTasks = currentTasks.filter((task) => {
-      if (useSelected && !selectedTaskIds.includes(task.id)) return false;
+      if (useSelected && !selectedTaskIdSet.has(task.id)) return false;
       return getExportableTaskImages(task).length > 0;
     });
 
@@ -523,7 +539,7 @@ export function Sidebar({
         );
 
         for (const task of finalTasksToExport) {
-          store.updateTask(task.id, {
+          updateTask(task.id, {
             exported: true,
             exportedResultIds: Array.from(exportedIdsByTask.get(task.id) || []),
           });
@@ -610,7 +626,7 @@ export function Sidebar({
     }
 
     for (const task of finalTasksToExport) {
-      store.updateTask(task.id, {
+      updateTask(task.id, {
         exported: true,
         exportedResultIds: Array.from(exportedIdsByTask.get(task.id) || []),
       });
@@ -633,7 +649,7 @@ export function Sidebar({
   };
 
   const handleExportProject = async () => {
-    const payload = buildProjectExportPayload(store);
+    const payload = buildProjectExportPayload(useAppStore.getState());
     const data = JSON.stringify(payload, null, 2);
     const filename = `Project_${projectName}.json`;
     const successfulPromptCount = payload.successfulPrompts.length;
@@ -683,7 +699,7 @@ export function Sidebar({
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
-          store.loadProjectFromJson(event.target.result as string);
+          loadProjectFromJson(event.target.result as string);
           toast.success("成功加载项目空间");
         }
       };
@@ -1006,7 +1022,7 @@ export function Sidebar({
         <div className="flex w-full group relative p-[3px] rounded-2xl bg-[#2C2B29] shadow-md border border-black/10 items-center transition-all mt-1">
           <Button
             onClick={() => handleRunBatch('all')}
-            disabled={useAppStore.getState().tasks.length === 0}
+            disabled={tasksCount === 0}
             className={`flex-1 h-9 px-4 text-[13.65px] font-medium shadow-none text-white rounded-[14px] transition-all border-none ${isBatchRunning ? "bg-red-600 hover:bg-red-500" : "bg-transparent hover:bg-white/10"}`}
           >
             {isBatchRunning ? (
@@ -1027,7 +1043,7 @@ export function Sidebar({
                 <Popover>
                   <PopoverTrigger render={
                     <Button
-                      disabled={useAppStore.getState().tasks.length === 0}
+                      disabled={tasksCount === 0}
                       className="h-9 w-8 px-0 flex items-center shadow-none justify-center bg-transparent hover:bg-white/10 text-white rounded-[10px] border-none transition-colors"
                     >
                       <ChevronDown className="w-4 h-4 opacity-60 group-hover:opacity-100" />
@@ -1055,14 +1071,16 @@ export function Sidebar({
         </div>
       </div>
 
-      <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
-      <MarkdownEditorDialog
-        open={isMarkdownEditorOpen}
-        fileName={skillFileName}
-        value={localSkillText}
-        onOpenChange={setIsMarkdownEditorOpen}
-        onSave={handleSaveSkillText}
-      />
+      {isSettingsOpen ? <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} /> : null}
+      {isMarkdownEditorOpen ? (
+        <MarkdownEditorDialog
+          open={isMarkdownEditorOpen}
+          fileName={skillFileName}
+          value={localSkillText}
+          onOpenChange={setIsMarkdownEditorOpen}
+          onSave={handleSaveSkillText}
+        />
+      ) : null}
     </div>
   );
 }

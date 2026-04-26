@@ -7,8 +7,7 @@ import { toast } from 'sonner';
 import { Task, TaskResultImage } from '@/types';
 import { useAppStore } from '@/store';
 import { generateTaskPrompt, getTaskPromptInputSignature, processSingleTask } from '@/lib/batchRunner';
-import { getBatchCountNumber, getCurrentTaskResultImages, getEffectiveBatchCount, getHistoricalTaskResultGroups, getHistoricalTaskResultImages, getPrimaryTaskResult, getTaskResultProgress } from '@/lib/taskResults';
-import { getTaskViewerItems, getTaskViewerMainImage } from '@/lib/taskViewer';
+import { getBatchCountNumber, getEffectiveBatchCount } from '@/lib/taskResults';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -24,7 +23,7 @@ import {
 } from '@/lib/resultImageAsset';
 import { primeTaskResultImageCache } from '@/lib/resultImageCache';
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from '@/lib/resultImageDownload';
-import { appendGenerationLogEvent } from '@/lib/appLogger';
+import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from '@/lib/appLogger';
 
 type TaskCardProps = {
   taskId: string;
@@ -125,7 +124,13 @@ function getTotalGenerationTime(images: TaskResultImage[]) {
 }
 
 type ViewerMode = 'result' | 'source';
-type ThumbnailViewerItem = ReturnType<typeof getTaskViewerItems>[number] & { placeholder?: false };
+type ThumbnailViewerItem = {
+  id: string;
+  src: string;
+  type: 'source' | 'result';
+  resultIndex?: number;
+  placeholder?: false;
+};
 type PlaceholderThumbnailItem = {
   id: string;
   type: 'placeholder';
@@ -133,6 +138,10 @@ type PlaceholderThumbnailItem = {
   src: '';
   placeholder: true;
 };
+
+const EMPTY_RESULT_IMAGES: TaskResultImage[] = [];
+const EMPTY_THUMBNAIL_ITEMS: ThumbnailViewerItem[] = [];
+const EMPTY_HISTORY_GROUPS: Array<{ sessionId: string; images: TaskResultImage[]; createdAt: number }> = [];
 
 export const TaskCard = React.memo(function TaskCard({
   taskId,
@@ -157,14 +166,11 @@ export const TaskCard = React.memo(function TaskCard({
   const globalBatchCount = useAppStore(state => state.globalBatchCount);
   const enablePromptOptimization = useAppStore(state => state.enablePromptOptimization !== false);
   const imageModel = useAppStore(state => state.imageModel);
+  const isBatchRunning = useAppStore((state) => state.isBatchRunning);
+  const tasksCount = useAppStore((state) => state.tasks.length);
 
   if (!task) return null;
 
-  const resultImages = getCurrentTaskResultImages(task);
-  const historicalResultImages = getHistoricalTaskResultImages(task);
-  const historicalResultGroups = getHistoricalTaskResultGroups(task);
-  const primaryResult = getPrimaryTaskResult(task);
-  const resultProgress = getTaskResultProgress(task, globalBatchCount);
   const effectiveBatchCount = getEffectiveBatchCount(task, globalBatchCount);
   const isRenderingVisual = task.status === 'Rendering';
   const isListMode = viewMode === 'list';
@@ -184,6 +190,86 @@ export const TaskCard = React.memo(function TaskCard({
       promptSource: 'manual',
     }),
   });
+  const derivedResults = React.useMemo(() => {
+    const allResultImages = task.resultImages || EMPTY_RESULT_IMAGES;
+    const activeSessionId = task.activeResultSessionId;
+    const currentResultImages = activeSessionId
+      ? allResultImages.filter((result) => result.sessionId === activeSessionId)
+      : EMPTY_RESULT_IMAGES;
+    const primaryTaskResult = currentResultImages[0];
+    const requestedBatchCount = task.requestedBatchCount || effectiveBatchCount;
+    const progress = {
+      requestedBatchCount,
+      requested: getBatchCountNumber(requestedBatchCount),
+      completed: currentResultImages.length,
+      failed: task.failedResultCount || 0,
+    };
+
+    if (!isActive) {
+      return {
+        currentResultImages,
+        historicalResultImages: EMPTY_RESULT_IMAGES,
+        historicalResultGroups: EMPTY_HISTORY_GROUPS,
+        primaryTaskResult,
+        progress,
+      };
+    }
+
+    const historicalResultImages = activeSessionId
+      ? allResultImages.filter((result) => result.sessionId !== activeSessionId)
+      : allResultImages;
+    const historyGroups = new Map<string, TaskResultImage[]>();
+
+    historicalResultImages.forEach((image) => {
+      const sessionId = image.sessionId || `legacy-${image.id}`;
+      const existing = historyGroups.get(sessionId) || [];
+      existing.push(image);
+      historyGroups.set(sessionId, existing);
+    });
+
+    const historicalResultGroups = Array.from(historyGroups.entries())
+      .map(([sessionId, images]) => ({
+        sessionId,
+        images: [...images].sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0)),
+        createdAt: Math.max(...images.map((image) => image.createdAt || 0), 0),
+      }))
+      .sort((left, right) => right.createdAt - left.createdAt);
+
+    return {
+      currentResultImages,
+      historicalResultImages,
+      historicalResultGroups,
+      primaryTaskResult,
+      progress,
+    };
+  }, [effectiveBatchCount, isActive, task.activeResultSessionId, task.failedResultCount, task.requestedBatchCount, task.resultImages]);
+  const resultImages = derivedResults.currentResultImages;
+  const historicalResultImages = derivedResults.historicalResultImages;
+  const historicalResultGroups = derivedResults.historicalResultGroups;
+  const primaryResult = derivedResults.primaryTaskResult;
+  const resultProgress = derivedResults.progress;
+  const shouldReduceMotionEffects = isBatchRunning || tasksCount >= 12;
+  const thumbnailItems = React.useMemo<ThumbnailViewerItem[]>(() => {
+    if (!isActive) return EMPTY_THUMBNAIL_ITEMS;
+
+    const items: ThumbnailViewerItem[] = [];
+    if (task.sourceImage) {
+      items.push({ id: 'source', src: task.sourceImage, type: 'source' });
+    }
+    resultImages.forEach((result, index) => {
+      items.push({
+        id: result.id,
+        src: result.src,
+        type: 'result',
+        resultIndex: index,
+      });
+    });
+    return items;
+  }, [isActive, resultImages, task.sourceImage]);
+  const primaryResultDimensions = React.useMemo(
+    () => (primaryResult ? getResultImageAssetDimensions(primaryResult) : null),
+    [primaryResult],
+  );
 
   React.useEffect(() => {
     if (isRenderingVisual && task.activeResultSessionId && autoFocusSessionRef.current !== task.activeResultSessionId) {
@@ -220,10 +306,11 @@ export const TaskCard = React.memo(function TaskCard({
   }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage, isRenderingVisual, task.activeResultSessionId]);
 
   React.useEffect(() => {
+    if (!isActive || resultImages.length === 0) return;
     void primeTaskResultImageCache(
       resultImages.flatMap((result) => [result.assetSrc, result.src, result.previewSrc, result.originalSrc])
     );
-  }, [resultImages]);
+  }, [isActive, resultImages]);
 
   const activeResult = resultImages[selectedResultIndex] || primaryResult;
   const coverImageSrc = primaryResult?.src || task.sourceImage;
@@ -323,11 +410,7 @@ export const TaskCard = React.memo(function TaskCard({
   };
 
   const downloadResultImage = async (result: TaskResultImage, fileName: string) => {
-    const latestLogSession = useAppStore
-      .getState()
-      .generationLogs
-      .filter((session) => session.taskId === task.id)
-      .sort((left, right) => right.createdAt - left.createdAt)[0];
+    const latestLogSession = getLatestGenerationLogSessionForTask(task.id);
     try {
       const { blob, cacheStatus, status } = await resolveResultImageDownloadBlob(result);
       try {
@@ -540,11 +623,13 @@ export const TaskCard = React.memo(function TaskCard({
   );
 
   const renderUnifiedViewer = () => {
-    const mainImageSrc = getTaskViewerMainImage(task, viewerMode, selectedResultIndex);
+    const mainImageSrc =
+      viewerMode === 'source'
+        ? task.sourceImage
+        : resultImages[selectedResultIndex]?.src || primaryResult?.src;
     const activeAssetDimensions = activeResult ? getResultImageAssetDimensions(activeResult) : null;
     const showResultSize = viewerMode === 'result' && Boolean(activeAssetDimensions);
     const activeResultDuration = formatGenerationTime(activeResult?.generationTimeMs);
-    const thumbnailItems = getTaskViewerItems(task) as ThumbnailViewerItem[];
     const placeholderCount = isRenderingVisual
       ? Math.max(0, resultProgress.requested - resultImages.length - resultProgress.failed)
       : 0;
@@ -558,7 +643,7 @@ export const TaskCard = React.memo(function TaskCard({
     const visibleThumbnailItems = [...thumbnailItems, ...placeholderItems];
     const hasThumbnailStrip = visibleThumbnailItems.length > 0;
     const hasResolvedActiveResult = viewerMode === 'result' && Boolean(activeResult?.src) && selectedResultIndex < resultImages.length;
-    const shouldAnimateViewerImage = isRenderingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
+    const shouldAnimateViewerImage = !shouldReduceMotionEffects && isRenderingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
 
     return (
       <div className="overflow-hidden rounded-t-[22px] rounded-b-none bg-[#FBFAF7] p-0 transition-all duration-300 ease-out">
@@ -568,19 +653,9 @@ export const TaskCard = React.memo(function TaskCard({
         >
           {shouldAnimateViewerImage ? (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-              <div className="absolute inset-0 bg-white/20 backdrop-blur-[18px]" />
-              <div className="absolute inset-0 animate-[mist-breathe_3.1s_ease-in-out_infinite] bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_34%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.24),transparent_30%)]" />
-              <div
-                className="absolute inset-0 animate-[dot-drift_4.8s_linear_infinite]"
-                style={{
-                  backgroundImage:
-                    'radial-gradient(circle, rgba(255,255,255,0.88) 0 1px, transparent 1.8px), radial-gradient(circle, rgba(255,255,255,0.32) 0 1px, transparent 2px)',
-                  backgroundSize: '18px 18px, 24px 24px',
-                }}
-              />
-              <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/48 to-transparent blur-[24px] animate-[shimmer_2.4s_ease-in-out_infinite]" />
-              <div className="absolute left-[12%] top-[16%] h-28 w-28 rounded-full bg-white/24 blur-[58px] animate-[mist-breathe_2.6s_ease-in-out_infinite]" />
-              <div className="absolute bottom-[14%] right-[16%] h-24 w-24 rounded-full bg-white/16 blur-[46px] animate-[mist-breathe_2.9s_ease-in-out_infinite]" />
+              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.16)_0%,rgba(255,255,255,0.08)_100%)]" />
+              <div className="absolute inset-0 opacity-85 bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_34%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.2),transparent_30%)]" />
+              <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/58 to-transparent blur-[12px] animate-[shimmer_2.6s_linear_infinite]" />
             </div>
           ) : null}
           {mainImageSrc ? (
@@ -588,7 +663,8 @@ export const TaskCard = React.memo(function TaskCard({
               <img
                 src={mainImageSrc}
                 alt={task.title}
-                className={`block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.018] blur-[16px] saturate-[0.88]' : isRenderingVisual ? 'scale-[1.008]' : ''}`}
+                decoding="async"
+                className={`block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.01] blur-[8px] saturate-[0.92]' : isRenderingVisual ? 'scale-[1.004]' : ''}`}
                 draggable={false}
                 onDragStart={preventNativeImageDrag}
               />
@@ -598,7 +674,8 @@ export const TaskCard = React.memo(function TaskCard({
               <img
                 src={task.sourceImage}
                 alt={task.title}
-                className="block h-full w-full scale-[1.08] object-cover blur-[26px] saturate-[0.82] opacity-90"
+                decoding="async"
+                className="block h-full w-full scale-[1.03] object-cover blur-[12px] saturate-[0.9] opacity-92"
                 draggable={false}
                 onDragStart={preventNativeImageDrag}
               />
@@ -650,28 +727,11 @@ export const TaskCard = React.memo(function TaskCard({
                           className="relative h-9 w-12 shrink-0 overflow-hidden rounded-[12px] border border-black/10 bg-[#f3efe8] sm:h-10 sm:w-[54px]"
                           aria-hidden="true"
                         >
-                          {task.sourceImage ? (
-                            <img
-                              src={task.sourceImage}
-                              alt=""
-                              className="absolute inset-0 h-full w-full scale-[1.68] object-cover opacity-92 blur-[18px] saturate-[0.88] brightness-[1.03]"
-                              draggable={false}
-                              onDragStart={preventNativeImageDrag}
-                            />
+                          <div className="absolute inset-0 bg-[linear-gradient(135deg,#f6f1ea_0%,#efe6da_52%,#eadfce_100%)]" />
+                          <div className="absolute inset-0 opacity-70 bg-[radial-gradient(circle_at_28%_24%,rgba(255,255,255,0.62),transparent_34%),radial-gradient(circle_at_72%_72%,rgba(255,255,255,0.2),transparent_28%)]" />
+                          {!shouldReduceMotionEffects ? (
+                            <div className="absolute inset-y-0 left-[-55%] w-[42%] rotate-[12deg] bg-gradient-to-r from-transparent via-white/72 to-transparent animate-[shimmer_2s_linear_infinite]" />
                           ) : null}
-                          <div className="absolute inset-0 bg-white/20 backdrop-blur-[12px]" />
-                          <div className="absolute inset-0 animate-[mist-breathe_2.6s_ease-in-out_infinite] bg-[radial-gradient(circle_at_28%_24%,rgba(255,255,255,0.52),transparent_34%),radial-gradient(circle_at_72%_72%,rgba(255,255,255,0.24),transparent_30%)]" />
-                          <div
-                            className="absolute inset-0 animate-[dot-drift_3.2s_linear_infinite]"
-                            style={{
-                              backgroundImage:
-                                'radial-gradient(circle, rgba(255,255,255,0.86) 0 1px, transparent 1.8px), radial-gradient(circle, rgba(255,255,255,0.36) 0 1px, transparent 2px)',
-                              backgroundSize: '18px 18px, 24px 24px',
-                            }}
-                          />
-                          <div className="absolute inset-y-[-15%] left-[-42%] w-[48%] rotate-[12deg] bg-gradient-to-r from-transparent via-white/56 to-transparent blur-[16px] animate-[shimmer_1.9s_ease-in-out_infinite]" />
-                          <div className="absolute left-[12%] top-[18%] h-6 w-6 rounded-full bg-white/22 blur-[16px] animate-[mist-breathe_2.3s_ease-in-out_infinite]" />
-                          <div className="absolute bottom-[16%] right-[16%] h-5 w-5 rounded-full bg-white/16 blur-[14px] animate-[mist-breathe_2.8s_ease-in-out_infinite]" />
                         </div>
                       );
                     }
@@ -701,6 +761,8 @@ export const TaskCard = React.memo(function TaskCard({
                       >
                         <img
                           src={item.src}
+                          loading="lazy"
+                          decoding="async"
                           className={`h-full w-full object-cover transition-transform duration-200 ease-out ${
                             isActiveThumb ? 'scale-[1.02]' : 'group-hover/thumb:scale-[1.03]'
                           }`}
@@ -786,6 +848,8 @@ export const TaskCard = React.memo(function TaskCard({
                                     <img
                                       src={image.previewSrc || image.src}
                                       alt={`历史结果 ${index + 1}`}
+                                      loading="lazy"
+                                      decoding="async"
                                       className="h-full w-full object-cover transition-transform duration-200 group-hover/history:scale-[1.03]"
                                       draggable={false}
                                       onDragStart={preventNativeImageDrag}
@@ -926,21 +990,11 @@ export const TaskCard = React.memo(function TaskCard({
         >
           {isRenderingVisual && !primaryResult?.src && (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-              <div className={`absolute inset-0 ${primaryResult?.src ? 'bg-white/[0.05] backdrop-blur-[1.5px]' : 'bg-white/14 backdrop-blur-[10px]'}`} />
-              <div className={`absolute inset-0 animate-[mist-breathe_3s_ease-in-out_infinite] ${primaryResult?.src ? 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.18),transparent_24%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.12),transparent_24%)]' : 'bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_30%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.24),transparent_28%)]'}`} />
-              <div
-                className="absolute inset-0 animate-[dot-drift_4.2s_linear_infinite]"
-                style={{
-                  backgroundImage:
-                    primaryResult?.src
-                      ? 'radial-gradient(circle, rgba(255,255,255,0.8) 0 1px, transparent 1.6px), radial-gradient(circle, rgba(255,255,255,0.28) 0 1px, transparent 1.85px)'
-                      : 'radial-gradient(circle, rgba(255,255,255,0.9) 0 1px, transparent 1.7px), radial-gradient(circle, rgba(255,255,255,0.36) 0 1px, transparent 1.9px)',
-                  backgroundSize: '18px 18px, 24px 24px',
-                }}
-              />
-              <div className={`absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent ${primaryResult?.src ? 'via-white/22' : 'via-white/58'} to-transparent blur-[18px] animate-[shimmer_2.2s_ease-in-out_infinite]`} />
-              <div className={`absolute left-[15%] top-[18%] rounded-full ${primaryResult?.src ? 'h-14 w-14 bg-white/12 blur-[30px]' : 'h-16 w-16 bg-white/26 blur-[36px]'} animate-[mist-breathe_2.4s_ease-in-out_infinite]`} />
-              <div className={`absolute right-[18%] top-[58%] rounded-full ${primaryResult?.src ? 'h-12 w-12 bg-white/10 blur-[24px]' : 'h-14 w-14 bg-white/18 blur-[28px]'} animate-[mist-breathe_2.8s_ease-in-out_infinite]`} />
+              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.18)_0%,rgba(255,255,255,0.08)_100%)]" />
+              <div className="absolute inset-0 opacity-82 bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_30%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.22),transparent_28%)]" />
+              {!shouldReduceMotionEffects ? (
+                <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/58 to-transparent blur-[10px] animate-[shimmer_2.4s_linear_infinite]" />
+              ) : null}
             </div>
           )}
 
@@ -980,9 +1034,9 @@ export const TaskCard = React.memo(function TaskCard({
             </button>
           </div>
 
-          {primaryResult && getResultImageAssetDimensions(primaryResult) ? (
+          {primaryResultDimensions ? (
             <div className="absolute bottom-3 left-3 z-20 rounded-full border border-black/10 bg-white px-3 py-1 text-[10.5px] font-mono font-medium text-black/78 shadow-[0_8px_20px_rgba(0,0,0,0.10)]">
-              {getResultImageAssetDimensions(primaryResult)?.width} × {getResultImageAssetDimensions(primaryResult)?.height}
+              {primaryResultDimensions.width} × {primaryResultDimensions.height}
               {totalResultDuration ? ` / ${totalResultDuration}` : ''}
             </div>
           ) : null}
@@ -1036,7 +1090,7 @@ export const TaskCard = React.memo(function TaskCard({
                     <div className="flex gap-2 opacity-80 pointer-events-none">
                       {globalReferenceImages.map((img, i) => (
                         <div key={i} className="h-10 w-10 overflow-hidden rounded-lg bg-white shadow-sm">
-                          <img src={img} className="h-full w-full object-cover" alt="Global Ref" draggable={false} onDragStart={preventNativeImageDrag} />
+                          <img src={img} loading="lazy" decoding="async" className="h-full w-full object-cover" alt="Global Ref" draggable={false} onDragStart={preventNativeImageDrag} />
                         </div>
                       ))}
                     </div>
@@ -1075,6 +1129,8 @@ export const TaskCard = React.memo(function TaskCard({
                       >
                         <img
                           src={img}
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-cover transition-transform duration-200 group-hover/ref:scale-[1.04]"
                           alt="Ref"
                           draggable={referenceSortMode}

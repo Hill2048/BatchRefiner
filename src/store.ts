@@ -26,6 +26,11 @@ function buildTaskLookup(tasks: Task[]) {
   return Object.fromEntries(tasks.map((task) => [task.id, task])) as Record<string, Task>;
 }
 
+function hasTaskUpdates(existingTask: Task, updates: Partial<Task>) {
+  const updateKeys = Object.keys(updates) as Array<keyof Task>;
+  return updateKeys.some((key) => !Object.is(existingTask[key], updates[key]));
+}
+
 const idbStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
     try {
@@ -154,20 +159,26 @@ export const useAppStore = create<AppState>()(
       updateTask: (id, updates) =>
         set((state) => {
           const existingTask = state.taskLookup[id];
-          if (!existingTask) return { updatedAt: Date.now() };
+          if (!existingTask || !hasTaskUpdates(existingTask, updates)) return state;
+
+          const taskIndex = state.tasks.findIndex((task) => task.id === id);
+          if (taskIndex === -1) return state;
+
+          const updatedAt = Date.now();
           const nextTask = migrateTask({
             ...existingTask,
             ...updates,
-            updatedAt: Date.now(),
+            updatedAt,
           });
-          const nextTasks = state.tasks.map((task) => (task.id === id ? nextTask : task));
+          const nextTasks = [...state.tasks];
+          nextTasks[taskIndex] = nextTask;
           return {
             tasks: nextTasks,
             taskLookup: {
               ...state.taskLookup,
               [id]: nextTask,
             },
-            updatedAt: Date.now(),
+            updatedAt,
           };
         }),
 
@@ -312,7 +323,6 @@ export const useAppStore = create<AppState>()(
         globalResolution: state.globalResolution,
         globalImageQuality: state.globalImageQuality,
         globalBatchCount: state.globalBatchCount,
-        generationLogs: state.generationLogs,
         tasks: state.tasks,
         viewMode: state.viewMode,
         maxConcurrency: state.maxConcurrency,

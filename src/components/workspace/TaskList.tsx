@@ -29,7 +29,93 @@ function hasImageFiles(dataTransfer?: DataTransfer | null) {
   );
 }
 
+const GRID_PLACEHOLDER_HEIGHT = 320;
+const LIST_PLACEHOLDER_HEIGHT = 180;
+
+type DeferredTaskCardProps = {
+  taskId: string;
+  viewMode: 'grid' | 'list';
+  scrollRoot: HTMLDivElement | null;
+  isFileDropTarget: boolean;
+  onFileDragEnter: (taskId: string) => void;
+  onFileDragLeave: (taskId: string) => void;
+  onFileDrop: (taskId: string, files: File[]) => void;
+};
+
+const DeferredTaskCard = React.memo(function DeferredTaskCard({
+  taskId,
+  viewMode,
+  scrollRoot,
+  isFileDropTarget,
+  onFileDragEnter,
+  onFileDragLeave,
+  onFileDrop,
+}: DeferredTaskCardProps) {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [shouldRender, setShouldRender] = React.useState(false);
+
+  React.useEffect(() => {
+    if (shouldRender || isFileDropTarget) {
+      setShouldRender(true);
+      return;
+    }
+
+    const node = containerRef.current;
+    if (!node) return;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setShouldRender(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldRender(true);
+          observer.disconnect();
+        }
+      },
+      {
+        root: scrollRoot,
+        rootMargin: '900px 0px',
+        threshold: 0.01,
+      },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [isFileDropTarget, scrollRoot, shouldRender]);
+
+  return (
+    <div ref={containerRef} className="min-h-0">
+      {shouldRender ? (
+        <TaskCard
+          taskId={taskId}
+          isFileDropTarget={isFileDropTarget}
+          onFileDragEnter={onFileDragEnter}
+          onFileDragLeave={onFileDragLeave}
+          onFileDrop={onFileDrop}
+        />
+      ) : (
+        <div
+          className={`overflow-hidden rounded-2xl border border-black/8 bg-white shadow-sm ${
+            viewMode === 'list' ? 'min-h-[180px]' : 'min-h-[320px]'
+          }`}
+          style={{
+            contentVisibility: 'auto',
+            containIntrinsicSize: `${viewMode === 'list' ? LIST_PLACEHOLDER_HEIGHT : GRID_PLACEHOLDER_HEIGHT}px`,
+          }}
+          aria-hidden="true"
+        >
+          <div className="h-full w-full bg-[linear-gradient(180deg,#fbfaf7_0%,#f4f0e8_100%)]" />
+        </div>
+      )}
+    </div>
+  );
+});
+
 export function TaskList() {
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
   const taskIds = useAppStore(useShallow((state) => state.tasks.map((task) => task.id)));
   const tasksCount = useAppStore((state) => state.tasks.length);
   const viewMode = useAppStore((state) => state.viewMode);
@@ -198,9 +284,11 @@ export function TaskList() {
   );
 
   const allSelected = tasksCount > 0 && selectedTaskIds.length === tasksCount;
+  const selectedTaskIdSet = React.useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
 
   return (
     <div
+      ref={scrollContainerRef}
       onDragEnter={handleWorkspaceDragEnter}
       onDragOver={handleWorkspaceDragOver}
       onDragLeave={handleWorkspaceDragLeave}
@@ -242,7 +330,7 @@ export function TaskList() {
                 <button
                   onClick={() =>
                     setProjectFields({
-                      tasks: useAppStore.getState().tasks.filter((task) => !selectedTaskIds.includes(task.id)),
+                      tasks: useAppStore.getState().tasks.filter((task) => !selectedTaskIdSet.has(task.id)),
                       selectedTaskIds: [],
                     })
                   }
@@ -313,9 +401,11 @@ export function TaskList() {
               }}
             >
               {taskIds.map((id) => (
-                <TaskCard
+                <DeferredTaskCard
                   key={id}
                   taskId={id}
+                  viewMode={viewMode}
+                  scrollRoot={scrollContainerRef.current}
                   isFileDropTarget={hoverTaskId === id}
                   onFileDragEnter={handleTaskFileDragEnter}
                   onFileDragLeave={handleTaskFileDragLeave}

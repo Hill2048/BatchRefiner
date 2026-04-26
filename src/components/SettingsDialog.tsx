@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/store';
+import { useShallow } from 'zustand/react/shallow';
 import { PlatformApiConfigMap, PlatformPreset } from '@/types';
 import { clearDownloadDirectory, pickDownloadDirectory, supportsDirectoryDownload } from '@/lib/downloadDirectory';
 import {
@@ -353,24 +354,70 @@ function ModelInput({
 }
 
 export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const store = useAppStore();
+  const {
+    apiBaseUrl: savedApiBaseUrl,
+    apiKey: savedApiKey,
+    downloadDirectoryName: savedDownloadDirectoryName,
+    imageApiBaseUrl: savedImageApiBaseUrl,
+    imageApiKey: savedImageApiKey,
+    imageApiPath: savedImageApiPath,
+    imageModel: savedImageModel,
+    maxConcurrency: savedMaxConcurrency,
+    platformConfigs,
+    platformPreset: savedPlatformPreset,
+    setApiBaseUrl,
+    setImageApiBaseUrl,
+    setImageApiKey,
+    setImageApiPath,
+    setMaxConcurrency,
+    setProjectFields,
+    setTextApiBaseUrl,
+    setTextApiKey,
+    textApiBaseUrl: savedTextApiBaseUrl,
+    textApiKey: savedTextApiKey,
+    textModel: savedTextModel,
+  } = useAppStore(
+    useShallow((state) => ({
+      apiBaseUrl: state.apiBaseUrl,
+      apiKey: state.apiKey,
+      downloadDirectoryName: state.downloadDirectoryName,
+      imageApiBaseUrl: state.imageApiBaseUrl,
+      imageApiKey: state.imageApiKey,
+      imageApiPath: state.imageApiPath,
+      imageModel: state.imageModel,
+      maxConcurrency: state.maxConcurrency,
+      platformConfigs: state.platformConfigs,
+      platformPreset: state.platformPreset,
+      setApiBaseUrl: state.setApiBaseUrl,
+      setImageApiBaseUrl: state.setImageApiBaseUrl,
+      setImageApiKey: state.setImageApiKey,
+      setImageApiPath: state.setImageApiPath,
+      setMaxConcurrency: state.setMaxConcurrency,
+      setProjectFields: state.setProjectFields,
+      setTextApiBaseUrl: state.setTextApiBaseUrl,
+      setTextApiKey: state.setTextApiKey,
+      textApiBaseUrl: state.textApiBaseUrl,
+      textApiKey: state.textApiKey,
+      textModel: state.textModel,
+    })),
+  );
   const generationLogs = useAppStore((state) => state.generationLogs);
   const mergedPlatformConfigs = React.useMemo(
-    () => mergePlatformConfigs(store.platformConfigs),
-    [store.platformConfigs],
+    () => mergePlatformConfigs(platformConfigs),
+    [platformConfigs],
   );
 
-  const [platformPreset, setPlatformPreset] = React.useState<PlatformPreset>(store.platformPreset || 'yunwu');
-  const [textApiKey, setTextApiKey] = React.useState(store.textApiKey || store.apiKey);
-  const [imageApiKey, setImageApiKey] = React.useState(store.imageApiKey || store.apiKey);
-  const [apiBaseUrl, setApiBaseUrl] = React.useState(store.apiBaseUrl);
-  const [textApiBaseUrl, setTextApiBaseUrl] = React.useState(store.textApiBaseUrl || store.apiBaseUrl);
-  const [imageApiBaseUrl, setImageApiBaseUrl] = React.useState(store.imageApiBaseUrl || store.apiBaseUrl);
-  const [imageApiPath, setImageApiPath] = React.useState(store.imageApiPath || '');
-  const [maxConcurrency, setMaxConcurrency] = React.useState(String(store.maxConcurrency));
-  const [localTextModel, setLocalTextModel] = React.useState(store.textModel || 'gemini-3.1-flash-lite-preview');
-  const [localImageModel, setLocalImageModel] = React.useState(store.imageModel || 'gemini-3.1-flash-image-preview');
-  const [downloadDirectoryName, setDownloadDirectoryName] = React.useState(store.downloadDirectoryName || '');
+  const [platformPreset, setPlatformPreset] = React.useState<PlatformPreset>(savedPlatformPreset || 'yunwu');
+  const [textApiKey, setTextApiKeyValue] = React.useState(savedTextApiKey || savedApiKey);
+  const [imageApiKey, setImageApiKeyValue] = React.useState(savedImageApiKey || savedApiKey);
+  const [apiBaseUrl, setApiBaseUrlValue] = React.useState(savedApiBaseUrl);
+  const [textApiBaseUrl, setTextApiBaseUrlValue] = React.useState(savedTextApiBaseUrl || savedApiBaseUrl);
+  const [imageApiBaseUrl, setImageApiBaseUrlValue] = React.useState(savedImageApiBaseUrl || savedApiBaseUrl);
+  const [imageApiPath, setImageApiPathValue] = React.useState(savedImageApiPath || '');
+  const [maxConcurrency, setMaxConcurrencyValue] = React.useState(String(savedMaxConcurrency));
+  const [localTextModel, setLocalTextModel] = React.useState(savedTextModel || 'gemini-3.1-flash-lite-preview');
+  const [localImageModel, setLocalImageModel] = React.useState(savedImageModel || 'gemini-3.1-flash-image-preview');
+  const [downloadDirectoryName, setDownloadDirectoryName] = React.useState(savedDownloadDirectoryName || '');
   const [allPlatformConfigs, setAllPlatformConfigs] = React.useState<PlatformApiConfigMap>(mergedPlatformConfigs);
   const [remoteTextModels, setRemoteTextModels] = React.useState<string[]>([]);
   const [remoteImageModels, setRemoteImageModels] = React.useState<string[]>([]);
@@ -385,12 +432,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const applyPlatformConfigToForm = React.useCallback((preset: PlatformPreset, configs: PlatformApiConfigMap) => {
     const next = configs[preset];
     setPlatformPreset(preset);
-    setTextApiKey(next.textApiKey || next.apiKey);
-    setImageApiKey(next.imageApiKey || next.apiKey);
-    setApiBaseUrl(next.apiBaseUrl);
-    setTextApiBaseUrl(next.textApiBaseUrl || next.apiBaseUrl);
-    setImageApiBaseUrl(next.imageApiBaseUrl || next.apiBaseUrl);
-    setImageApiPath(next.imageApiPath || '');
+    setTextApiKeyValue(next.textApiKey || next.apiKey);
+    setImageApiKeyValue(next.imageApiKey || next.apiKey);
+    setApiBaseUrlValue(next.apiBaseUrl);
+    setTextApiBaseUrlValue(next.textApiBaseUrl || next.apiBaseUrl);
+    setImageApiBaseUrlValue(next.imageApiBaseUrl || next.apiBaseUrl);
+    setImageApiPathValue(next.imageApiPath || '');
     setLocalTextModel(next.textModel);
     setLocalImageModel(next.imageModel);
   }, []);
@@ -413,11 +460,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   }, [apiBaseUrl, imageApiBaseUrl, imageApiKey, imageApiPath, localImageModel, localTextModel, platformPreset, textApiBaseUrl, textApiKey]);
 
   React.useEffect(() => {
-    const nextConfigs = mergePlatformConfigs(store.platformConfigs);
+    const nextConfigs = mergePlatformConfigs(platformConfigs);
     setAllPlatformConfigs(nextConfigs);
-    applyPlatformConfigToForm(store.platformPreset || 'yunwu', nextConfigs);
-    setMaxConcurrency(String(store.maxConcurrency));
-    setDownloadDirectoryName(store.downloadDirectoryName || '');
+    applyPlatformConfigToForm(savedPlatformPreset || 'yunwu', nextConfigs);
+    setMaxConcurrencyValue(String(savedMaxConcurrency));
+    setDownloadDirectoryName(savedDownloadDirectoryName || '');
     setRemoteTextModels([]);
     setRemoteImageModels([]);
     setTestResult({ status: 'idle', msg: '' });
@@ -426,10 +473,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   }, [
     applyPlatformConfigToForm,
     open,
-    store.downloadDirectoryName,
-    store.maxConcurrency,
-    store.platformConfigs,
-    store.platformPreset,
+    platformConfigs,
+    savedDownloadDirectoryName,
+    savedMaxConcurrency,
+    savedPlatformPreset,
   ]);
 
   const textModelOptions = uniqSorted([...BUILT_IN_TEXT_MODELS, ...remoteTextModels]);
@@ -717,7 +764,7 @@ const handleExportCurrentConfig = async () => {
     try {
       const { name } = await pickDownloadDirectory();
       setDownloadDirectoryName(name);
-      store.setProjectFields({ downloadDirectoryName: name });
+      setProjectFields({ downloadDirectoryName: name });
       toast.success(`已设置结果图下载目录：${name}`);
     } catch (error: any) {
       if (error?.name !== 'AbortError') {
@@ -732,7 +779,7 @@ const handleExportCurrentConfig = async () => {
     try {
       await clearDownloadDirectory();
       setDownloadDirectoryName('');
-      store.setProjectFields({ downloadDirectoryName: '' });
+      setProjectFields({ downloadDirectoryName: '' });
       toast.success('已清除结果图下载目录');
     } catch {
       toast.error('清除下载目录失败');
@@ -743,18 +790,18 @@ const handleExportCurrentConfig = async () => {
     const parsedConcurrency = parseInt(maxConcurrency, 10);
     const nextPlatformConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
 
-    store.setTextApiKey(textApiKey);
-    store.setImageApiKey(imageApiKey);
-    store.setApiBaseUrl(textApiBaseUrl || apiBaseUrl);
-    store.setTextApiBaseUrl(textApiBaseUrl);
-    store.setImageApiBaseUrl(imageApiBaseUrl);
-    store.setImageApiPath(imageApiPath);
+    setTextApiKey(textApiKey);
+    setImageApiKey(imageApiKey);
+    setApiBaseUrl(textApiBaseUrl || apiBaseUrl);
+    setTextApiBaseUrl(textApiBaseUrl);
+    setImageApiBaseUrl(imageApiBaseUrl);
+    setImageApiPath(imageApiPath);
 
     if (!Number.isNaN(parsedConcurrency) && parsedConcurrency > 0) {
-      store.setMaxConcurrency(parsedConcurrency);
+      setMaxConcurrency(parsedConcurrency);
     }
 
-    store.setProjectFields({
+    setProjectFields({
       platformPreset,
       downloadDirectoryName,
       textModel: localTextModel,
@@ -826,8 +873,8 @@ const handleExportCurrentConfig = async () => {
                     placeholder="文本 API 地址，例如 https://ai.comfly.chat"
                     value={textApiBaseUrl}
                     onChange={(e) => {
-                      setTextApiBaseUrl(e.target.value);
-                      setApiBaseUrl(e.target.value);
+                      setTextApiBaseUrlValue(e.target.value);
+                      setApiBaseUrlValue(e.target.value);
                     }}
                     className={mergedInputClassName}
                   />
@@ -844,7 +891,7 @@ const handleExportCurrentConfig = async () => {
                     data-1p-ignore="true"
                     placeholder="文本 API Key，用于提示词和文本模型"
                     value={textApiKey}
-                    onChange={(e) => setTextApiKey(e.target.value)}
+                    onChange={(e) => setTextApiKeyValue(e.target.value)}
                     className={mergedInputClassName}
                   />
                   <div className="h-px bg-border/70" />
@@ -866,7 +913,7 @@ const handleExportCurrentConfig = async () => {
                     autoComplete="off"
                     placeholder="生图 API 地址，留空则使用文本 API 地址"
                     value={imageApiBaseUrl}
-                    onChange={(e) => setImageApiBaseUrl(e.target.value)}
+                    onChange={(e) => setImageApiBaseUrlValue(e.target.value)}
                     className={mergedInputClassName}
                   />
                   <div className="h-px bg-border/70" />
@@ -876,7 +923,7 @@ const handleExportCurrentConfig = async () => {
                     autoComplete="off"
                     placeholder="生图接口路径，例如 /v1/images/edits"
                     value={imageApiPath}
-                    onChange={(e) => setImageApiPath(e.target.value)}
+                    onChange={(e) => setImageApiPathValue(e.target.value)}
                     className={mergedInputClassName}
                   />
                   <div className="h-px bg-border/70" />
@@ -892,7 +939,7 @@ const handleExportCurrentConfig = async () => {
                     data-1p-ignore="true"
                     placeholder="生图 API Key，留空则使用文本 API Key"
                     value={imageApiKey}
-                    onChange={(e) => setImageApiKey(e.target.value)}
+                    onChange={(e) => setImageApiKeyValue(e.target.value)}
                     className={mergedInputClassName}
                   />
                   <div className="h-px bg-border/70" />
@@ -986,7 +1033,7 @@ const handleExportCurrentConfig = async () => {
               min="1"
               max="10"
               value={maxConcurrency}
-              onChange={(e) => setMaxConcurrency(e.target.value)}
+              onChange={(e) => setMaxConcurrencyValue(e.target.value)}
               className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
             />
             <p className="mt-1 text-[11.55px] text-text-secondary">
