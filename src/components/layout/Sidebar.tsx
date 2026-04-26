@@ -20,7 +20,7 @@ import { Textarea } from "../ui/textarea";
 import { ScrollArea } from "../ui/scroll-area";
 import { useAppStore } from "@/store";
 import { useState, useRef } from "react";
-import { processBatch, generateTaskPrompt, haltBatch } from "@/lib/batchRunner";
+import { processBatch, generateTaskPrompt, getTaskPromptInputSignature, haltBatch } from "@/lib/batchRunner";
 import { toast } from "sonner";
 import pLimit from "p-limit";
 import { SettingsDialog } from "../SettingsDialog";
@@ -176,6 +176,7 @@ export function Sidebar({
 
   const handleGlobalTargetSend = () => {
     const currentTasks = useAppStore.getState().tasks;
+    const appliedTargetText = localTargetText.trim();
     if (currentTasks.length === 0) {
        toast.info('没有可操作的任务');
        return;
@@ -193,16 +194,27 @@ export function Sidebar({
 
     const newTasks = currentTasks.map(t => {
        if (tasksToUpdate.some(tu => tu.id === t.id)) {
+          const nextPromptFields = enablePromptOptimization
+            ? {
+                description: appliedTargetText || t.description,
+                promptText: undefined,
+                promptInputSignature: undefined,
+                promptSource: 'auto' as const,
+              }
+            : {
+                description: t.description,
+                promptText: appliedTargetText || t.promptText,
+                promptInputSignature: getTaskPromptInputSignature(t),
+                promptSource: 'manual' as const,
+              };
+
           return {
             ...t, 
-            description: globalTargetText || t.description,
-            promptText: undefined, // Clear old prompt cache
-            promptInputSignature: undefined,
+            ...nextPromptFields,
             resultImage: undefined, // Clear old image results
             resultImages: [],
             failedResultCount: 0,
             requestedBatchCount: t.batchCount || globalBatchCount || 'x1',
-            promptSource: 'auto' as const,
             status: 'Idle' as const, // Reset to idle
             errorLog: undefined
           };
@@ -210,8 +222,12 @@ export function Sidebar({
        return t;
     });
 
-    useAppStore.getState().setProjectFields({ tasks: newTasks });
-    toast.success(`已强行覆写至 ${tasksToUpdate.length} 个任务并重置状态`);
+    useAppStore.getState().setProjectFields({ globalTargetText: localTargetText, tasks: newTasks });
+    toast.success(
+      enablePromptOptimization
+        ? `已覆写 ${tasksToUpdate.length} 个任务的生成指令并重置状态`
+        : `已写入 ${tasksToUpdate.length} 个任务的提示词框并重置状态`
+    );
   };
 
   const handleMdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -835,11 +851,11 @@ export function Sidebar({
 
           <div className="flex flex-col">
             <h3 className="text-[12.6px] font-medium text-text-secondary mb-3">
-              全局目标指令
+              {enablePromptOptimization ? '全局目标指令' : '全局提示词指令'}
             </h3>
             <div className="relative group">
               <Textarea
-                placeholder="例如：将背景替换为纯白色的摄影布板..."
+                placeholder={enablePromptOptimization ? '例如：将背景替换为纯白色的摄影布板...' : '例如：保留产品主体，直接输出可执行的完整提示词...'}
                 className={`bg-card border border-border rounded-2xl p-4 pb-10 text-[13.65px] leading-relaxed text-foreground resize-none shadow-none focus-visible:ring-1 focus-visible:ring-button-main focus-visible:border-button-main transition-colors outline-none ${compact ? 'min-h-[72px]' : 'min-h-[80px]'}`}
                 value={localTargetText}
                 onChange={(e) => setLocalTargetText(e.target.value)}
@@ -847,7 +863,7 @@ export function Sidebar({
               />
               <button 
                   onClick={handleGlobalTargetSend}
-                  title="应用指令并为任务生成提示词"
+                  title={enablePromptOptimization ? '应用目标指令并为任务生成提示词' : '应用全局提示词到任务提示词框'}
                   className="absolute bottom-2 right-2 bg-[#E8E5DF] hover:bg-button-main hover:text-white text-text-secondary p-1.5 rounded-lg transition-colors group"
                 >
                   <ArrowUp className="w-4 h-4" strokeWidth={2} />
