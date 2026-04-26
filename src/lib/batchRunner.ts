@@ -375,6 +375,28 @@ function getImageApiBaseUrl(store: { apiBaseUrl?: string; imageApiBaseUrl?: stri
   return (store.imageApiBaseUrl || store.apiBaseUrl || store.textApiBaseUrl || "").trim();
 }
 
+function getImageApiPath(store: { imageApiPath?: string }) {
+  return (store.imageApiPath || "").trim();
+}
+
+function buildConfiguredImageApiUrl(baseUrl: string, defaultPath: string, customPath?: string) {
+  const normalizedBase = baseUrl.trim().replace(/\/+$/, "");
+  const path = (customPath || "").trim();
+
+  if (path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    const normalizedPath = path.replace(/^\/+/, "");
+    const baseWithoutDuplicateVersion =
+      normalizedPath.startsWith("v1/") || normalizedPath === "v1"
+        ? normalizedBase.replace(/\/v1$/, "")
+        : normalizedBase;
+    return `${baseWithoutDuplicateVersion}/${normalizedPath}`;
+  }
+
+  const openAIBaseUrl = normalizedBase.endsWith("/v1") ? normalizedBase : `${normalizedBase}/v1`;
+  return `${openAIBaseUrl}/${defaultPath.replace(/^\/+/, "")}`;
+}
+
 function getTextApiKey(store: { apiKey?: string; textApiKey?: string }) {
   return (store.textApiKey || store.apiKey || "").trim();
 }
@@ -2223,6 +2245,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
   const platformPreset = getPlatformPreset();
   const imageApiBaseUrl = getImageApiBaseUrl(store);
   const imageApiKey = getImageApiKey(store);
+  const imageApiPath = getImageApiPath(store);
   const resolution = getEffectiveResolution(task);
   const resolvedModel = resolveImageModel(store.imageModel, resolution, platformPreset);
   const isYunwuGptImage = isYunwuGptImageModel(resolvedModel.actualModel, platformPreset);
@@ -2395,6 +2418,8 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
     if (platformPreset === "yunwu" && isYunwuGptImage && imageApiBaseUrl && imageApiKey) {
       let baseUrl = imageApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
+      const editsUrl = buildConfiguredImageApiUrl(baseUrl, "/images/edits", imageApiPath);
+      const generationsUrl = buildConfiguredImageApiUrl(baseUrl, "/images/generations", imageApiPath);
 
       const isImage2Request = isDocumentedImage2Model(resolvedModel.actualModel);
 
@@ -2420,7 +2445,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
           event: "image.request.started",
           message: "开始请求生图 API",
           data: {
-            requestPath: getRequestPathLabel(`${baseUrl}/images/edits`),
+            requestPath: getRequestPathLabel(editsUrl),
             method: "POST",
             requestType: "openai_image_edits",
             body: summarizeFormDataForLog({
@@ -2432,7 +2457,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
           },
         });
 
-        const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
+        const extracted = await fetchImageResultWithOptionalStream(editsUrl, {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${imageApiKey}`
@@ -2463,7 +2488,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         event: "image.request.started",
         message: "开始请求生图 API",
         data: {
-          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          requestPath: getRequestPathLabel(generationsUrl),
           method: "POST",
           requestType: "openai_image_generations",
           body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
@@ -2475,7 +2500,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         event: "image.request.started",
         message: "开始请求生图 API",
         data: {
-          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          requestPath: getRequestPathLabel(generationsUrl),
           method: "POST",
           requestType: "openai_image_generations",
           body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
@@ -2486,7 +2511,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         event: "image.request.started",
         message: "寮€濮嬭姹傜敓鍥?API",
         data: {
-          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          requestPath: getRequestPathLabel(generationsUrl),
           method: "POST",
           requestType: "openai_image_generations",
           body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
@@ -2497,13 +2522,13 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         event: "image.request.started",
         message: "寮€濮嬭姹傜敓鍥?API",
         data: {
-          requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+          requestPath: getRequestPathLabel(generationsUrl),
           method: "POST",
           requestType: "openai_image_generations",
           body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
         },
       });
-      const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
+      const extracted = await fetchImageResultWithOptionalStream(generationsUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2525,6 +2550,8 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
     if (isCustomOpenAI) {
       let baseUrl = imageApiBaseUrl.replace(/\/+$/, "");
       if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
+      const editsUrl = buildConfiguredImageApiUrl(baseUrl, "/images/edits", imageApiPath);
+      const generationsUrl = buildConfiguredImageApiUrl(baseUrl, "/images/generations", imageApiPath);
 
       if (
         hasImageInputs &&
@@ -2552,7 +2579,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
           event: "image.request.started",
           message: "开始请求生图 API",
           data: {
-            requestPath: getRequestPathLabel(`${baseUrl}/images/edits`),
+            requestPath: getRequestPathLabel(editsUrl),
             method: "POST",
             requestType: "openai_image_edits",
             body: summarizeFormDataForLog({
@@ -2564,7 +2591,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
           },
         });
 
-        const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/edits`, {
+        const extracted = await fetchImageResultWithOptionalStream(editsUrl, {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${imageApiKey}`
@@ -2596,14 +2623,14 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
           event: "image.request.started",
           message: "开始请求生图 API",
           data: {
-            requestPath: getRequestPathLabel(`${baseUrl}/images/generations`),
+            requestPath: getRequestPathLabel(generationsUrl),
             method: "POST",
             requestType: "comfly_image_generations",
             body: summarizeJsonImageRequestBody(requestBody, String(requestBody.prompt || "")),
           },
         });
 
-        const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
+        const extracted = await fetchImageResultWithOptionalStream(generationsUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -2693,7 +2720,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
       }
 
       updateTaskProgress(taskId, "Rendering", "请求 API");
-      const extracted = await fetchImageResultWithOptionalStream(`${baseUrl}/images/generations`, {
+      const extracted = await fetchImageResultWithOptionalStream(generationsUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

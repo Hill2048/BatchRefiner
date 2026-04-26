@@ -24,6 +24,7 @@ export function sanitizeProjectSnapshot<T extends Record<string, any>>(state: T)
   delete nextState.apiBaseUrl;
   delete nextState.textApiBaseUrl;
   delete nextState.imageApiBaseUrl;
+  delete nextState.imageApiPath;
   return nextState;
 }
 
@@ -39,6 +40,7 @@ export function mergeProjectSnapshotWithGlobalConfig<T extends Record<string, an
     apiBaseUrl: globalState.apiBaseUrl || "",
     textApiBaseUrl: globalState.textApiBaseUrl || globalState.apiBaseUrl || "",
     imageApiBaseUrl: globalState.imageApiBaseUrl || globalState.apiBaseUrl || "",
+    imageApiPath: globalState.imageApiPath || "",
   };
 }
 

@@ -494,6 +494,7 @@ export const TaskCard = React.memo(function TaskCard({
   const promptCollapsedLines = getCollapsedTextClass(task.promptText, 3, 4, 6);
   const descriptionEditorHeightClass = getEditorHeightClass(task.description, 'min-h-[96px]', 'min-h-[156px]', 'min-h-[228px]');
   const promptEditorHeightClass = getEditorHeightClass(task.promptText, 'min-h-[112px]', 'min-h-[188px]', 'min-h-[272px]');
+  const shouldShowPromptEditor = !enablePromptOptimization || Boolean(task.promptText?.trim());
   const collapsedPreviewText = enablePromptOptimization
     ? (task.description || '').trim()
     : ((task.promptText || task.description || '').trim());
@@ -1234,23 +1235,26 @@ export const TaskCard = React.memo(function TaskCard({
                 </div>
               ) : null}
 
-              {task.promptText ? (
+              {shouldShowPromptEditor ? (
                 <div ref={promptEditor.containerRef} className={textSectionClass}>
                   <div className="flex items-center justify-between gap-2">
                     <span className={textLabelClass}>AI 提示词</span>
-                    <span className={`text-[9.45px] px-2 py-0.5 rounded-full border uppercase tracking-wider ${
-                      task.promptSource === 'manual'
-                        ? 'text-[#9A6700] bg-[#FFF7DB] border-[#F0D27A]'
-                        : 'text-[#2D734C] bg-[#F3F9F5] border-[#B9D6C4]'
-                    }`}>
-                      {task.promptSource === 'manual' ? '手动' : '自动'}
-                    </span>
+                    {task.promptText?.trim() ? (
+                      <span className={`text-[9.45px] px-2 py-0.5 rounded-full border uppercase tracking-wider ${
+                        task.promptSource === 'manual'
+                          ? 'text-[#9A6700] bg-[#FFF7DB] border-[#F0D27A]'
+                          : 'text-[#2D734C] bg-[#F3F9F5] border-[#B9D6C4]'
+                      }`}>
+                        {task.promptSource === 'manual' ? '手动' : '自动'}
+                      </span>
+                    ) : null}
                   </div>
                   {promptEditor.isEditing ? (
                     <Textarea
                       ref={promptEditor.textareaRef}
                       value={promptEditor.localValue}
                       onChange={(e) => promptEditor.setLocalValue(e.target.value)}
+                      placeholder="输入这条任务要直接执行的提示词..."
                       className={`${textEditorClass} ${promptEditorHeightClass} animate-in fade-in zoom-in-[0.99] duration-200`}
                     />
                   ) : (
@@ -1264,7 +1268,7 @@ export const TaskCard = React.memo(function TaskCard({
                       }`}
                       onMouseDown={activatePromptEditor}
                     >
-                      {task.promptText}
+                      {task.promptText?.trim() || '输入这条任务要直接执行的提示词...'}
                     </div>
                   )}
                 </div>

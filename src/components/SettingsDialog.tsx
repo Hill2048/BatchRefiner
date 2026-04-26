@@ -110,6 +110,7 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       apiBaseUrl: 'https://yunwu.ai',
       textApiBaseUrl: 'https://yunwu.ai',
       imageApiBaseUrl: 'https://yunwu.ai',
+      imageApiPath: '',
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
@@ -120,6 +121,7 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       apiBaseUrl: 'https://ai.comfly.chat',
       textApiBaseUrl: 'https://ai.comfly.chat',
       imageApiBaseUrl: 'https://ai.comfly.chat',
+      imageApiPath: '',
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
@@ -130,6 +132,7 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       apiBaseUrl: '',
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
+      imageApiPath: '',
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
@@ -140,6 +143,7 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       apiBaseUrl: '',
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
+      imageApiPath: '',
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
@@ -150,6 +154,7 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       apiBaseUrl: '',
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
+      imageApiPath: '',
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
@@ -177,6 +182,7 @@ function normalizePlatformConfig(config: PlatformApiConfigMap[PlatformPreset]): 
     ...config,
     textApiBaseUrl: config.textApiBaseUrl ?? config.apiBaseUrl,
     imageApiBaseUrl: config.imageApiBaseUrl ?? config.apiBaseUrl,
+    imageApiPath: config.imageApiPath ?? '',
     textApiKey: config.textApiKey ?? config.apiKey,
     imageApiKey: config.imageApiKey ?? config.apiKey,
   };
@@ -360,6 +366,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [apiBaseUrl, setApiBaseUrl] = React.useState(store.apiBaseUrl);
   const [textApiBaseUrl, setTextApiBaseUrl] = React.useState(store.textApiBaseUrl || store.apiBaseUrl);
   const [imageApiBaseUrl, setImageApiBaseUrl] = React.useState(store.imageApiBaseUrl || store.apiBaseUrl);
+  const [imageApiPath, setImageApiPath] = React.useState(store.imageApiPath || '');
   const [maxConcurrency, setMaxConcurrency] = React.useState(String(store.maxConcurrency));
   const [localTextModel, setLocalTextModel] = React.useState(store.textModel || 'gemini-3.1-flash-lite-preview');
   const [localImageModel, setLocalImageModel] = React.useState(store.imageModel || 'gemini-3.1-flash-image-preview');
@@ -383,6 +390,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setApiBaseUrl(next.apiBaseUrl);
     setTextApiBaseUrl(next.textApiBaseUrl || next.apiBaseUrl);
     setImageApiBaseUrl(next.imageApiBaseUrl || next.apiBaseUrl);
+    setImageApiPath(next.imageApiPath || '');
     setLocalTextModel(next.textModel);
     setLocalImageModel(next.imageModel);
   }, []);
@@ -394,6 +402,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         apiBaseUrl: textApiBaseUrl || apiBaseUrl,
         textApiBaseUrl,
         imageApiBaseUrl,
+        imageApiPath,
         apiKey: textApiKey,
         textApiKey,
         imageApiKey,
@@ -401,7 +410,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         imageModel: localImageModel,
       },
     };
-  }, [apiBaseUrl, imageApiBaseUrl, imageApiKey, localImageModel, localTextModel, platformPreset, textApiBaseUrl, textApiKey]);
+  }, [apiBaseUrl, imageApiBaseUrl, imageApiKey, imageApiPath, localImageModel, localTextModel, platformPreset, textApiBaseUrl, textApiKey]);
 
   React.useEffect(() => {
     const nextConfigs = mergePlatformConfigs(store.platformConfigs);
@@ -452,6 +461,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         apiBaseUrl: data.apiBaseUrl,
         textApiBaseUrl: data.textApiBaseUrl || data.apiBaseUrl,
         imageApiBaseUrl: data.imageApiBaseUrl || data.apiBaseUrl,
+        imageApiPath: data.imageApiPath || '',
         apiKey: data.apiKey,
         textApiKey: data.textApiKey || data.apiKey,
         imageApiKey: data.imageApiKey || data.apiKey,
@@ -663,6 +673,7 @@ const handleExportCurrentConfig = async () => {
         apiBaseUrl: currentConfig.apiBaseUrl,
         textApiBaseUrl: currentConfig.textApiBaseUrl,
         imageApiBaseUrl: currentConfig.imageApiBaseUrl,
+        imageApiPath: currentConfig.imageApiPath,
         apiKey: currentConfig.apiKey,
         textApiKey: currentConfig.textApiKey,
         imageApiKey: currentConfig.imageApiKey,
@@ -737,6 +748,7 @@ const handleExportCurrentConfig = async () => {
     store.setApiBaseUrl(textApiBaseUrl || apiBaseUrl);
     store.setTextApiBaseUrl(textApiBaseUrl);
     store.setImageApiBaseUrl(imageApiBaseUrl);
+    store.setImageApiPath(imageApiPath);
 
     if (!Number.isNaN(parsedConcurrency) && parsedConcurrency > 0) {
       store.setMaxConcurrency(parsedConcurrency);
@@ -749,6 +761,7 @@ const handleExportCurrentConfig = async () => {
       imageModel: localImageModel,
       textApiBaseUrl,
       imageApiBaseUrl,
+      imageApiPath,
       platformConfigs: nextPlatformConfigs,
     });
 
@@ -854,6 +867,16 @@ const handleExportCurrentConfig = async () => {
                     placeholder="生图 API 地址，留空则使用文本 API 地址"
                     value={imageApiBaseUrl}
                     onChange={(e) => setImageApiBaseUrl(e.target.value)}
+                    className={mergedInputClassName}
+                  />
+                  <div className="h-px bg-border/70" />
+                  <Input
+                    type="text"
+                    name="batch-refiner-image-api-path"
+                    autoComplete="off"
+                    placeholder="生图接口路径，例如 /v1/images/edits"
+                    value={imageApiPath}
+                    onChange={(e) => setImageApiPath(e.target.value)}
                     className={mergedInputClassName}
                   />
                   <div className="h-px bg-border/70" />

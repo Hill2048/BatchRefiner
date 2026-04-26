@@ -71,6 +71,7 @@ interface AppState extends ProjectData {
   apiBaseUrl: string;
   textApiBaseUrl: string;
   imageApiBaseUrl: string;
+  imageApiPath: string;
   platformConfigs: PlatformApiConfigMap;
   setProjectFields: (fields: Partial<AppState>) => void;
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
@@ -94,6 +95,7 @@ interface AppState extends ProjectData {
   setApiBaseUrl: (url: string) => void;
   setTextApiBaseUrl: (url: string) => void;
   setImageApiBaseUrl: (url: string) => void;
+  setImageApiPath: (path: string) => void;
   reorderTasks: (startIndex: number, endIndex: number) => void;
   flushDrafts: () => void;
   registerDraftFlusher: (id: string, flush: () => void) => void;
@@ -118,6 +120,7 @@ export const useAppStore = create<AppState>()(
       apiBaseUrl: 'https://yunwu.ai',
       textApiBaseUrl: 'https://yunwu.ai',
       imageApiBaseUrl: 'https://yunwu.ai',
+      imageApiPath: '',
       platformConfigs: initialPlatformConfigs,
 
       setProjectFields: (fields) => set((state) => ({ ...state, ...fields, updatedAt: Date.now() })),
@@ -211,6 +214,7 @@ export const useAppStore = create<AppState>()(
       setApiBaseUrl: (url) => set({ apiBaseUrl: url }),
       setTextApiBaseUrl: (url) => set({ textApiBaseUrl: url }),
       setImageApiBaseUrl: (url) => set({ imageApiBaseUrl: url }),
+      setImageApiPath: (path) => set({ imageApiPath: path }),
 
       reorderTasks: (startIndex, endIndex) =>
         set((state) => {
@@ -276,6 +280,7 @@ export const useAppStore = create<AppState>()(
         apiBaseUrl: state.apiBaseUrl,
         textApiBaseUrl: state.textApiBaseUrl,
         imageApiBaseUrl: state.imageApiBaseUrl,
+        imageApiPath: state.imageApiPath,
         platformConfigs: state.platformConfigs,
         createdAt: state.createdAt,
         updatedAt: state.updatedAt,

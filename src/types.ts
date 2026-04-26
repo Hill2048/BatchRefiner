@@ -9,6 +9,7 @@ export interface PlatformApiConfig {
   apiBaseUrl: string;
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
+  imageApiPath?: string;
   apiKey: string;
   textApiKey?: string;
   imageApiKey?: string;
@@ -138,6 +139,7 @@ export interface ProjectData {
   textModel: string;
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
+  imageApiPath?: string;
   globalAspectRatio?: AspectRatio;
   globalResolution?: Resolution;
   globalImageQuality?: ImageQuality;
