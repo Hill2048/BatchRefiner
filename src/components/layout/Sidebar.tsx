@@ -142,13 +142,14 @@ export function Sidebar({
   const projectName = useAppStore((state) => state.projectName);
   const projectId = useAppStore((state) => state.projectId);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
-  const generationLogs = useAppStore((state) => state.generationLogs);
   const getLatestTaskLogSessionId = React.useCallback(
     (taskId: string) =>
-      generationLogs
+      useAppStore
+        .getState()
+        .generationLogs
         .filter((session) => session.taskId === taskId)
         .sort((left, right) => right.createdAt - left.createdAt)[0]?.id,
-    [generationLogs],
+    [],
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);

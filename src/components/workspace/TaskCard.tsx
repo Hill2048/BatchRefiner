@@ -141,7 +141,7 @@ export const TaskCard = React.memo(function TaskCard({
   onFileDragLeave,
   onFileDrop
 }: TaskCardProps) {
-  const task = useAppStore(state => state.tasks.find(t => t.id === taskId));
+  const task = useAppStore(state => state.taskLookup[taskId]);
   const isActive = useAppStore(state => state.activeTaskId === taskId);
   const setActiveTask = useAppStore(state => state.setActiveTask);
   const updateTask = useAppStore(state => state.updateTask);

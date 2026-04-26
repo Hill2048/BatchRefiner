@@ -22,6 +22,10 @@ let pendingState: string | null = null;
 
 const draftFlushers = new Map<string, () => void>();
 
+function buildTaskLookup(tasks: Task[]) {
+  return Object.fromEntries(tasks.map((task) => [task.id, task])) as Record<string, Task>;
+}
+
 const idbStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
     try {
@@ -57,6 +61,7 @@ const idbStorage: StateStorage = {
 };
 
 interface AppState extends ProjectData {
+  taskLookup: Record<string, Task>;
   activeTaskId: string | null;
   isBatchRunning: boolean;
   viewMode: 'grid' | 'list';
@@ -106,6 +111,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       ...initialProjectState,
+      taskLookup: buildTaskLookup(initialProjectState.tasks),
       activeTaskId: null,
       isBatchRunning: false,
       viewMode: 'grid',
@@ -123,46 +129,81 @@ export const useAppStore = create<AppState>()(
       imageApiPath: '',
       platformConfigs: initialPlatformConfigs,
 
-      setProjectFields: (fields) => set((state) => ({ ...state, ...fields, updatedAt: Date.now() })),
+      setProjectFields: (fields) =>
+        set((state) => {
+          const nextTasks = fields.tasks ?? state.tasks;
+          return {
+            ...state,
+            ...fields,
+            tasks: nextTasks,
+            taskLookup: buildTaskLookup(nextTasks),
+            updatedAt: Date.now(),
+          };
+        }),
 
-      addTask: (taskInfo) => set((state) => ({
-        tasks: [...state.tasks, normalizeIncomingTask(taskInfo)],
-        updatedAt: Date.now(),
-      })),
+      addTask: (taskInfo) =>
+        set((state) => {
+          const nextTasks = [...state.tasks, normalizeIncomingTask(taskInfo)];
+          return {
+            tasks: nextTasks,
+            taskLookup: buildTaskLookup(nextTasks),
+            updatedAt: Date.now(),
+          };
+        }),
 
       updateTask: (id, updates) =>
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.id !== id) return task;
-            return migrateTask({
-              ...task,
-              ...updates,
-              updatedAt: Date.now(),
-            });
-          }),
-          updatedAt: Date.now(),
-        })),
+        set((state) => {
+          const existingTask = state.taskLookup[id];
+          if (!existingTask) return { updatedAt: Date.now() };
+          const nextTask = migrateTask({
+            ...existingTask,
+            ...updates,
+            updatedAt: Date.now(),
+          });
+          const nextTasks = state.tasks.map((task) => (task.id === id ? nextTask : task));
+          return {
+            tasks: nextTasks,
+            taskLookup: {
+              ...state.taskLookup,
+              [id]: nextTask,
+            },
+            updatedAt: Date.now(),
+          };
+        }),
 
-      removeTask: (id) => set((state) => ({
-        tasks: state.tasks.filter((task) => task.id !== id),
-        activeTaskId: state.activeTaskId === id ? null : state.activeTaskId,
-        lightboxTaskId: state.lightboxTaskId === id ? null : state.lightboxTaskId,
-        lightboxImageIndex: state.lightboxTaskId === id ? 0 : state.lightboxImageIndex,
-        selectedTaskIds: state.selectedTaskIds.filter((selectedId) => selectedId !== id),
-        updatedAt: Date.now(),
-      })),
+      removeTask: (id) =>
+        set((state) => {
+          const nextTasks = state.tasks.filter((task) => task.id !== id);
+          const nextTaskLookup = { ...state.taskLookup };
+          delete nextTaskLookup[id];
+          return {
+            tasks: nextTasks,
+            taskLookup: nextTaskLookup,
+            activeTaskId: state.activeTaskId === id ? null : state.activeTaskId,
+            lightboxTaskId: state.lightboxTaskId === id ? null : state.lightboxTaskId,
+            lightboxImageIndex: state.lightboxTaskId === id ? 0 : state.lightboxImageIndex,
+            selectedTaskIds: state.selectedTaskIds.filter((selectedId) => selectedId !== id),
+            updatedAt: Date.now(),
+          };
+        }),
 
       setActiveTask: (id) => set({ activeTaskId: id }),
       setBatchRunning: (isRunning) => set({ isBatchRunning: isRunning }),
 
-      importTasks: (tasksInfo) => set((state) => ({
-        tasks: [...state.tasks, ...tasksInfo.map((task) => normalizeIncomingTask(task))],
-        updatedAt: Date.now(),
-      })),
+      importTasks: (tasksInfo) =>
+        set((state) => {
+          const nextTasks = [...state.tasks, ...tasksInfo.map((task) => normalizeIncomingTask(task))];
+          return {
+            tasks: nextTasks,
+            taskLookup: buildTaskLookup(nextTasks),
+            updatedAt: Date.now(),
+          };
+        }),
 
       clearProject: () =>
         set({
           ...initialProjectState,
+          taskLookup: buildTaskLookup(initialProjectState.tasks),
           projectId: uuidv4(),
           selectedTaskIds: [],
           lightboxTaskId: null,
@@ -185,6 +226,7 @@ export const useAppStore = create<AppState>()(
               ...state,
               ...mergeProjectSnapshotWithGlobalConfig(sanitizedProject, state),
               tasks: recoveredTasks,
+              taskLookup: buildTaskLookup(recoveredTasks),
               isBatchRunning: false,
               activeTaskId: null,
               lightboxTaskId: null,
@@ -223,6 +265,7 @@ export const useAppStore = create<AppState>()(
           tasks.splice(endIndex, 0, removed);
           return {
             tasks,
+            taskLookup: buildTaskLookup(tasks),
             updatedAt: Date.now(),
           };
         }),

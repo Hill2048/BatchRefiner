@@ -975,7 +975,7 @@ function buildTaskImageUpdatePayload(task: Task, images: TaskResultImage[], fail
 
 function updateTaskWithGeneratedImages(taskId: string, images: TaskResultImage[], failedCount: number, status?: TaskStatus) {
   const store = useAppStore.getState();
-  const currentTask = store.tasks.find((item) => item.id === taskId);
+  const currentTask = store.taskLookup[taskId];
   if (!currentTask || images.length === 0) return;
 
   store.updateTask(taskId, {
@@ -995,7 +995,7 @@ function updateTaskProgress(taskId: string, status: TaskStatus, progressStage: s
 
 function ensureGenerationLogSession(taskId: string, context: GenerationLogContext = {}) {
   if (context.logSessionId) return context.logSessionId;
-  const task = useAppStore.getState().tasks.find((item) => item.id === taskId);
+  const task = useAppStore.getState().taskLookup[taskId];
   return createGenerationLogSession({
     mode: context.mode || 'image-single',
     task,
@@ -1578,7 +1578,7 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
 
     try {
       if (mode === "all" || mode === "prompts") {
-        const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
+        const currentTask = useAppStore.getState().taskLookup[task.id];
         if (currentTask && promptOptimizationEnabled && !isTaskPromptCurrent(currentTask)) {
           updateTaskProgress(task.id, "Prompting", "准备提示词");
           const generatedPrompt = await retryWrap(() =>
@@ -1597,7 +1597,7 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
       if (!useAppStore.getState().isBatchRunning) return;
 
       if (mode === "all" || mode === "images") {
-        const currentTask = useAppStore.getState().tasks.find(x => x.id === task.id);
+        const currentTask = useAppStore.getState().taskLookup[task.id];
         const executablePromptText = currentTask ? getExecutionReadyTaskPrompt(currentTask) : null;
         if (currentTask && executablePromptText) {
           const sessionId = crypto.randomUUID();
@@ -1618,7 +1618,7 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
           if (generatedBatch.images.length === 0) {
             throw createStageError("没有成功返回任何结果图。", "Image Generation");
           }
-          const latestTask = useAppStore.getState().tasks.find((item) => item.id === task.id) || currentTask;
+          const latestTask = useAppStore.getState().taskLookup[task.id] || currentTask;
           useAppStore.getState().updateTask(task.id, {
             ...buildTaskImageUpdatePayload(latestTask, generatedBatch.images, generatedBatch.failedCount),
             status: "Success",
@@ -1709,7 +1709,7 @@ export function haltBatch() {
 
 export async function processSingleTask(taskId: string) {
   const store = useAppStore.getState();
-  const task = store.tasks.find(t => t.id === taskId);
+  const task = store.taskLookup[taskId];
   if (!task) return;
   const logSessionId = createGenerationLogSession({
     mode: "image-single",
@@ -1732,7 +1732,7 @@ export async function processSingleTask(taskId: string) {
   });
 
   try {
-    const currentTask = useAppStore.getState().tasks.find(x => x.id === taskId);
+    const currentTask = useAppStore.getState().taskLookup[taskId];
     if (!currentTask) return;
 
     let promptText = getExecutionReadyTaskPrompt(currentTask);
@@ -1747,7 +1747,7 @@ export async function processSingleTask(taskId: string) {
         errorLog: undefined,
         progressStage: undefined,
       });
-      promptText = getExecutionReadyTaskPrompt(useAppStore.getState().tasks.find(x => x.id === taskId) || {
+      promptText = getExecutionReadyTaskPrompt(useAppStore.getState().taskLookup[taskId] || {
         promptText,
         description: currentTask.description,
       });
@@ -1775,7 +1775,7 @@ export async function processSingleTask(taskId: string) {
     if (generatedBatch.images.length === 0) {
       throw createStageError("没有成功返回任何结果图。", "Image Generation");
     }
-    const latestTask = useAppStore.getState().tasks.find((item) => item.id === taskId) || currentTask;
+    const latestTask = useAppStore.getState().taskLookup[taskId] || currentTask;
       store.updateTask(taskId, {
         ...buildTaskImageUpdatePayload(latestTask, generatedBatch.images, generatedBatch.failedCount),
         progressStage: undefined,
@@ -1816,7 +1816,7 @@ export async function processSingleTask(taskId: string) {
 
 export async function generateTaskPrompt(taskId: string, context: GenerationLogContext = {}): Promise<GeneratedPromptResult> {
   const store = useAppStore.getState();
-  const task = store.tasks.find(t => t.id === taskId);
+  const task = store.taskLookup[taskId];
   if (!task) throw new Error("Task not found");
   const inputSignature = getTaskPromptInputSignature(task);
   const logSessionId = ensureGenerationLogSession(taskId, {
@@ -2235,7 +2235,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
 
 async function runSingleImageGeneration(taskId: string, context: GenerationLogContext = {}): Promise<GeneratedImageResult> {
   const store = useAppStore.getState();
-  const task = store.tasks.find(t => t.id === taskId);
+  const task = store.taskLookup[taskId];
   const effectivePromptText = task ? getRenderableTaskPrompt(task) : null;
   if (!task || !effectivePromptText) throw getMissingPromptError();
   const startedAt = Date.now();
@@ -2864,7 +2864,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
 
 async function runImageGeneration(taskId: string, options: RunImageGenerationOptions = {}): Promise<GeneratedBatchResult> {
   const store = useAppStore.getState();
-  const task = store.tasks.find(t => t.id === taskId);
+  const task = store.taskLookup[taskId];
   if (!task) throw new Error("Task not found");
 
   const targetBatchCount = getBatchCountNumber(getEffectiveTaskBatchCount(task));
