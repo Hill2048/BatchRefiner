@@ -31,7 +31,7 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
+          enabled: false,
         },
       }),
     ],
@@ -84,6 +84,16 @@ export default defineConfig(() => {
     server: {
       // When DISABLE_HMR=true, keep HMR off to avoid UI flicker during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
+      watch: {
+        ignored: [
+          '**/*.log',
+          '**/docs/**',
+          '**/dist/**',
+          '**/dev-dist/**',
+          '**/output/**',
+          '**/*.md',
+        ],
+      },
     },
   };
 });

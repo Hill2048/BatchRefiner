@@ -8,6 +8,7 @@ import {
   Task,
 } from './types';
 import { extractProjectDataFromImport, mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from './lib/projectSnapshot';
+import { compactPersistedStateValue, OVERSIZED_PERSISTENCE_NOTICE } from './lib/persistedStateBudget';
 import {
   initialPlatformConfigs,
   initialProjectState,
@@ -19,8 +20,26 @@ import {
 
 let persistTimeout: ReturnType<typeof setTimeout>;
 let pendingState: string | null = null;
+let pendingPersistNotice: string | null = null;
 
 const draftFlushers = new Map<string, () => void>();
+
+function queuePersistNotice() {
+  pendingPersistNotice = OVERSIZED_PERSISTENCE_NOTICE;
+}
+
+function flushPersistNotice() {
+  if (!pendingPersistNotice || typeof window === 'undefined') return;
+  const message = pendingPersistNotice;
+  pendingPersistNotice = null;
+  window.setTimeout(() => {
+    window.dispatchEvent(
+      new CustomEvent('batch-refiner:persist-warning', {
+        detail: { message },
+      }),
+    );
+  }, 0);
+}
 
 function buildTaskLookup(tasks: Task[]) {
   return Object.fromEntries(tasks.map((task) => [task.id, task])) as Record<string, Task>;
@@ -34,13 +53,30 @@ function hasTaskUpdates(existingTask: Task, updates: Partial<Task>) {
 const idbStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
     try {
-      return (await get(name)) || null;
+      const storedValue = (await get(name)) || null;
+      if (typeof storedValue !== 'string') return null;
+
+      const compacted = compactPersistedStateValue(storedValue);
+      if (compacted.compacted) {
+        queuePersistNotice();
+        try {
+          await set(name, compacted.value);
+        } catch {
+          // Ignore storage failures in non-browser or restricted environments.
+        }
+      }
+
+      return compacted.value;
     } catch {
       return null;
     }
   },
   setItem: async (name: string, value: string): Promise<void> => {
-    pendingState = value;
+    const compacted = compactPersistedStateValue(value);
+    pendingState = compacted.value;
+    if (compacted.compacted) {
+      queuePersistNotice();
+    }
     if (persistTimeout) clearTimeout(persistTimeout);
     return new Promise((resolve) => {
       persistTimeout = setTimeout(async () => {
@@ -306,6 +342,7 @@ export const useAppStore = create<AppState>()(
           lightboxTaskId: null,
           lightboxImageIndex: 0,
         });
+        flushPersistNotice();
       },
       partialize: (state) => ({
         projectId: state.projectId,

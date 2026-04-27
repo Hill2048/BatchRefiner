@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { PanelLeftClose } from 'lucide-react';
+import { toast } from 'sonner';
 import packageJson from '../package.json';
 import { Topbar } from './components/layout/Topbar';
 import { Sidebar } from './components/layout/Sidebar';
@@ -119,6 +120,20 @@ export default function App() {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
   }, [isCompactLayout, isNarrowDesktop]);
+
+  useEffect(() => {
+    const handlePersistWarning = (event: Event) => {
+      const customEvent = event as CustomEvent<{ message?: string }>;
+      const message = customEvent.detail?.message;
+      if (message) {
+        toast.warning(message, { duration: 8000 });
+      }
+    };
+
+    window.addEventListener('batch-refiner:persist-warning', handlePersistWarning as EventListener);
+    return () =>
+      window.removeEventListener('batch-refiner:persist-warning', handlePersistWarning as EventListener);
+  }, []);
 
   const statusBadge = (
     <div
