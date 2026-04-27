@@ -57,18 +57,29 @@ export async function buildImportedTasksFromFiles(
   startIndex: number,
 ): Promise<Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'referenceImages'>>> {
   const images = files.filter((file) => file.type.startsWith('image/'));
-  const encodedImages = await Promise.all(images.map((file) => readImageFileToDataUrl(file)));
+  const tasks: Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'referenceImages'>> = [];
 
-  return encodedImages.map((dataUrl, index) => ({
-    index: startIndex + index,
-    title: images[index].name,
-    description: '',
-    sourceImage: dataUrl,
-    referenceImages: [],
-  }));
+  for (const [index, file] of images.entries()) {
+    const dataUrl = await optimizeImageToDataUrl(file);
+    tasks.push({
+      index: startIndex + index,
+      title: file.name,
+      description: '',
+      sourceImage: dataUrl,
+      referenceImages: [],
+    });
+  }
+
+  return tasks;
 }
 
 export async function buildReferenceImagesFromFiles(files: File[]) {
   const images = files.filter((file) => file.type.startsWith('image/'));
-  return Promise.all(images.map((file) => readImageFileToDataUrl(file)));
+  const optimizedImages: string[] = [];
+
+  for (const file of images) {
+    optimizedImages.push(await optimizeImageToDataUrl(file));
+  }
+
+  return optimizedImages;
 }

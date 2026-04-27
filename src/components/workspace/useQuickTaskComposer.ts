@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { toast } from 'sonner';
-import { optimizeDataUrlForUpload, readImageFileToDataUrl } from '@/lib/taskFileImport';
+import { optimizeImageToDataUrl } from '@/lib/taskFileImport';
 import { useAppStore } from '@/store';
 
 export function useQuickTaskComposer() {
@@ -100,11 +100,9 @@ export function useQuickTaskComposer() {
             sourceImage: string;
             referenceImages: never[];
           }> = [];
-          const chunkStartIndex = startIndex;
-
           for (const file of chunk) {
             const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
-            const dataUrl = await readImageFileToDataUrl(file);
+            const dataUrl = await optimizeImageToDataUrl(file);
             const initialDescription = textContents[baseName]?.trim() || '';
             delete textContents[baseName];
 
@@ -118,19 +116,6 @@ export function useQuickTaskComposer() {
           }
 
           importTasks(nextTasks);
-
-          void (async () => {
-            await new Promise((resolve) => setTimeout(resolve, 0));
-            for (let offset = 0; offset < nextTasks.length; offset += 1) {
-              const taskIndex = chunkStartIndex + offset;
-              const optimizedSourceImage = await optimizeDataUrlForUpload(nextTasks[offset].sourceImage || '');
-              const latestTask = useAppStore
-                .getState()
-                .tasks.find((item) => item.index === taskIndex && item.title === nextTasks[offset].title);
-              if (!latestTask || !optimizedSourceImage || latestTask.sourceImage === optimizedSourceImage) continue;
-              useAppStore.getState().updateTask(latestTask.id, { sourceImage: optimizedSourceImage });
-            }
-          })();
 
           await new Promise((resolve) => requestAnimationFrame(resolve));
         }

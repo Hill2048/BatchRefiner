@@ -29,7 +29,7 @@ import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { MarkdownEditorDialog } from "../MarkdownEditorDialog";
 import { AspectRatio, Resolution, Task, TaskResultImage } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { optimizeDataUrlForUpload, readImageFileToDataUrl } from "@/lib/taskFileImport";
+import { optimizeDataUrlForUpload, optimizeImageToDataUrl, readImageFileToDataUrl } from "@/lib/taskFileImport";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
 import { buildProjectExportPayload } from "@/lib/projectSnapshot";
 import { getTaskResultImages } from "@/lib/taskResults";
@@ -301,11 +301,10 @@ export function Sidebar({
       for (let i = 0; i < images.length; i += CHUNK_SIZE) {
         const chunk = images.slice(i, i + CHUNK_SIZE);
         const newTasks: any[] = [];
-        const chunkStartIndex = startIndex;
         
         for (const file of chunk) {
           const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
-          const dataUrl = await readImageFileToDataUrl(file);
+          const dataUrl = await optimizeImageToDataUrl(file);
           
           let initialDesc = "";
           if (textContents[baseName]) {
@@ -323,16 +322,6 @@ export function Sidebar({
           });
         }
         importTasks(newTasks);
-        void (async () => {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-          for (let offset = 0; offset < newTasks.length; offset += 1) {
-            const taskIndex = chunkStartIndex + offset;
-            const optimizedSourceImage = await optimizeDataUrlForUpload(newTasks[offset].sourceImage || "");
-            const latestTask = useAppStore.getState().tasks.find((item) => item.index === taskIndex && item.title === newTasks[offset].title);
-            if (!latestTask || !optimizedSourceImage || latestTask.sourceImage === optimizedSourceImage) continue;
-            useAppStore.getState().updateTask(latestTask.id, { sourceImage: optimizedSourceImage });
-          }
-        })();
         await new Promise(r => requestAnimationFrame(r)); // Yield to paint
       }
       addedCount += images.length;

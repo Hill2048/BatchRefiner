@@ -3,7 +3,7 @@ import { Upload } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '@/store';
 import { TaskCard } from './TaskCard';
-import { buildImportedTasksFromFiles, buildReferenceImagesFromFiles, optimizeDataUrlForUpload } from '@/lib/taskFileImport';
+import { buildImportedTasksFromFiles, buildReferenceImagesFromFiles } from '@/lib/taskFileImport';
 import {
   DndContext,
   closestCenter,
@@ -172,20 +172,8 @@ export function TaskList() {
       for (let index = 0; index < images.length; index += chunkSize) {
         const chunk = images.slice(index, index + chunkSize);
         const newTasks = await buildImportedTasksFromFiles(chunk, startIndex);
-        const chunkStartIndex = startIndex;
         startIndex += newTasks.length;
         importTasks(newTasks);
-
-        void (async () => {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-          for (let offset = 0; offset < newTasks.length; offset += 1) {
-            const taskIndex = chunkStartIndex + offset;
-            const optimizedSourceImage = await optimizeDataUrlForUpload(newTasks[offset].sourceImage || '');
-            const latestTask = useAppStore.getState().tasks.find((item) => item.index === taskIndex && item.title === newTasks[offset].title);
-            if (!latestTask || !optimizedSourceImage || latestTask.sourceImage === optimizedSourceImage) continue;
-            useAppStore.getState().updateTask(latestTask.id, { sourceImage: optimizedSourceImage });
-          }
-        })();
 
         await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
       }
@@ -204,27 +192,6 @@ export function TaskList() {
     useAppStore.getState().updateTask(taskId, {
       referenceImages: [...(task.referenceImages || []), ...encodedImages],
     });
-
-    void (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      const optimizedImages = await Promise.all(encodedImages.map((image) => optimizeDataUrlForUpload(image)));
-      const latestTask = useAppStore.getState().tasks.find((item) => item.id === taskId);
-      if (!latestTask) return;
-      const currentReferences = [...(latestTask.referenceImages || [])];
-      const startOffset = currentReferences.length - encodedImages.length;
-      if (startOffset < 0) return;
-      let changed = false;
-      optimizedImages.forEach((image, index) => {
-        const targetIndex = startOffset + index;
-        if (currentReferences[targetIndex] !== image) {
-          currentReferences[targetIndex] = image;
-          changed = true;
-        }
-      });
-      if (changed) {
-        useAppStore.getState().updateTask(taskId, { referenceImages: currentReferences });
-      }
-    })();
   }, []);
 
   const handleWorkspaceDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
