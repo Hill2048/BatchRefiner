@@ -381,12 +381,36 @@ function getTextApiBaseUrl(store: { apiBaseUrl?: string; textApiBaseUrl?: string
   return (store.textApiBaseUrl || store.apiBaseUrl || "").trim();
 }
 
-function getImageApiBaseUrl(store: { apiBaseUrl?: string; imageApiBaseUrl?: string; textApiBaseUrl?: string }) {
-  return (store.imageApiBaseUrl || store.apiBaseUrl || store.textApiBaseUrl || "").trim();
+type ImageRequestMode = "text-to-image" | "image-to-image";
+
+function getImageRequestMode(hasImageInputs: boolean): ImageRequestMode {
+  return hasImageInputs ? "image-to-image" : "text-to-image";
 }
 
-function getImageApiPath(store: { imageApiPath?: string }) {
-  return (store.imageApiPath || "").trim();
+function getImageApiBaseUrl(store: {
+  apiBaseUrl?: string;
+  imageApiBaseUrl?: string;
+  textApiBaseUrl?: string;
+  textToImageApiBaseUrl?: string;
+  imageToImageApiBaseUrl?: string;
+}, mode?: ImageRequestMode) {
+  const modeBaseUrl =
+    mode === "image-to-image"
+      ? store.imageToImageApiBaseUrl
+      : mode === "text-to-image"
+        ? store.textToImageApiBaseUrl
+        : "";
+  return (modeBaseUrl || store.imageApiBaseUrl || store.apiBaseUrl || store.textApiBaseUrl || "").trim();
+}
+
+function getImageApiPath(store: { imageApiPath?: string; textToImageApiPath?: string; imageToImageApiPath?: string }, mode?: ImageRequestMode) {
+  const modePath =
+    mode === "image-to-image"
+      ? store.imageToImageApiPath
+      : mode === "text-to-image"
+        ? store.textToImageApiPath
+        : "";
+  return (modePath || store.imageApiPath || "").trim();
 }
 
 function buildConfiguredImageApiUrl(baseUrl: string, defaultPath: string, customPath?: string) {
@@ -411,8 +435,24 @@ function getTextApiKey(store: { apiKey?: string; textApiKey?: string }) {
   return (store.textApiKey || store.apiKey || "").trim();
 }
 
-function getImageApiKey(store: { apiKey?: string; imageApiKey?: string; textApiKey?: string }) {
-  return (store.imageApiKey || store.textApiKey || store.apiKey || "").trim();
+function getImageApiKey(store: {
+  apiKey?: string;
+  imageApiKey?: string;
+  textApiKey?: string;
+  textToImageApiKey?: string;
+  imageToImageApiKey?: string;
+}, mode?: ImageRequestMode) {
+  const modeKey =
+    mode === "image-to-image"
+      ? store.imageToImageApiKey
+      : mode === "text-to-image"
+        ? store.textToImageApiKey
+        : "";
+  return (modeKey || store.imageApiKey || store.textApiKey || store.apiKey || "").trim();
+}
+
+function getImageModelForMode(store: { imageModel?: string; textToImageModel?: string; imageToImageModel?: string }, mode: ImageRequestMode) {
+  return (mode === "image-to-image" ? store.imageToImageModel : store.textToImageModel) || store.imageModel || "";
 }
 
 function isGeminiGatewayPreset(platformPreset: PlatformPreset) {
@@ -621,11 +661,13 @@ export function supportsImageInput(modelName: string, apiBaseUrl: string, apiKey
 function assertImageInputSupport(task: Task) {
   const store = useAppStore.getState();
   const platformPreset = getPlatformPreset();
-  const imageApiBaseUrl = getImageApiBaseUrl(store);
-  const imageApiKey = getImageApiKey(store);
   if (!taskHasImageInputs(task, store.globalReferenceImages)) return;
+  const imageRequestMode = getImageRequestMode(true);
+  const imageApiBaseUrl = getImageApiBaseUrl(store, imageRequestMode);
+  const imageApiKey = getImageApiKey(store, imageRequestMode);
+  const imageModel = getImageModelForMode(store, imageRequestMode);
 
-  if (!supportsImageInput(store.imageModel, imageApiBaseUrl, imageApiKey, platformPreset)) {
+  if (!supportsImageInput(imageModel, imageApiBaseUrl, imageApiKey, platformPreset)) {
     throw createStageError(
       "当前模型不支持基于原图或参考图生成，请切换到支持图片输入的模型后再执行。",
       "Image Generation"
@@ -2382,11 +2424,16 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
   updateTaskProgress(taskId, "Rendering", "准备参数");
 
   const platformPreset = getPlatformPreset();
-  const imageApiBaseUrl = getImageApiBaseUrl(store);
-  const imageApiKey = getImageApiKey(store);
-  const imageApiPath = getImageApiPath(store);
   const resolution = getEffectiveResolution(task);
-  const resolvedModel = resolveImageModel(store.imageModel, resolution, platformPreset);
+  const aspectRatio = getEffectiveAspectRatio(task);
+  const imageInputs = await getTaskImageInputs(task, store.globalReferenceImages);
+  const hasImageInputs = imageInputs.length > 0;
+  const imageRequestMode = getImageRequestMode(hasImageInputs);
+  const imageApiBaseUrl = getImageApiBaseUrl(store, imageRequestMode);
+  const imageApiKey = getImageApiKey(store, imageRequestMode);
+  const imageApiPath = getImageApiPath(store, imageRequestMode);
+  const requestedImageModel = getImageModelForMode(store, imageRequestMode);
+  const resolvedModel = resolveImageModel(requestedImageModel, resolution, platformPreset);
   const isYunwuGptImage = isYunwuGptImageModel(resolvedModel.actualModel, platformPreset);
   const isGeminiGateway = platformPreset === "yunwu" && !!imageApiBaseUrl && !!imageApiKey && !isYunwuGptImage;
   const isCustomOpenAI = !isGeminiGateway && (platformPreset === "comfly-chat" || platformPreset === "openai-compatible" || platformPreset === "custom");
@@ -2395,9 +2442,6 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
       ? YUNWU_GPT_IMAGE_REQUEST_TIMEOUT_MS
       : IMAGE_REQUEST_TIMEOUT_MS;
   const supportsStreamAttempt = platformPreset === 'comfly-chat' || (platformPreset === 'yunwu' && isYunwuGptImage);
-  const aspectRatio = getEffectiveAspectRatio(task);
-  const imageInputs = await getTaskImageInputs(task, store.globalReferenceImages);
-  const hasImageInputs = imageInputs.length > 0;
   if (hasImageInputs) {
     updateTaskProgress(taskId, "Rendering", "准备图片");
   }
@@ -2447,6 +2491,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
       responseFormat: requestResponseFormat || "default",
       timeoutMs: imageRequestTimeoutMs,
       hasImageInputs,
+      imageRequestMode,
       imageInputCount: imageInputs.length,
       imageInputs: imageInputSummary,
       supportsStreamAttempt,

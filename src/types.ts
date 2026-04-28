@@ -10,11 +10,19 @@ export interface PlatformApiConfig {
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
   imageApiPath?: string;
+  textToImageApiBaseUrl?: string;
+  textToImageApiPath?: string;
+  imageToImageApiBaseUrl?: string;
+  imageToImageApiPath?: string;
   apiKey: string;
   textApiKey?: string;
   imageApiKey?: string;
+  textToImageApiKey?: string;
+  imageToImageApiKey?: string;
   textModel: string;
   imageModel: string;
+  textToImageModel?: string;
+  imageToImageModel?: string;
 }
 
 export type PlatformApiConfigMap = Record<PlatformPreset, PlatformApiConfig>;
@@ -147,6 +155,14 @@ export interface ProjectData {
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
   imageApiPath?: string;
+  textToImageApiBaseUrl?: string;
+  textToImageApiPath?: string;
+  imageToImageApiBaseUrl?: string;
+  imageToImageApiPath?: string;
+  textToImageApiKey?: string;
+  imageToImageApiKey?: string;
+  textToImageModel?: string;
+  imageToImageModel?: string;
   globalAspectRatio?: AspectRatio;
   globalResolution?: Resolution;
   globalImageQuality?: ImageQuality;

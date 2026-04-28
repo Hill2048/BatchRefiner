@@ -19,6 +19,9 @@ import {
   withDefaultSkill,
 } from './lib/taskMigration';
 
+const DEFAULT_TEXT_TO_IMAGE_API_PATH = '/v1/images/generations';
+const DEFAULT_IMAGE_TO_IMAGE_API_PATH = '/v1/images/edits';
+
 let persistTimeout: ReturnType<typeof setTimeout> | undefined;
 let pendingPersistNotice: string | null = null;
 let pendingPersistValue: StorageValue<Partial<AppState>> | null = null;
@@ -91,6 +94,14 @@ interface AppState extends ProjectData {
   textApiBaseUrl: string;
   imageApiBaseUrl: string;
   imageApiPath: string;
+  textToImageApiBaseUrl: string;
+  textToImageApiPath: string;
+  imageToImageApiBaseUrl: string;
+  imageToImageApiPath: string;
+  textToImageApiKey: string;
+  imageToImageApiKey: string;
+  textToImageModel: string;
+  imageToImageModel: string;
   platformConfigs: PlatformApiConfigMap;
   setProjectFields: (fields: Partial<AppState>) => void;
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
@@ -228,6 +239,14 @@ export const useAppStore = create<AppState>()(
       textApiBaseUrl: 'https://yunwu.ai',
       imageApiBaseUrl: 'https://yunwu.ai',
       imageApiPath: '',
+      textToImageApiBaseUrl: 'https://yunwu.ai',
+      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
+      imageToImageApiBaseUrl: 'https://yunwu.ai',
+      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
+      textToImageApiKey: '',
+      imageToImageApiKey: '',
+      textToImageModel: 'gemini-3.1-flash-image-preview',
+      imageToImageModel: 'gemini-3.1-flash-image-preview',
       platformConfigs: initialPlatformConfigs,
 
       setProjectFields: (fields) =>
@@ -434,6 +453,14 @@ export const useAppStore = create<AppState>()(
         textApiBaseUrl: state.textApiBaseUrl,
         imageApiBaseUrl: state.imageApiBaseUrl,
         imageApiPath: state.imageApiPath,
+        textToImageApiBaseUrl: state.textToImageApiBaseUrl,
+        textToImageApiPath: state.textToImageApiPath,
+        imageToImageApiBaseUrl: state.imageToImageApiBaseUrl,
+        imageToImageApiPath: state.imageToImageApiPath,
+        textToImageApiKey: state.textToImageApiKey,
+        imageToImageApiKey: state.imageToImageApiKey,
+        textToImageModel: state.textToImageModel,
+        imageToImageModel: state.imageToImageModel,
         platformConfigs: state.platformConfigs,
         createdAt: state.createdAt,
         updatedAt: state.updatedAt,

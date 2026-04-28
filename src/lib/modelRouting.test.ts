@@ -44,7 +44,31 @@ test('云雾 image2 会映射到 OpenAI 图片接口', () => {
   assert.equal(route.transport, 'openai-images');
   assert.equal(route.actualModel, 'gpt-image-2-all');
   assert.equal(route.requestPath, 'https://yunwu.ai/v1/images/edits');
-  assert.ok(route.warnings.some((warning) => warning.includes('同时覆盖有图和无图')));
+  assert.ok(route.warnings.some((warning) => warning.includes('旧版通用生图接口路径')));
+});
+
+test('文生图和图生图可以使用不同图片接口路径', () => {
+  const input = {
+    platformPreset: 'openai-compatible' as const,
+    textToImageApiBaseUrl: 'https://image.example.com',
+    textToImageApiKey: 'txt2img-key',
+    textToImageApiPath: '/v1/images/generations',
+    textToImageModel: 'gpt-image-2',
+    imageToImageApiBaseUrl: 'https://edit.example.com',
+    imageToImageApiKey: 'img2img-key',
+    imageToImageApiPath: '/v1/images/edits',
+    imageToImageModel: 'gpt-image-2',
+  };
+
+  const textToImageRoute = resolveImageRoute(input, { hasImageInputs: false });
+  const imageToImageRoute = resolveImageRoute(input, { hasImageInputs: true });
+
+  assert.equal(textToImageRoute.requestPath, 'https://image.example.com/v1/images/generations');
+  assert.equal(textToImageRoute.baseUrlSource, 'textToImageApiBaseUrl');
+  assert.equal(textToImageRoute.keySource, 'textToImageApiKey');
+  assert.equal(imageToImageRoute.requestPath, 'https://edit.example.com/v1/images/edits');
+  assert.equal(imageToImageRoute.baseUrlSource, 'imageToImageApiBaseUrl');
+  assert.equal(imageToImageRoute.keySource, 'imageToImageApiKey');
 });
 
 test('comfly 带参考图且非 gpt-image 时走 chat/completions', () => {

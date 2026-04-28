@@ -1,5 +1,8 @@
 import type { Task } from "@/types";
 
+const DEFAULT_TEXT_TO_IMAGE_API_PATH = "/v1/images/generations";
+const DEFAULT_IMAGE_TO_IMAGE_API_PATH = "/v1/images/edits";
+
 export interface SuccessfulPromptRecord {
   index: number;
   title: string;
@@ -21,10 +24,16 @@ export function sanitizeProjectSnapshot<T extends Record<string, any>>(state: T)
   delete nextState.apiKey;
   delete nextState.textApiKey;
   delete nextState.imageApiKey;
+  delete nextState.textToImageApiKey;
+  delete nextState.imageToImageApiKey;
   delete nextState.apiBaseUrl;
   delete nextState.textApiBaseUrl;
   delete nextState.imageApiBaseUrl;
   delete nextState.imageApiPath;
+  delete nextState.textToImageApiBaseUrl;
+  delete nextState.textToImageApiPath;
+  delete nextState.imageToImageApiBaseUrl;
+  delete nextState.imageToImageApiPath;
   return nextState;
 }
 
@@ -37,10 +46,16 @@ export function mergeProjectSnapshotWithGlobalConfig<T extends Record<string, an
     apiKey: globalState.apiKey || "",
     textApiKey: globalState.textApiKey || globalState.apiKey || "",
     imageApiKey: globalState.imageApiKey || globalState.apiKey || "",
+    textToImageApiKey: globalState.textToImageApiKey || globalState.imageApiKey || globalState.apiKey || "",
+    imageToImageApiKey: globalState.imageToImageApiKey || globalState.imageApiKey || globalState.apiKey || "",
     apiBaseUrl: globalState.apiBaseUrl || "",
     textApiBaseUrl: globalState.textApiBaseUrl || globalState.apiBaseUrl || "",
     imageApiBaseUrl: globalState.imageApiBaseUrl || globalState.apiBaseUrl || "",
     imageApiPath: globalState.imageApiPath || "",
+    textToImageApiBaseUrl: globalState.textToImageApiBaseUrl || globalState.imageApiBaseUrl || globalState.apiBaseUrl || "",
+    textToImageApiPath: globalState.textToImageApiPath || globalState.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
+    imageToImageApiBaseUrl: globalState.imageToImageApiBaseUrl || globalState.imageApiBaseUrl || globalState.apiBaseUrl || "",
+    imageToImageApiPath: globalState.imageToImageApiPath || globalState.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
   };
 }
 

@@ -34,6 +34,12 @@ function getResultFullSrc(result?: TaskResultImage | null) {
   return result?.originalSrc || result?.assetSrc || result?.src || result?.previewSrc;
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return target.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+}
+
 export function Lightbox() {
   const lightboxTaskId = useAppStore((state) => state.lightboxTaskId);
   const lightboxImageIndex = useAppStore((state) => state.lightboxImageIndex);
@@ -71,6 +77,12 @@ export function Lightbox() {
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setSliderPosition(50);
+  };
+
+  const toggleCompareView = () => {
+    if (!hasCompareSource) return;
+    setCompareEnabled((value) => !value);
+    resetView();
   };
 
   useEffect(() => {
@@ -122,9 +134,16 @@ export function Lightbox() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!task) return;
+      if (isEditableKeyboardTarget(event.target)) return;
 
       if (event.key === 'Escape') {
         setLightboxTask(null, 0);
+        return;
+      }
+
+      if (event.key.toLowerCase() === 'e' && hasCompareSource) {
+        event.preventDefault();
+        toggleCompareView();
         return;
       }
 
@@ -149,7 +168,7 @@ export function Lightbox() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canGoNextImage, canGoPrevImage, hasResultGallery, lightboxImageIndex, setLightboxTask, task, taskIndex, tasks]);
+  }, [canGoNextImage, canGoPrevImage, hasCompareSource, hasResultGallery, lightboxImageIndex, setLightboxTask, task, taskIndex, tasks]);
 
   useEffect(() => {
     if (!isCompareDragging) return;
@@ -279,10 +298,7 @@ export function Lightbox() {
               {hasCompareSource ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setCompareEnabled((value) => !value);
-                    resetView();
-                  }}
+                  onClick={toggleCompareView}
                   className={`h-10 rounded-full border px-3 text-[11.55px] font-medium transition-colors ${
                     compareEnabled
                       ? 'border-white/18 bg-white/14 text-white'

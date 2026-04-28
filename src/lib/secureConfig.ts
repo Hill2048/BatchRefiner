@@ -18,11 +18,19 @@ export interface ApiConfigPayload {
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
   imageApiPath?: string;
+  textToImageApiBaseUrl?: string;
+  textToImageApiPath?: string;
+  imageToImageApiBaseUrl?: string;
+  imageToImageApiPath?: string;
   apiKey: string;
   textApiKey?: string;
   imageApiKey?: string;
+  textToImageApiKey?: string;
+  imageToImageApiKey?: string;
   textModel: string;
   imageModel: string;
+  textToImageModel?: string;
+  imageToImageModel?: string;
   exportedAt: string;
 }
 
@@ -45,7 +53,7 @@ interface ChunkedProtectedConfigEnvelope {
   type: "batch-refiner-protected-config";
   version: 3;
   algorithm: "chunked-obfuscation";
-  payload: Omit<ApiConfigPayload, "apiKey" | "textApiKey" | "imageApiKey">;
+  payload: Omit<ApiConfigPayload, "apiKey" | "textApiKey" | "imageApiKey" | "textToImageApiKey" | "imageToImageApiKey">;
   keyData: {
     nonce: string;
     order: number[];
@@ -53,12 +61,16 @@ interface ChunkedProtectedConfigEnvelope {
   };
   textKeyData?: ChunkedProtectedConfigEnvelope["keyData"];
   imageKeyData?: ChunkedProtectedConfigEnvelope["keyData"];
+  textToImageKeyData?: ChunkedProtectedConfigEnvelope["keyData"];
+  imageToImageKeyData?: ChunkedProtectedConfigEnvelope["keyData"];
 }
 
 type ProtectedKeyBundle = {
   apiKey: ChunkedProtectedConfigEnvelope["keyData"];
   textApiKey?: ChunkedProtectedConfigEnvelope["keyData"];
   imageApiKey?: ChunkedProtectedConfigEnvelope["keyData"];
+  textToImageApiKey?: ChunkedProtectedConfigEnvelope["keyData"];
+  imageToImageApiKey?: ChunkedProtectedConfigEnvelope["keyData"];
 };
 
 interface MultiChunkedProtectedConfigEnvelope {
@@ -66,7 +78,7 @@ interface MultiChunkedProtectedConfigEnvelope {
   version: 4;
   algorithm: "chunked-obfuscation-multi";
   payload: Omit<MultiPlatformApiConfigPayload, "platformConfigs"> & {
-    platformConfigs: Record<PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey" | "textApiKey" | "imageApiKey">>;
+    platformConfigs: Record<PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey" | "textApiKey" | "imageApiKey" | "textToImageApiKey" | "imageToImageApiKey">>;
   };
   keyDataByPlatform: Record<PlatformPreset, ChunkedProtectedConfigEnvelope["keyData"] | ProtectedKeyBundle>;
 }
@@ -165,8 +177,14 @@ export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatform
           textApiBaseUrl: config.textApiBaseUrl,
           imageApiBaseUrl: config.imageApiBaseUrl,
           imageApiPath: config.imageApiPath,
+          textToImageApiBaseUrl: config.textToImageApiBaseUrl,
+          textToImageApiPath: config.textToImageApiPath,
+          imageToImageApiBaseUrl: config.imageToImageApiBaseUrl,
+          imageToImageApiPath: config.imageToImageApiPath,
           textModel: config.textModel,
           imageModel: config.imageModel,
+          textToImageModel: config.textToImageModel,
+          imageToImageModel: config.imageToImageModel,
         },
       ]),
     ) as MultiChunkedProtectedConfigEnvelope["payload"]["platformConfigs"];
@@ -179,6 +197,8 @@ export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatform
             apiKey: await obfuscateApiKey(config.apiKey),
             textApiKey: await obfuscateApiKey(config.textApiKey || config.apiKey),
             imageApiKey: await obfuscateApiKey(config.imageApiKey || config.apiKey),
+            textToImageApiKey: await obfuscateApiKey(config.textToImageApiKey || config.imageApiKey || config.apiKey),
+            imageToImageApiKey: await obfuscateApiKey(config.imageToImageApiKey || config.imageApiKey || config.apiKey),
           },
         ]),
       ),
@@ -200,7 +220,7 @@ export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatform
     return JSON.stringify(envelope, null, 2);
   }
 
-  const { apiKey, textApiKey, imageApiKey, ...restPayload } = payload;
+  const { apiKey, textApiKey, imageApiKey, textToImageApiKey, imageToImageApiKey, ...restPayload } = payload;
   const envelope: ChunkedProtectedConfigEnvelope = {
     type: "batch-refiner-protected-config",
     version: 3,
@@ -209,6 +229,8 @@ export async function encryptApiConfig(payload: ApiConfigPayload | MultiPlatform
     keyData: await obfuscateApiKey(apiKey),
     textKeyData: await obfuscateApiKey(textApiKey || apiKey),
     imageKeyData: await obfuscateApiKey(imageApiKey || apiKey),
+    textToImageKeyData: await obfuscateApiKey(textToImageApiKey || imageApiKey || apiKey),
+    imageToImageKeyData: await obfuscateApiKey(imageToImageApiKey || imageApiKey || apiKey),
   };
 
   return JSON.stringify(envelope, null, 2);
@@ -230,17 +252,21 @@ export async function decryptApiConfig(input: string) {
     const apiKey = await restoreApiKey(parsed.keyData);
     const textApiKey = parsed.textKeyData ? await restoreApiKey(parsed.textKeyData) : apiKey;
     const imageApiKey = parsed.imageKeyData ? await restoreApiKey(parsed.imageKeyData) : apiKey;
+    const textToImageApiKey = parsed.textToImageKeyData ? await restoreApiKey(parsed.textToImageKeyData) : imageApiKey;
+    const imageToImageApiKey = parsed.imageToImageKeyData ? await restoreApiKey(parsed.imageToImageKeyData) : imageApiKey;
     return {
       ...parsed.payload,
       apiKey,
       textApiKey,
       imageApiKey,
+      textToImageApiKey,
+      imageToImageApiKey,
     } as ApiConfigPayload | MultiPlatformApiConfigPayload;
   }
 
   if (parsed.version === 4) {
     const platformEntries = Object.entries(parsed.payload.platformConfigs) as Array<
-      [PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey" | "textApiKey" | "imageApiKey">]
+      [PlatformPreset, Omit<PlatformApiConfigMap[PlatformPreset], "apiKey" | "textApiKey" | "imageApiKey" | "textToImageApiKey" | "imageToImageApiKey">]
     >;
     const platformConfigs = Object.fromEntries(
       await Promise.all(
@@ -250,6 +276,14 @@ export async function decryptApiConfig(input: string) {
           const apiKey = await restoreApiKey(legacyKeyData);
           const textApiKey = "chunks" in keyData || !keyData.textApiKey ? apiKey : await restoreApiKey(keyData.textApiKey);
           const imageApiKey = "chunks" in keyData || !keyData.imageApiKey ? apiKey : await restoreApiKey(keyData.imageApiKey);
+          const textToImageApiKey =
+            "chunks" in keyData || !keyData.textToImageApiKey
+              ? imageApiKey
+              : await restoreApiKey(keyData.textToImageApiKey);
+          const imageToImageApiKey =
+            "chunks" in keyData || !keyData.imageToImageApiKey
+              ? imageApiKey
+              : await restoreApiKey(keyData.imageToImageApiKey);
 
           return [
             platform,
@@ -258,6 +292,8 @@ export async function decryptApiConfig(input: string) {
               apiKey,
               textApiKey,
               imageApiKey,
+              textToImageApiKey,
+              imageToImageApiKey,
             },
           ];
         }),

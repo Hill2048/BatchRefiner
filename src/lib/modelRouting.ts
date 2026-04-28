@@ -3,11 +3,17 @@ import type { PlatformPreset, Resolution } from '@/types';
 type RouteFieldSource =
   | 'textApiBaseUrl'
   | 'imageApiBaseUrl'
+  | 'textToImageApiBaseUrl'
+  | 'imageToImageApiBaseUrl'
   | 'apiBaseUrl'
   | 'textApiKey'
   | 'imageApiKey'
+  | 'textToImageApiKey'
+  | 'imageToImageApiKey'
   | 'apiKey'
   | 'imageApiPath'
+  | 'textToImageApiPath'
+  | 'imageToImageApiPath'
   | 'default'
   | 'builtin'
   | 'missing';
@@ -24,11 +30,19 @@ export type ModelRoutingInput = {
   textApiBaseUrl?: string;
   imageApiBaseUrl?: string;
   imageApiPath?: string;
+  textToImageApiBaseUrl?: string;
+  textToImageApiPath?: string;
+  imageToImageApiBaseUrl?: string;
+  imageToImageApiPath?: string;
   apiKey?: string;
   textApiKey?: string;
   imageApiKey?: string;
+  textToImageApiKey?: string;
+  imageToImageApiKey?: string;
   textModel?: string;
   imageModel?: string;
+  textToImageModel?: string;
+  imageToImageModel?: string;
   resolution?: Resolution | string;
 };
 
@@ -154,16 +168,28 @@ function getSourceLabel(source: RouteFieldSource) {
       return '文本 API 地址';
     case 'imageApiBaseUrl':
       return '生图 API 地址';
+    case 'textToImageApiBaseUrl':
+      return '文生图 API 地址';
+    case 'imageToImageApiBaseUrl':
+      return '图生图 API 地址';
     case 'apiBaseUrl':
       return '默认 API 地址';
     case 'textApiKey':
       return '文本 API Key';
     case 'imageApiKey':
       return '生图 API Key';
+    case 'textToImageApiKey':
+      return '文生图 API Key';
+    case 'imageToImageApiKey':
+      return '图生图 API Key';
     case 'apiKey':
       return '默认 API Key';
     case 'imageApiPath':
       return '自定义生图接口路径';
+    case 'textToImageApiPath':
+      return '文生图接口路径';
+    case 'imageToImageApiPath':
+      return '图生图接口路径';
     case 'builtin':
       return '内置 Gemini';
     case 'default':
@@ -374,7 +400,10 @@ export function resolveImageRoute(
 ): ResolvedRoute {
   const warnings: string[] = [];
   const notes: string[] = [];
-  const requestedModel = trimValue(input.imageModel) || BUILTIN_GEMINI_IMAGE_MODEL;
+  const requestedModel =
+    trimValue(options.hasImageInputs ? input.imageToImageModel : input.textToImageModel) ||
+    trimValue(input.imageModel) ||
+    BUILTIN_GEMINI_IMAGE_MODEL;
   const resolution = normalizeResolution(options.resolution || input.resolution);
   const actualModel = resolveRequestedImageModel(
     requestedModel,
@@ -383,16 +412,30 @@ export function resolveImageRoute(
     warnings,
   );
   const imageBase = pickFirstValue([
+    {
+      source: options.hasImageInputs ? 'imageToImageApiBaseUrl' : 'textToImageApiBaseUrl',
+      value: options.hasImageInputs ? input.imageToImageApiBaseUrl : input.textToImageApiBaseUrl,
+    },
     { source: 'imageApiBaseUrl', value: input.imageApiBaseUrl },
     { source: 'apiBaseUrl', value: input.apiBaseUrl },
     { source: 'textApiBaseUrl', value: input.textApiBaseUrl },
   ]);
   const imageKey = pickFirstValue([
+    {
+      source: options.hasImageInputs ? 'imageToImageApiKey' : 'textToImageApiKey',
+      value: options.hasImageInputs ? input.imageToImageApiKey : input.textToImageApiKey,
+    },
     { source: 'imageApiKey', value: input.imageApiKey },
     { source: 'textApiKey', value: input.textApiKey },
     { source: 'apiKey', value: input.apiKey },
   ]);
-  const imagePath = pickFirstValue([{ source: 'imageApiPath', value: input.imageApiPath }]);
+  const imagePath = pickFirstValue([
+    {
+      source: options.hasImageInputs ? 'imageToImageApiPath' : 'textToImageApiPath',
+      value: options.hasImageInputs ? input.imageToImageApiPath : input.textToImageApiPath,
+    },
+    { source: 'imageApiPath', value: input.imageApiPath },
+  ]);
   const isYunwuGptImage = isYunwuGptImageModel(actualModel, input.platformPreset);
   const isGeminiGateway =
     input.platformPreset === 'yunwu' &&
@@ -452,8 +495,8 @@ export function resolveImageRoute(
       imagePath.value,
     );
     notes.push('云雾预设下，gpt-image-2/image2 会改走 OpenAI 图片接口。');
-    if (imagePath.value) {
-      warnings.push('你填写的生图接口路径会同时覆盖有图和无图两种图片请求。');
+    if (imagePath.value && imagePath.source === 'imageApiPath') {
+      warnings.push('你填写的是旧版通用生图接口路径，会同时影响文生图和图生图。');
     }
 
     return {
@@ -517,8 +560,8 @@ export function resolveImageRoute(
     if (!imageBase.value || !imageKey.value) {
       warnings.push('当前生图地址或 Key 没填完整，这条 OpenAI 兼容生图路由不会自动回落，实际执行会直接失败。');
     }
-    if (imagePath.value && transport === 'openai-images') {
-      warnings.push('你填写的生图接口路径会同时覆盖有图和无图两种图片请求。');
+    if (imagePath.value && imagePath.source === 'imageApiPath' && transport === 'openai-images') {
+      warnings.push('你填写的是旧版通用生图接口路径，会同时影响文生图和图生图。');
     }
     if (transport === 'openai-chat-completions') {
       notes.push('带图且不是 gpt-image/dall-e 时，这里会走 chat/completions，而不是 /images/edits。');

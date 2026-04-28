@@ -107,6 +107,9 @@ const BUILT_IN_IMAGE_MODELS = [
   'imagen-3.0-generate-001',
 ];
 
+const DEFAULT_TEXT_TO_IMAGE_API_PATH = '/v1/images/generations';
+const DEFAULT_IMAGE_TO_IMAGE_API_PATH = '/v1/images/edits';
+
 function uniqSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort();
 }
@@ -122,55 +125,95 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       textApiBaseUrl: 'https://yunwu.ai',
       imageApiBaseUrl: 'https://yunwu.ai',
       imageApiPath: '',
+      textToImageApiBaseUrl: 'https://yunwu.ai',
+      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
+      imageToImageApiBaseUrl: 'https://yunwu.ai',
+      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
+      textToImageApiKey: '',
+      imageToImageApiKey: '',
       textModel: 'gemini-3.1-flash-lite-preview',
       imageModel: 'gemini-3.1-flash-image-preview',
+      textToImageModel: 'gemini-3.1-flash-image-preview',
+      imageToImageModel: 'gemini-3.1-flash-image-preview',
     },
     'comfly-chat': {
       apiBaseUrl: 'https://ai.comfly.chat',
       textApiBaseUrl: 'https://ai.comfly.chat',
       imageApiBaseUrl: 'https://ai.comfly.chat',
       imageApiPath: '',
+      textToImageApiBaseUrl: 'https://ai.comfly.chat',
+      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
+      imageToImageApiBaseUrl: 'https://ai.comfly.chat',
+      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
+      textToImageApiKey: '',
+      imageToImageApiKey: '',
       textModel: 'gemini-3.1-flash-lite-preview',
       imageModel: 'gemini-3.1-flash-image-preview',
+      textToImageModel: 'gemini-3.1-flash-image-preview',
+      imageToImageModel: 'gemini-3.1-flash-image-preview',
     },
     'openai-compatible': {
       apiBaseUrl: '',
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
       imageApiPath: '',
+      textToImageApiBaseUrl: '',
+      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
+      imageToImageApiBaseUrl: '',
+      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
+      textToImageApiKey: '',
+      imageToImageApiKey: '',
       textModel: 'gpt-4o',
       imageModel: 'gpt-image-2',
+      textToImageModel: 'gpt-image-2',
+      imageToImageModel: 'gpt-image-2',
     },
     'gemini-native': {
       apiBaseUrl: '',
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
       imageApiPath: '',
+      textToImageApiBaseUrl: '',
+      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
+      imageToImageApiBaseUrl: '',
+      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
+      textToImageApiKey: '',
+      imageToImageApiKey: '',
       textModel: 'gemini-2.5-flash',
       imageModel: 'imagen-3.0-generate-001',
+      textToImageModel: 'imagen-3.0-generate-001',
+      imageToImageModel: 'imagen-3.0-generate-001',
     },
     'custom': {
       apiBaseUrl: '',
       textApiBaseUrl: '',
       imageApiBaseUrl: '',
       imageApiPath: '',
+      textToImageApiBaseUrl: '',
+      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
+      imageToImageApiBaseUrl: '',
+      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
+      textToImageApiKey: '',
+      imageToImageApiKey: '',
       textModel: '',
       imageModel: '',
+      textToImageModel: '',
+      imageToImageModel: '',
     },
   };
 }
@@ -194,8 +237,16 @@ function normalizePlatformConfig(config: PlatformApiConfigMap[PlatformPreset]): 
     textApiBaseUrl: config.textApiBaseUrl ?? config.apiBaseUrl,
     imageApiBaseUrl: config.imageApiBaseUrl ?? config.apiBaseUrl,
     imageApiPath: config.imageApiPath ?? '',
+    textToImageApiBaseUrl: config.textToImageApiBaseUrl ?? config.imageApiBaseUrl ?? config.apiBaseUrl,
+    textToImageApiPath: config.textToImageApiPath || config.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
+    imageToImageApiBaseUrl: config.imageToImageApiBaseUrl ?? config.imageApiBaseUrl ?? config.apiBaseUrl,
+    imageToImageApiPath: config.imageToImageApiPath || config.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
     textApiKey: config.textApiKey ?? config.apiKey,
     imageApiKey: config.imageApiKey ?? config.apiKey,
+    textToImageApiKey: config.textToImageApiKey ?? config.imageApiKey ?? config.apiKey,
+    imageToImageApiKey: config.imageToImageApiKey ?? config.imageApiKey ?? config.apiKey,
+    textToImageModel: config.textToImageModel ?? config.imageModel,
+    imageToImageModel: config.imageToImageModel ?? config.imageModel,
   };
 }
 
@@ -446,6 +497,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     imageApiKey: savedImageApiKey,
     imageApiPath: savedImageApiPath,
     imageModel: savedImageModel,
+    textToImageApiBaseUrl: savedTextToImageApiBaseUrl,
+    textToImageApiKey: savedTextToImageApiKey,
+    textToImageApiPath: savedTextToImageApiPath,
+    textToImageModel: savedTextToImageModel,
+    imageToImageApiBaseUrl: savedImageToImageApiBaseUrl,
+    imageToImageApiKey: savedImageToImageApiKey,
+    imageToImageApiPath: savedImageToImageApiPath,
+    imageToImageModel: savedImageToImageModel,
     maxConcurrency: savedMaxConcurrency,
     platformConfigs,
     platformPreset: savedPlatformPreset,
@@ -470,6 +529,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       imageApiKey: state.imageApiKey,
       imageApiPath: state.imageApiPath,
       imageModel: state.imageModel,
+      textToImageApiBaseUrl: state.textToImageApiBaseUrl,
+      textToImageApiKey: state.textToImageApiKey,
+      textToImageApiPath: state.textToImageApiPath,
+      textToImageModel: state.textToImageModel,
+      imageToImageApiBaseUrl: state.imageToImageApiBaseUrl,
+      imageToImageApiKey: state.imageToImageApiKey,
+      imageToImageApiPath: state.imageToImageApiPath,
+      imageToImageModel: state.imageToImageModel,
       maxConcurrency: state.maxConcurrency,
       platformConfigs: state.platformConfigs,
       platformPreset: state.platformPreset,
@@ -499,9 +566,17 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [textApiBaseUrl, setTextApiBaseUrlValue] = React.useState(savedTextApiBaseUrl || savedApiBaseUrl);
   const [imageApiBaseUrl, setImageApiBaseUrlValue] = React.useState(savedImageApiBaseUrl || savedApiBaseUrl);
   const [imageApiPath, setImageApiPathValue] = React.useState(savedImageApiPath || '');
+  const [textToImageApiKey, setTextToImageApiKeyValue] = React.useState(savedTextToImageApiKey || savedImageApiKey || savedApiKey);
+  const [textToImageApiBaseUrl, setTextToImageApiBaseUrlValue] = React.useState(savedTextToImageApiBaseUrl || savedImageApiBaseUrl || savedApiBaseUrl);
+  const [textToImageApiPath, setTextToImageApiPathValue] = React.useState(savedTextToImageApiPath || savedImageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH);
+  const [imageToImageApiKey, setImageToImageApiKeyValue] = React.useState(savedImageToImageApiKey || savedImageApiKey || savedApiKey);
+  const [imageToImageApiBaseUrl, setImageToImageApiBaseUrlValue] = React.useState(savedImageToImageApiBaseUrl || savedImageApiBaseUrl || savedApiBaseUrl);
+  const [imageToImageApiPath, setImageToImageApiPathValue] = React.useState(savedImageToImageApiPath || savedImageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH);
   const [maxConcurrency, setMaxConcurrencyValue] = React.useState(String(savedMaxConcurrency));
   const [localTextModel, setLocalTextModel] = React.useState(savedTextModel || 'gemini-3.1-flash-lite-preview');
   const [localImageModel, setLocalImageModel] = React.useState(savedImageModel || 'gemini-3.1-flash-image-preview');
+  const [localTextToImageModel, setLocalTextToImageModel] = React.useState(savedTextToImageModel || savedImageModel || 'gemini-3.1-flash-image-preview');
+  const [localImageToImageModel, setLocalImageToImageModel] = React.useState(savedImageToImageModel || savedImageModel || 'gemini-3.1-flash-image-preview');
   const [downloadDirectoryName, setDownloadDirectoryName] = React.useState(savedDownloadDirectoryName || '');
   const [cacheDirectoryName, setCacheDirectoryName] = React.useState(savedCacheDirectoryName || '');
   const [allPlatformConfigs, setAllPlatformConfigs] = React.useState<PlatformApiConfigMap>(mergedPlatformConfigs);
@@ -526,8 +601,16 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setTextApiBaseUrlValue(next.textApiBaseUrl || next.apiBaseUrl);
     setImageApiBaseUrlValue(next.imageApiBaseUrl || next.apiBaseUrl);
     setImageApiPathValue(next.imageApiPath || '');
+    setTextToImageApiKeyValue(next.textToImageApiKey || next.imageApiKey || next.apiKey);
+    setTextToImageApiBaseUrlValue(next.textToImageApiBaseUrl || next.imageApiBaseUrl || next.apiBaseUrl);
+    setTextToImageApiPathValue(next.textToImageApiPath || next.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH);
+    setImageToImageApiKeyValue(next.imageToImageApiKey || next.imageApiKey || next.apiKey);
+    setImageToImageApiBaseUrlValue(next.imageToImageApiBaseUrl || next.imageApiBaseUrl || next.apiBaseUrl);
+    setImageToImageApiPathValue(next.imageToImageApiPath || next.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH);
     setLocalTextModel(next.textModel);
     setLocalImageModel(next.imageModel);
+    setLocalTextToImageModel(next.textToImageModel || next.imageModel);
+    setLocalImageToImageModel(next.imageToImageModel || next.imageModel);
   }, []);
 
   const syncCurrentFormToConfigs = React.useCallback((configs: PlatformApiConfigMap): PlatformApiConfigMap => {
@@ -538,14 +621,40 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         textApiBaseUrl,
         imageApiBaseUrl,
         imageApiPath,
+        textToImageApiBaseUrl,
+        textToImageApiPath,
+        imageToImageApiBaseUrl,
+        imageToImageApiPath,
         apiKey: textApiKey,
         textApiKey,
         imageApiKey,
+        textToImageApiKey,
+        imageToImageApiKey,
         textModel: localTextModel,
         imageModel: localImageModel,
+        textToImageModel: localTextToImageModel,
+        imageToImageModel: localImageToImageModel,
       },
     };
-  }, [apiBaseUrl, imageApiBaseUrl, imageApiKey, imageApiPath, localImageModel, localTextModel, platformPreset, textApiBaseUrl, textApiKey]);
+  }, [
+    apiBaseUrl,
+    imageApiBaseUrl,
+    imageApiKey,
+    imageApiPath,
+    imageToImageApiBaseUrl,
+    imageToImageApiKey,
+    imageToImageApiPath,
+    localImageModel,
+    localImageToImageModel,
+    localTextModel,
+    localTextToImageModel,
+    platformPreset,
+    textApiBaseUrl,
+    textApiKey,
+    textToImageApiBaseUrl,
+    textToImageApiKey,
+    textToImageApiPath,
+  ]);
 
   React.useEffect(() => {
     const nextConfigs = mergePlatformConfigs(platformConfigs);
@@ -595,22 +704,38 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       textApiBaseUrl,
       imageApiBaseUrl,
       imageApiPath,
+      textToImageApiBaseUrl,
+      textToImageApiPath,
+      imageToImageApiBaseUrl,
+      imageToImageApiPath,
       apiKey: textApiKey,
       textApiKey,
       imageApiKey,
+      textToImageApiKey,
+      imageToImageApiKey,
       textModel: localTextModel,
       imageModel: localImageModel,
+      textToImageModel: localTextToImageModel,
+      imageToImageModel: localImageToImageModel,
     }),
     [
       apiBaseUrl,
       imageApiBaseUrl,
       imageApiKey,
       imageApiPath,
+      imageToImageApiBaseUrl,
+      imageToImageApiKey,
+      imageToImageApiPath,
       localImageModel,
+      localImageToImageModel,
       localTextModel,
+      localTextToImageModel,
       platformPreset,
       textApiBaseUrl,
       textApiKey,
+      textToImageApiBaseUrl,
+      textToImageApiKey,
+      textToImageApiPath,
     ],
   );
   const textRoute = React.useMemo(() => resolveTextRoute(routingInput), [routingInput]);
@@ -648,11 +773,19 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         textApiBaseUrl: data.textApiBaseUrl || data.apiBaseUrl,
         imageApiBaseUrl: data.imageApiBaseUrl || data.apiBaseUrl,
         imageApiPath: data.imageApiPath || '',
+        textToImageApiBaseUrl: data.textToImageApiBaseUrl || data.imageApiBaseUrl || data.apiBaseUrl,
+        textToImageApiPath: data.textToImageApiPath || data.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
+        imageToImageApiBaseUrl: data.imageToImageApiBaseUrl || data.imageApiBaseUrl || data.apiBaseUrl,
+        imageToImageApiPath: data.imageToImageApiPath || data.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
         apiKey: data.apiKey,
         textApiKey: data.textApiKey || data.apiKey,
         imageApiKey: data.imageApiKey || data.apiKey,
+        textToImageApiKey: data.textToImageApiKey || data.imageApiKey || data.apiKey,
+        imageToImageApiKey: data.imageToImageApiKey || data.imageApiKey || data.apiKey,
         textModel: data.textModel,
         imageModel: data.imageModel,
+        textToImageModel: data.textToImageModel || data.imageModel,
+        imageToImageModel: data.imageToImageModel || data.imageModel,
       },
     });
 
@@ -670,6 +803,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     const baseUrlEntries = [
       { baseUrl: textApiBaseUrl || apiBaseUrl, apiKey: textApiKey },
       { baseUrl: imageApiBaseUrl || textApiBaseUrl || apiBaseUrl, apiKey: imageApiKey || textApiKey },
+      { baseUrl: textToImageApiBaseUrl || imageApiBaseUrl || textApiBaseUrl || apiBaseUrl, apiKey: textToImageApiKey || imageApiKey || textApiKey },
+      { baseUrl: imageToImageApiBaseUrl || imageApiBaseUrl || textApiBaseUrl || apiBaseUrl, apiKey: imageToImageApiKey || imageApiKey || textApiKey },
     ].filter((entry) => entry.baseUrl && entry.apiKey);
 
     if (platformPreset === 'gemini-native') {
@@ -722,7 +857,18 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       }
     });
     return Array.from(byId.values());
-  }, [apiBaseUrl, imageApiBaseUrl, imageApiKey, platformPreset, textApiBaseUrl, textApiKey]);
+  }, [
+    apiBaseUrl,
+    imageApiBaseUrl,
+    imageApiKey,
+    imageToImageApiBaseUrl,
+    imageToImageApiKey,
+    platformPreset,
+    textApiBaseUrl,
+    textApiKey,
+    textToImageApiBaseUrl,
+    textToImageApiKey,
+  ]);
 
   const loadRemoteModels = async () => {
     setIsLoadingModels(true);
@@ -860,11 +1006,19 @@ const handleExportCurrentConfig = async () => {
         textApiBaseUrl: currentConfig.textApiBaseUrl,
         imageApiBaseUrl: currentConfig.imageApiBaseUrl,
         imageApiPath: currentConfig.imageApiPath,
+        textToImageApiBaseUrl: currentConfig.textToImageApiBaseUrl,
+        textToImageApiPath: currentConfig.textToImageApiPath,
+        imageToImageApiBaseUrl: currentConfig.imageToImageApiBaseUrl,
+        imageToImageApiPath: currentConfig.imageToImageApiPath,
         apiKey: currentConfig.apiKey,
         textApiKey: currentConfig.textApiKey,
         imageApiKey: currentConfig.imageApiKey,
+        textToImageApiKey: currentConfig.textToImageApiKey,
+        imageToImageApiKey: currentConfig.imageToImageApiKey,
         textModel: currentConfig.textModel,
         imageModel: currentConfig.imageModel,
+        textToImageModel: currentConfig.textToImageModel,
+        imageToImageModel: currentConfig.imageToImageModel,
         exportedAt: new Date().toISOString(),
       };
 
@@ -993,6 +1147,14 @@ const handleExportCurrentConfig = async () => {
       textApiBaseUrl,
       imageApiBaseUrl,
       imageApiPath,
+      textToImageApiBaseUrl,
+      textToImageApiPath,
+      imageToImageApiBaseUrl,
+      imageToImageApiPath,
+      textToImageApiKey,
+      imageToImageApiKey,
+      textToImageModel: localTextToImageModel,
+      imageToImageModel: localImageToImageModel,
       platformConfigs: nextPlatformConfigs,
     });
 
@@ -1088,6 +1250,105 @@ const handleExportCurrentConfig = async () => {
                 </div>
               </div>
 
+              <div className="flex flex-col gap-3">
+                <label className="text-[12.6px] font-medium text-text-secondary">生图 API</label>
+                <div className="rounded-2xl border border-border/70 bg-[#F6F1E8]/55 p-3">
+                  <div className="mb-2 text-[12.6px] font-medium text-text-primary">文生图</div>
+                  <div className="rounded-xl border border-border bg-white shadow-sm transition-colors focus-within:border-button-main/40 focus-within:ring-2 focus-within:ring-button-main/20">
+                    <Input
+                      type="text"
+                      name="batch-refiner-text-to-image-api-base"
+                      autoComplete="off"
+                      placeholder="文生图 API 地址，留空则使用通用生图 API 地址"
+                      value={textToImageApiBaseUrl}
+                      onChange={(e) => setTextToImageApiBaseUrlValue(e.target.value)}
+                      className={mergedInputClassName}
+                    />
+                    <div className="h-px bg-border/70" />
+                    <Input
+                      type="text"
+                      name="batch-refiner-text-to-image-api-path"
+                      autoComplete="off"
+                      placeholder="文生图接口路径，例如 /v1/images/generations"
+                      value={textToImageApiPath}
+                      onChange={(e) => setTextToImageApiPathValue(e.target.value)}
+                      className={mergedInputClassName}
+                    />
+                    <div className="h-px bg-border/70" />
+                    <Input
+                      type="password"
+                      name="batch-refiner-text-to-image-api-key"
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      data-form-type="other"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      placeholder="文生图 API Key，留空则使用通用生图 API Key"
+                      value={textToImageApiKey}
+                      onChange={(e) => setTextToImageApiKeyValue(e.target.value)}
+                      className={mergedInputClassName}
+                    />
+                    <div className="h-px bg-border/70" />
+                    <ModelInput
+                      value={localTextToImageModel}
+                      onChange={setLocalTextToImageModel}
+                      options={imageModelOptions}
+                      placeholder="文生图模型，例如 gpt-image-2"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border/70 bg-[#F6F1E8]/55 p-3">
+                  <div className="mb-2 text-[12.6px] font-medium text-text-primary">图生图</div>
+                  <div className="rounded-xl border border-border bg-white shadow-sm transition-colors focus-within:border-button-main/40 focus-within:ring-2 focus-within:ring-button-main/20">
+                    <Input
+                      type="text"
+                      name="batch-refiner-image-to-image-api-base"
+                      autoComplete="off"
+                      placeholder="图生图 API 地址，留空则使用通用生图 API 地址"
+                      value={imageToImageApiBaseUrl}
+                      onChange={(e) => setImageToImageApiBaseUrlValue(e.target.value)}
+                      className={mergedInputClassName}
+                    />
+                    <div className="h-px bg-border/70" />
+                    <Input
+                      type="text"
+                      name="batch-refiner-image-to-image-api-path"
+                      autoComplete="off"
+                      placeholder="图生图接口路径，例如 /v1/images/edits"
+                      value={imageToImageApiPath}
+                      onChange={(e) => setImageToImageApiPathValue(e.target.value)}
+                      className={mergedInputClassName}
+                    />
+                    <div className="h-px bg-border/70" />
+                    <Input
+                      type="password"
+                      name="batch-refiner-image-to-image-api-key"
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      data-form-type="other"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      placeholder="图生图 API Key，留空则使用通用生图 API Key"
+                      value={imageToImageApiKey}
+                      onChange={(e) => setImageToImageApiKeyValue(e.target.value)}
+                      className={mergedInputClassName}
+                    />
+                    <div className="h-px bg-border/70" />
+                    <ModelInput
+                      value={localImageToImageModel}
+                      onChange={setLocalImageToImageModel}
+                      options={imageModelOptions}
+                      placeholder="图生图模型，例如 gpt-image-2"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-col gap-2">
                 <label className="text-[12.6px] font-medium text-text-secondary">生图 API</label>
                 <div className="rounded-xl border border-border bg-white shadow-sm transition-colors focus-within:border-button-main/40 focus-within:ring-2 focus-within:ring-button-main/20">
@@ -1178,7 +1439,7 @@ const handleExportCurrentConfig = async () => {
                     variant="outline"
                     size="sm"
                     onClick={loadRemoteModels}
-                    disabled={isLoadingModels || (!textApiKey.trim() && !imageApiKey.trim())}
+                    disabled={isLoadingModels || (!textApiKey.trim() && !imageApiKey.trim() && !textToImageApiKey.trim() && !imageToImageApiKey.trim())}
                     className="h-8 rounded-xl border-none bg-white text-[12.6px] text-text-primary shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all hover:bg-black/5"
                   >
                     {isLoadingModels ? '拉取中...' : '拉取模型'}
