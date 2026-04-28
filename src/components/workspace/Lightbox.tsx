@@ -2,6 +2,7 @@ import { useAppStore } from '@/store';
 import { ChevronLeft, ChevronRight, GripVertical, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentTaskResultImages } from '@/lib/taskResults';
+import type { TaskResultImage } from '@/types';
 
 function preventNativeImageDrag(e: React.DragEvent<HTMLImageElement>) {
   e.preventDefault();
@@ -28,6 +29,10 @@ function getTaskStatusLabel(status?: string) {
   }
 }
 
+function getResultFullSrc(result?: TaskResultImage | null) {
+  return result?.originalSrc || result?.assetSrc || result?.src || result?.previewSrc;
+}
+
 export function Lightbox() {
   const lightboxTaskId = useAppStore((state) => state.lightboxTaskId);
   const lightboxImageIndex = useAppStore((state) => state.lightboxImageIndex);
@@ -42,9 +47,10 @@ export function Lightbox() {
   const taskIndex = useMemo(() => tasks.findIndex((item) => item.id === lightboxTaskId), [tasks, lightboxTaskId]);
   const resultImages = task ? getCurrentTaskResultImages(task) : [];
   const currentResultImage = resultImages[lightboxImageIndex] || resultImages[0];
+  const currentResultImageSrc = getResultFullSrc(currentResultImage);
   const hasResultGallery = resultImages.length > 1;
-  const hasCompareView = Boolean(task?.sourceImage && currentResultImage);
-  const displayImage = currentResultImage?.src || task?.sourceImage;
+  const hasCompareView = Boolean(task?.sourceImage && currentResultImageSrc);
+  const displayImage = currentResultImageSrc || task?.sourceImage;
   const canGoPrevImage = hasResultGallery ? lightboxImageIndex > 0 : taskIndex > 0;
   const canGoNextImage = hasResultGallery ? lightboxImageIndex < resultImages.length - 1 : taskIndex !== -1 && taskIndex < tasks.length - 1;
 
@@ -204,7 +210,7 @@ export function Lightbox() {
               {hasCompareView && currentResultImage ? (
                 <>
                   <img
-                    src={currentResultImage.src}
+                    src={currentResultImageSrc || ''}
                     className="absolute inset-0 h-full w-full select-none object-contain"
                     alt="结果图"
                     draggable={false}

@@ -14,6 +14,7 @@ import type {
 const MAX_GENERATION_LOG_SESSIONS = 500;
 const MAX_EVENTS_PER_SESSION = 200;
 const MAX_STRING_LOG_LENGTH = 500;
+const MAX_LOG_ARRAY_ITEMS = 50;
 const REDACT_KEYS = ['apiKey', 'authorization', 'token', 'secret', 'signature', 'sig', 'password'];
 
 function truncateString(value: string, maxLength = MAX_STRING_LOG_LENGTH) {
@@ -48,7 +49,15 @@ export function sanitizeLogData(value: unknown): unknown {
   if (typeof value === 'number' || typeof value === 'boolean') return value;
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeLogData(item));
+    const sanitizedItems = value.slice(0, MAX_LOG_ARRAY_ITEMS).map((item) => sanitizeLogData(item));
+    if (value.length <= MAX_LOG_ARRAY_ITEMS) return sanitizedItems;
+    return [
+      ...sanitizedItems,
+      {
+        kind: 'truncated_array',
+        omitted: value.length - MAX_LOG_ARRAY_ITEMS,
+      },
+    ];
   }
 
   if (value instanceof Error) {

@@ -59,6 +59,18 @@ test('sanitizeLogData redacts sensitive fields and summarizes data urls', () => 
   });
 });
 
+test('sanitizeLogData caps large arrays in hot log data', () => {
+  const sanitized = sanitizeLogData({
+    chunks: Array.from({ length: 55 }, (_, index) => index),
+  }) as { chunks: Array<number | { kind: string; omitted: number }> };
+
+  assert.equal(sanitized.chunks.length, 51);
+  assert.deepEqual(sanitized.chunks.at(-1), {
+    kind: 'truncated_array',
+    omitted: 5,
+  });
+});
+
 test('generation log sessions are trimmed to the latest 500 records', () => {
   useAppStore.setState((state) => ({
     ...state,

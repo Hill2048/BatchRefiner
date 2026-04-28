@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getBatchCountNumber, getCurrentTaskResultImages, getHistoricalTaskResultGroups, getHistoricalTaskResultImages, getTaskResultProgress, getTaskResultImages } from './taskResults';
+import { compactTaskResultImagesForHotState, getBatchCountNumber, getCurrentTaskResultImages, getHistoricalTaskResultGroups, getHistoricalTaskResultImages, getTaskResultProgress, getTaskResultImages } from './taskResults';
 import { Task } from '@/types';
 
 function createTask(overrides: Partial<Task> = {}): Task {
@@ -78,4 +78,20 @@ test('getHistoricalTaskResultGroups groups images by session and sorts latest fi
   assert.equal(groups[0].sessionId, 'session-old-a');
   assert.deepEqual(groups[0].images.map((image) => image.src), ['old-1', 'old-2']);
   assert.equal(groups[1].sessionId, 'session-old-b');
+});
+
+test('compactTaskResultImagesForHotState keeps current results and caps old sessions', () => {
+  const images = [
+    { id: 'current', src: 'current.png', sessionId: 'session-current', createdAt: 100 },
+    { id: 'old-1', src: 'old-1.png', sessionId: 'session-old-1', createdAt: 10 },
+    { id: 'old-2', src: 'old-2.png', sessionId: 'session-old-2', createdAt: 20 },
+    { id: 'old-3', src: 'old-3.png', sessionId: 'session-old-3', createdAt: 30 },
+  ];
+
+  const compacted = compactTaskResultImagesForHotState(images, 'session-current', {
+    maxHistoricalSessions: 2,
+    maxImages: 3,
+  });
+
+  assert.deepEqual(compacted.map((image) => image.id), ['current', 'old-3', 'old-2']);
 });

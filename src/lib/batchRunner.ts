@@ -6,6 +6,7 @@ import { getBatchCountNumber, getEffectiveBatchCount } from "./taskResults";
 import { getExecutablePromptText, getPreparedPromptText, isPromptOptimizationEnabled } from "./promptExecution";
 import { dataUrlToBlob, primeResultImageCache, primeTaskResultImageCache, storeResultImageBlob } from "./resultImageCache";
 import { getResultImageAssetSrc, inferResultImageAssetMetadata, isValidResultImageAssetSrc } from "./resultImageAsset";
+import { storeImageAssetFromDataUrl } from "./imageAssetStore";
 import {
   appendGenerationLogEvent,
   buildGenerationTaskSnapshot,
@@ -20,6 +21,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const PROMPT_REQUEST_TIMEOUT_MS = 90_000;
 const IMAGE_REQUEST_TIMEOUT_MS = 180_000;
 const YUNWU_GPT_IMAGE_REQUEST_TIMEOUT_MS = 300_000;
+const IMAGE_UPDATE_FLUSH_MS = 350;
 
 const GEMINI_NATIVE_IMAGE_INPUT_MODELS = [
   "gemini-2.0-flash-preview-image-generation",
@@ -54,9 +56,12 @@ interface GeneratedImageResult {
   sourceType: "preview" | "original" | "base64";
   previewSrc?: string;
   originalSrc?: string;
+  assetId?: string;
   assetSrc?: string;
+  assetStorageStatus?: "stored" | "skipped" | "failed";
   assetMimeType?: string;
   assetExtension?: string;
+  assetSize?: number;
   downloadSourceType?: "original" | "src" | "data_url";
   downloadCacheStatus?: "primed" | "miss" | "failed";
   normalizationStatus?: "ok" | "invalid_source" | "download_unreachable";
@@ -851,10 +856,50 @@ async function cacheDownloadableResultSources(result: GeneratedImageResult) {
   }
 }
 
+function createBufferedImageNotifier(
+  onImage: (image: TaskResultImage, images: TaskResultImage[], failedCount: number) => void,
+) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let latestImage: TaskResultImage | null = null;
+  let latestImages: TaskResultImage[] = [];
+  let latestFailedCount = 0;
+
+  const flush = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (!latestImage) return;
+    onImage(latestImage, latestImages, latestFailedCount);
+    latestImage = null;
+    latestImages = [];
+  };
+
+  return {
+    queue(image: TaskResultImage, images: TaskResultImage[], failedCount: number) {
+      latestImage = image;
+      latestImages = images;
+      latestFailedCount = failedCount;
+      if (!timer) {
+        timer = setTimeout(flush, IMAGE_UPDATE_FLUSH_MS);
+      }
+    },
+    flush,
+  };
+}
+
 async function createTaskResultImage(result: GeneratedImageResult, sessionId?: string): Promise<TaskResultImage> {
   const assetSrc = result.src;
   const hasValidAssetSrc = isValidResultImageAssetSrc(assetSrc);
   const dimensions = hasValidAssetSrc ? await measureImageDimensions(assetSrc) : null;
+  const storedAsset = assetSrc.startsWith('data:image/')
+    ? await storeImageAssetFromDataUrl(assetSrc, {
+        kind: 'result',
+        previewSrc: result.previewSrc || assetSrc,
+        width: result.assetWidth || dimensions?.width,
+        height: result.assetHeight || dimensions?.height,
+      })
+    : null;
   let downloadCacheStatus = result.downloadCacheStatus;
   let normalizationStatus = result.normalizationStatus;
   let downloadStatus = result.downloadStatus;
@@ -919,7 +964,9 @@ async function createTaskResultImage(result: GeneratedImageResult, sessionId?: s
     src: result.src,
     previewSrc: result.previewSrc,
     originalSrc: result.originalSrc,
+    assetId: result.assetId || storedAsset?.assetId,
     assetSrc,
+    assetStorageStatus: result.assetStorageStatus || storedAsset?.storageStatus || (assetSrc.startsWith('data:image/') ? 'failed' : 'skipped'),
     sourceType: result.sourceType,
     downloadSourceType: result.downloadSourceType || (assetSrc.startsWith('data:') ? 'data_url' : "src"),
     downloadCacheStatus,
@@ -927,8 +974,9 @@ async function createTaskResultImage(result: GeneratedImageResult, sessionId?: s
     downloadStatus,
     downloadFailureStage,
     downloadFailureReason,
-    assetMimeType: result.assetMimeType || assetMetadata.mimeType,
-    assetExtension: result.assetExtension || assetMetadata.extension,
+    assetMimeType: result.assetMimeType || storedAsset?.metadata.mimeType || assetMetadata.mimeType,
+    assetExtension: result.assetExtension || storedAsset?.metadata.extension || assetMetadata.extension,
+    assetSize: result.assetSize || storedAsset?.metadata.size,
     sessionId,
     width: assetWidth,
     height: assetHeight,
@@ -2871,6 +2919,7 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
   const images: TaskResultImage[] = [];
   let failedCount = 0;
   const logSessionId = options.logSessionId;
+  const imageNotifier = options.onImage ? createBufferedImageNotifier(options.onImage) : null;
 
   if (logSessionId) {
     appendGenerationLogEvent(logSessionId, {
@@ -2914,7 +2963,7 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
           },
         });
       }
-      options.onImage?.(createdImage, [...images], failedCount);
+      imageNotifier?.queue(createdImage, [...images], failedCount);
     } catch (error) {
       failedCount += 1;
       if (logSessionId) {
@@ -2957,6 +3006,8 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
       },
     });
   }
+
+  imageNotifier?.flush();
 
   return { images, failedCount };
 }

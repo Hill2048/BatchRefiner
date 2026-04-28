@@ -18,7 +18,6 @@ import { getTaskBatchFileName } from '@/lib/resultImageFileName';
 import {
   getResultImageAssetDimensions,
   getResultImageAssetExtension,
-  getResultImageAssetSrc,
   getResultImageDownloadSourceType,
 } from '@/lib/resultImageAsset';
 import { primeTaskResultImageCache } from '@/lib/resultImageCache';
@@ -123,6 +122,24 @@ function getTotalGenerationTime(images: TaskResultImage[]) {
   return total > 0 ? total : undefined;
 }
 
+function getResultPreviewSrc(result?: TaskResultImage | null) {
+  return result?.previewSrc || result?.src || result?.assetSrc || result?.originalSrc;
+}
+
+function getResultFullSrc(result?: TaskResultImage | null) {
+  return result?.originalSrc || result?.assetSrc || result?.src || result?.previewSrc;
+}
+
+function getDownloadableResultImage(result: TaskResultImage): TaskResultImage {
+  const fullSrc = getResultFullSrc(result);
+  if (!fullSrc || fullSrc === result.src) return result;
+  return {
+    ...result,
+    src: fullSrc,
+    downloadSourceType: fullSrc.startsWith('data:') ? 'data_url' : 'src',
+  };
+}
+
 type ViewerMode = 'result' | 'source';
 type ThumbnailViewerItem = {
   id: string;
@@ -179,11 +196,13 @@ export const TaskCard = React.memo(function TaskCard({
   const descriptionEditor = useAutoSaveTextEditor({
     value: task.description || '',
     draftId: `task-description-${task.id}`,
+    enabled: isActive,
     onSave: (nextValue) => updateTask(task.id, { description: nextValue }),
   });
   const promptEditor = useAutoSaveTextEditor({
     value: task.promptText || '',
     draftId: `task-prompt-${task.id}`,
+    enabled: isActive,
     onSave: (nextValue) => updateTask(task.id, {
       promptText: nextValue,
       promptInputSignature: getTaskPromptInputSignature(task),
@@ -259,7 +278,7 @@ export const TaskCard = React.memo(function TaskCard({
     resultImages.forEach((result, index) => {
       items.push({
         id: result.id,
-        src: result.src,
+        src: getResultPreviewSrc(result) || '',
         type: 'result',
         resultIndex: index,
       });
@@ -308,12 +327,12 @@ export const TaskCard = React.memo(function TaskCard({
   React.useEffect(() => {
     if (!isActive || resultImages.length === 0) return;
     void primeTaskResultImageCache(
-      resultImages.flatMap((result) => [result.assetSrc, result.src, result.previewSrc, result.originalSrc])
+      resultImages.map((result) => getResultPreviewSrc(result))
     );
   }, [isActive, resultImages]);
 
   const activeResult = resultImages[selectedResultIndex] || primaryResult;
-  const coverImageSrc = primaryResult?.src || task.sourceImage;
+  const coverImageSrc = getResultPreviewSrc(primaryResult) || task.sourceImage;
   const showProgressBadge = resultProgress.requested > 1 && resultImages.length > 0;
   const totalResultDuration = formatGenerationTime(getTotalGenerationTime(resultImages));
 
@@ -411,8 +430,9 @@ export const TaskCard = React.memo(function TaskCard({
 
   const downloadResultImage = async (result: TaskResultImage, fileName: string) => {
     const latestLogSession = getLatestGenerationLogSessionForTask(task.id);
+    const downloadableResult = getDownloadableResultImage(result);
     try {
-      const { blob, cacheStatus, status } = await resolveResultImageDownloadBlob(result);
+      const { blob, cacheStatus, status } = await resolveResultImageDownloadBlob(downloadableResult);
       try {
         const { saveAs } = await import('file-saver');
         saveAs(blob, fileName);
@@ -452,7 +472,7 @@ export const TaskCard = React.memo(function TaskCard({
           data: {
             fileName,
             resultId: result.id,
-            sourceType: result.downloadSourceType || 'src',
+            sourceType: downloadableResult.downloadSourceType || 'src',
             cacheStatus,
             status,
           },
@@ -465,7 +485,7 @@ export const TaskCard = React.memo(function TaskCard({
             message: error instanceof Error ? error.message : '下载失败',
             stage: 'save',
             status: 'save_failed',
-            sourceType: getResultImageDownloadSourceType(result),
+            sourceType: getResultImageDownloadSourceType(downloadableResult),
             cacheStatus: result.downloadCacheStatus || 'failed',
           });
       updateTask(task.id, {
@@ -626,7 +646,7 @@ export const TaskCard = React.memo(function TaskCard({
     const mainImageSrc =
       viewerMode === 'source'
         ? task.sourceImage
-        : resultImages[selectedResultIndex]?.src || primaryResult?.src;
+        : getResultPreviewSrc(resultImages[selectedResultIndex]) || getResultPreviewSrc(primaryResult);
     const activeAssetDimensions = activeResult ? getResultImageAssetDimensions(activeResult) : null;
     const showResultSize = viewerMode === 'result' && Boolean(activeAssetDimensions);
     const activeResultDuration = formatGenerationTime(activeResult?.generationTimeMs);
@@ -837,7 +857,7 @@ export const TaskCard = React.memo(function TaskCard({
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setPreviewReferenceImage({
-                                        src: getResultImageAssetSrc(image),
+                                        src: getResultFullSrc(image) || image.src,
                                         title: `历史结果预览`,
                                         fileName: getTaskBatchFileName(task.index, index, getResultImageAssetExtension(image)),
                                         result: image,

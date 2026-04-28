@@ -1,4 +1,6 @@
 import { Task } from '@/types';
+import { runWithBackgroundYields, yieldToMainThread } from './backgroundQueue';
+import { storeImageAssetFromDataUrl, type StoreImageAssetResult } from './imageAssetStore';
 
 export async function readImageFileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -11,7 +13,33 @@ export async function readImageFileToDataUrl(file: File): Promise<string> {
 
 export async function optimizeImageToDataUrl(file: File): Promise<string> {
   const rawDataUrl = await readImageFileToDataUrl(file);
+  await yieldToMainThread();
   return optimizeDataUrlForUpload(rawDataUrl);
+}
+
+export interface OptimizedImageAsset {
+  dataUrl: string;
+  assetId?: string;
+  previewSrc?: string;
+  metadata: StoreImageAssetResult['metadata'];
+  storageStatus: StoreImageAssetResult['storageStatus'];
+}
+
+export async function optimizeImageToAsset(file: File, kind: 'source' | 'reference'): Promise<OptimizedImageAsset> {
+  const dataUrl = await optimizeImageToDataUrl(file);
+  const asset = await storeImageAssetFromDataUrl(dataUrl, {
+    kind,
+    previewSrc: dataUrl,
+    originalName: file.name,
+  });
+
+  return {
+    dataUrl,
+    assetId: asset.assetId,
+    previewSrc: asset.previewSrc,
+    metadata: asset.metadata,
+    storageStatus: asset.storageStatus,
+  };
 }
 
 export async function optimizeDataUrlForUpload(dataUrl: string): Promise<string> {
@@ -55,20 +83,21 @@ export async function optimizeDataUrlForUpload(dataUrl: string): Promise<string>
 export async function buildImportedTasksFromFiles(
   files: File[],
   startIndex: number,
-): Promise<Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'referenceImages'>>> {
+): Promise<Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'sourceImageAssetId' | 'referenceImages'>>> {
   const images = files.filter((file) => file.type.startsWith('image/'));
-  const tasks: Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'referenceImages'>> = [];
+  const tasks: Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'sourceImageAssetId' | 'referenceImages'>> = [];
 
-  for (const [index, file] of images.entries()) {
-    const dataUrl = await optimizeImageToDataUrl(file);
+  await runWithBackgroundYields(images, async (file, index) => {
+    const imageAsset = await optimizeImageToAsset(file, 'source');
     tasks.push({
       index: startIndex + index,
       title: file.name,
       description: '',
-      sourceImage: dataUrl,
+      sourceImage: imageAsset.dataUrl,
+      sourceImageAssetId: imageAsset.assetId,
       referenceImages: [],
     });
-  }
+  });
 
   return tasks;
 }
@@ -77,9 +106,21 @@ export async function buildReferenceImagesFromFiles(files: File[]) {
   const images = files.filter((file) => file.type.startsWith('image/'));
   const optimizedImages: string[] = [];
 
-  for (const file of images) {
-    optimizedImages.push(await optimizeImageToDataUrl(file));
-  }
+  await runWithBackgroundYields(images, async (file) => {
+    const imageAsset = await optimizeImageToAsset(file, 'reference');
+    optimizedImages.push(imageAsset.dataUrl);
+  });
+
+  return optimizedImages;
+}
+
+export async function buildReferenceImageAssetsFromFiles(files: File[]) {
+  const images = files.filter((file) => file.type.startsWith('image/'));
+  const optimizedImages: OptimizedImageAsset[] = [];
+
+  await runWithBackgroundYields(images, async (file) => {
+    optimizedImages.push(await optimizeImageToAsset(file, 'reference'));
+  });
 
   return optimizedImages;
 }

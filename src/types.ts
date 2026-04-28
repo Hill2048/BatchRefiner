@@ -70,7 +70,9 @@ export interface TaskResultImage {
   src: string;
   previewSrc?: string;
   originalSrc?: string;
+  assetId?: string;
   assetSrc?: string;
+  assetStorageStatus?: 'stored' | 'skipped' | 'failed';
   sourceType?: 'preview' | 'original' | 'base64';
   downloadSourceType?: 'original' | 'src' | 'data_url';
   downloadCacheStatus?: 'primed' | 'miss' | 'failed';
@@ -80,6 +82,7 @@ export interface TaskResultImage {
   downloadFailureReason?: string;
   assetMimeType?: string;
   assetExtension?: string;
+  assetSize?: number;
   sessionId?: string;
   width?: number;
   height?: number;
@@ -97,7 +100,9 @@ export interface Task {
   title: string;
   description: string;
   sourceImage?: string;
+  sourceImageAssetId?: string;
   referenceImages: string[];
+  referenceImageAssetIds?: string[];
   promptText?: string;
   promptInputSignature?: string;
   resultImage?: string;

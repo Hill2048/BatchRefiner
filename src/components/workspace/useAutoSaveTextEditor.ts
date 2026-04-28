@@ -5,9 +5,10 @@ type UseAutoSaveTextEditorOptions = {
   value: string;
   onSave: (nextValue: string) => void;
   draftId?: string;
+  enabled?: boolean;
 };
 
-export function useAutoSaveTextEditor({ value, onSave, draftId }: UseAutoSaveTextEditorOptions) {
+export function useAutoSaveTextEditor({ value, onSave, draftId, enabled = true }: UseAutoSaveTextEditorOptions) {
   const [localValue, setLocalValue] = React.useState(value);
   const [isEditing, setIsEditing] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -46,7 +47,7 @@ export function useAutoSaveTextEditor({ value, onSave, draftId }: UseAutoSaveTex
   );
 
   React.useEffect(() => {
-    if (!isEditing) return;
+    if (!enabled || !isEditing) return;
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -56,23 +57,28 @@ export function useAutoSaveTextEditor({ value, onSave, draftId }: UseAutoSaveTex
 
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [closeEditor, isEditing]);
+  }, [closeEditor, enabled, isEditing]);
 
   React.useEffect(() => {
-    if (!isEditing) return;
+    if (!enabled || !isEditing) return;
 
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       const length = textareaRef.current?.value.length ?? 0;
       textareaRef.current?.setSelectionRange(length, length);
     });
-  }, [isEditing]);
+  }, [enabled, isEditing]);
 
   React.useEffect(() => {
-    if (!draftId) return;
+    if (!enabled || !draftId) return;
     registerDraftFlusher(draftId, saveIfChanged);
     return () => unregisterDraftFlusher(draftId);
-  }, [draftId, registerDraftFlusher, saveIfChanged, unregisterDraftFlusher]);
+  }, [draftId, enabled, registerDraftFlusher, saveIfChanged, unregisterDraftFlusher]);
+
+  React.useEffect(() => {
+    if (enabled || !isEditing) return;
+    closeEditor(true);
+  }, [closeEditor, enabled, isEditing]);
 
   return {
     containerRef,

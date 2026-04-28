@@ -8,7 +8,19 @@ function isDataUrl(value: string) {
   return value.startsWith('data:');
 }
 
+function getStableStringHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 function getResultImageCacheKey(src: string) {
+  if (isDataUrl(src)) {
+    return `${RESULT_IMAGE_CACHE_PREFIX}data:${getStableStringHash(src)}:${src.length}`;
+  }
   return `${RESULT_IMAGE_CACHE_PREFIX}${src}`;
 }
 

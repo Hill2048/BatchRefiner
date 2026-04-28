@@ -30,11 +30,17 @@ function hasImageFiles(dataTransfer?: DataTransfer | null) {
 
 const GRID_PLACEHOLDER_HEIGHT = 320;
 const LIST_PLACEHOLDER_HEIGHT = 180;
+const GRID_ITEM_HEIGHT = 360;
+const LIST_ITEM_HEIGHT = 206;
+const WINDOW_OVERSCAN_ROWS = 3;
+const GRID_MIN_COLUMN_WIDTH = 240;
+const GRID_GAP = 24;
 
 type DeferredTaskCardProps = {
   taskId: string;
   viewMode: 'grid' | 'list';
   scrollRoot: HTMLDivElement | null;
+  forceRender: boolean;
   isFileDropTarget: boolean;
   onFileDragEnter: (taskId: string) => void;
   onFileDragLeave: (taskId: string) => void;
@@ -45,6 +51,7 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
   taskId,
   viewMode,
   scrollRoot,
+  forceRender,
   isFileDropTarget,
   onFileDragEnter,
   onFileDragLeave,
@@ -54,6 +61,7 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
   const [shouldRender, setShouldRender] = React.useState(false);
 
   React.useEffect(() => {
+    if (forceRender) return;
     if (shouldRender || isFileDropTarget) {
       setShouldRender(true);
       return;
@@ -83,11 +91,11 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [isFileDropTarget, scrollRoot, shouldRender]);
+  }, [forceRender, isFileDropTarget, scrollRoot, shouldRender]);
 
   return (
     <div ref={containerRef} className="min-h-0">
-      {shouldRender ? (
+      {forceRender || shouldRender ? (
         <TaskCard
           taskId={taskId}
           isFileDropTarget={isFileDropTarget}
@@ -128,7 +136,13 @@ export function TaskList() {
   const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
   const [dragMode, setDragMode] = React.useState<'idle' | 'workspace-drop' | 'task-drop'>('idle');
   const [hoverTaskId, setHoverTaskId] = React.useState<string | null>(null);
+  const [scrollMetrics, setScrollMetrics] = React.useState({
+    top: 0,
+    height: 900,
+    width: 1200,
+  });
   const workspaceDragDepthRef = React.useRef(0);
+  const scrollFrameRef = React.useRef<number | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -153,6 +167,74 @@ export function TaskList() {
       reorderTasks(oldIndex, newIndex);
     }
   };
+
+  const updateScrollMetrics = React.useCallback(() => {
+    const node = scrollContainerRef.current;
+    if (!node) return;
+    setScrollMetrics((current) => {
+      const next = {
+        top: node.scrollTop,
+        height: node.clientHeight || current.height,
+        width: node.clientWidth || current.width,
+      };
+      if (
+        Math.abs(current.top - next.top) < 1 &&
+        current.height === next.height &&
+        current.width === next.width
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, []);
+
+  const handleScroll = React.useCallback(() => {
+    if (scrollFrameRef.current != null) return;
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      updateScrollMetrics();
+    });
+  }, [updateScrollMetrics]);
+
+  React.useLayoutEffect(() => {
+    updateScrollMetrics();
+    const node = scrollContainerRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(updateScrollMetrics);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      if (scrollFrameRef.current != null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [updateScrollMetrics]);
+
+  React.useEffect(() => {
+    const handleScrollToTask = (event: Event) => {
+      const taskId = (event as CustomEvent).detail?.id;
+      if (!taskId) return;
+      const index = taskIds.indexOf(taskId);
+      const node = scrollContainerRef.current;
+      if (index < 0 || !node) return;
+
+      const columnCount =
+        viewMode === 'grid'
+          ? Math.max(1, Math.floor((scrollMetrics.width + GRID_GAP) / (GRID_MIN_COLUMN_WIDTH + GRID_GAP)))
+          : 1;
+      const rowHeight = viewMode === 'grid' ? GRID_ITEM_HEIGHT : LIST_ITEM_HEIGHT;
+      const targetRow = Math.floor(index / columnCount);
+      node.scrollTo({
+        top: Math.max(0, targetRow * rowHeight - rowHeight),
+        behavior: 'smooth',
+      });
+    };
+
+    window.addEventListener('scroll-to-task', handleScrollToTask);
+    return () => window.removeEventListener('scroll-to-task', handleScrollToTask);
+  }, [scrollMetrics.width, taskIds, viewMode]);
 
   const clearFileDragState = React.useCallback(() => {
     workspaceDragDepthRef.current = 0;
@@ -251,10 +333,39 @@ export function TaskList() {
 
   const allSelected = tasksCount > 0 && selectedTaskIds.length === tasksCount;
   const selectedTaskIdSet = React.useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
+  const shouldRenderFullList = Boolean(activeDragId) || dragMode !== 'idle';
+  const virtualWindow = React.useMemo(() => {
+    if (shouldRenderFullList || taskIds.length === 0) {
+      return {
+        ids: taskIds,
+        topSpacer: 0,
+        bottomSpacer: 0,
+      };
+    }
+
+    const columnCount =
+      viewMode === 'grid'
+        ? Math.max(1, Math.floor((scrollMetrics.width + GRID_GAP) / (GRID_MIN_COLUMN_WIDTH + GRID_GAP)))
+        : 1;
+    const rowHeight = viewMode === 'grid' ? GRID_ITEM_HEIGHT : LIST_ITEM_HEIGHT;
+    const rowCount = Math.ceil(taskIds.length / columnCount);
+    const firstRow = Math.max(0, Math.floor(scrollMetrics.top / rowHeight) - WINDOW_OVERSCAN_ROWS);
+    const visibleRows = Math.ceil(scrollMetrics.height / rowHeight) + WINDOW_OVERSCAN_ROWS * 2;
+    const lastRow = Math.min(rowCount, firstRow + visibleRows);
+    const startIndex = firstRow * columnCount;
+    const endIndex = Math.min(taskIds.length, lastRow * columnCount);
+
+    return {
+      ids: taskIds.slice(startIndex, endIndex),
+      topSpacer: firstRow * rowHeight,
+      bottomSpacer: Math.max(0, (rowCount - lastRow) * rowHeight),
+    };
+  }, [dragMode, activeDragId, scrollMetrics.height, scrollMetrics.top, scrollMetrics.width, shouldRenderFullList, taskIds, viewMode]);
 
   return (
     <div
       ref={scrollContainerRef}
+      onScroll={handleScroll}
       onDragEnter={handleWorkspaceDragEnter}
       onDragOver={handleWorkspaceDragOver}
       onDragLeave={handleWorkspaceDragLeave}
@@ -353,7 +464,7 @@ export function TaskList() {
           onDragEnd={handleDragEnd}
         >
           <SortableContext
-            items={taskIds}
+            items={shouldRenderFullList ? taskIds : virtualWindow.ids}
             strategy={viewMode === 'grid' ? rectSortingStrategy : verticalListSortingStrategy}
           >
             <div
@@ -366,18 +477,37 @@ export function TaskList() {
                 gridAutoRows: 'max-content',
               }}
             >
-              {taskIds.map((id) => (
+              {virtualWindow.topSpacer > 0 ? (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    height: virtualWindow.topSpacer,
+                    gridColumn: '1 / -1',
+                  }}
+                />
+              ) : null}
+              {virtualWindow.ids.map((id) => (
                 <DeferredTaskCard
                   key={id}
                   taskId={id}
                   viewMode={viewMode}
                   scrollRoot={scrollContainerRef.current}
+                  forceRender={shouldRenderFullList}
                   isFileDropTarget={hoverTaskId === id}
                   onFileDragEnter={handleTaskFileDragEnter}
                   onFileDragLeave={handleTaskFileDragLeave}
                   onFileDrop={handleTaskFileDrop}
                 />
               ))}
+              {virtualWindow.bottomSpacer > 0 ? (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    height: virtualWindow.bottomSpacer,
+                    gridColumn: '1 / -1',
+                  }}
+                />
+              ) : null}
             </div>
           </SortableContext>
 
