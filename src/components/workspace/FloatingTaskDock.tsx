@@ -477,11 +477,9 @@ export function FloatingTaskDock() {
     const currentTasks = useAppStore.getState().tasks;
     const targetIds = selectedTaskIds.length > 0
       ? selectedTaskIds
-      : activeTask
-        ? [activeTask.id]
-        : [];
+      : currentTasks.map((task) => task.id);
     if (targetIds.length === 0) {
-      toast.info('请先选择任务');
+      toast.info('没有可恢复的任务');
       return;
     }
     const targetSet = new Set(targetIds);
@@ -500,29 +498,7 @@ export function FloatingTaskDock() {
       ),
     });
     toast.success(`已恢复 ${targetIds.length} 个任务的全局参数`);
-  }, [activeTask, selectedTaskIds, setProjectFields]);
-
-  const handleFillMissingDescriptions = React.useCallback(() => {
-    const currentTasks = useAppStore.getState().tasks;
-    let updatedCount = 0;
-    const nextTasks = currentTasks.map((task) => {
-      if (task.description.trim() || task.promptText?.trim()) return task;
-      updatedCount += 1;
-      const title = task.title.replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim() || `任务 ${task.index}`;
-      return {
-        ...task,
-        title,
-        description: `基于「${title}」生成高质量图片，保持主体清晰、画面完整、细节自然。`,
-        promptInputSignature: undefined,
-      };
-    });
-    if (updatedCount === 0) {
-      toast.info('没有需要补全的空任务');
-      return;
-    }
-    setProjectFields({ tasks: nextTasks });
-    toast.success(`已补全 ${updatedCount} 个任务描述`);
-  }, [setProjectFields]);
+  }, [selectedTaskIds, setProjectFields]);
 
   const handleRunActiveTask = React.useCallback(() => {
     if (!activeTask) {
@@ -1352,34 +1328,6 @@ export function FloatingTaskDock() {
                   </button>
                 ) : null}
                 {isGlobalMode ? (
-                  <Popover>
-                    <PopoverTrigger
-                      render={
-                        <Button type="button" variant="outline" size="sm" className={toolbarButtonClass}>
-                          命名
-                        </Button>
-                      }
-                    />
-                    <PopoverContent className="w-[320px] rounded-[20px] border-border/80 bg-card p-3 shadow-xl" align="start">
-                      <div className="text-[12px] font-medium text-foreground">下载命名模板</div>
-                      <input
-                        value={exportTemplate}
-                        onChange={(event) => setProjectFields({ exportTemplate: event.target.value })}
-                        className="mt-2 w-full rounded-xl border border-black/8 bg-[#F7F4EE] px-3 py-2 text-[12px] outline-none focus:border-button-main"
-                        placeholder="{task_id}_{title}_{batch}"
-                      />
-                      <div className="mt-2 text-[10.5px] leading-5 text-text-secondary">
-                        支持：{'{task_id}'} {'{title}'} {'{batch}'} {'{model}'} {'{size}'} {'{ratio}'} {'{time}'} {'{status}'}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                ) : null}
-                {isGlobalMode ? (
-                  <Button type="button" variant="outline" size="sm" className={toolbarButtonClass} onClick={handleFillMissingDescriptions}>
-                    补全描述
-                  </Button>
-                ) : null}
-                {!isGlobalMode ? (
                   <Button type="button" variant="outline" size="sm" className={toolbarButtonClass} onClick={handleRestoreGlobalParams}>
                     <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                     恢复全局

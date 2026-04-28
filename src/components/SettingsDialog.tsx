@@ -468,6 +468,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     apiKey: savedApiKey,
     cacheDirectoryName: savedCacheDirectoryName,
     downloadDirectoryName: savedDownloadDirectoryName,
+    exportTemplate: savedExportTemplate,
     imageApiBaseUrl: savedImageApiBaseUrl,
     imageApiKey: savedImageApiKey,
     imageApiPath: savedImageApiPath,
@@ -500,6 +501,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       apiKey: state.apiKey,
       cacheDirectoryName: state.cacheDirectoryName,
       downloadDirectoryName: state.downloadDirectoryName,
+      exportTemplate: state.exportTemplate,
       imageApiBaseUrl: state.imageApiBaseUrl,
       imageApiKey: state.imageApiKey,
       imageApiPath: state.imageApiPath,
@@ -553,6 +555,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [localTextToImageModel, setLocalTextToImageModel] = React.useState(savedTextToImageModel || savedImageModel || 'gemini-3.1-flash-image-preview');
   const [localImageToImageModel, setLocalImageToImageModel] = React.useState(savedImageToImageModel || savedImageModel || 'gemini-3.1-flash-image-preview');
   const [downloadDirectoryName, setDownloadDirectoryName] = React.useState(savedDownloadDirectoryName || '');
+  const [exportTemplate, setExportTemplate] = React.useState(savedExportTemplate || '{task_id}_{title}_{batch}');
   const [cacheDirectoryName, setCacheDirectoryName] = React.useState(savedCacheDirectoryName || '');
   const [allPlatformConfigs, setAllPlatformConfigs] = React.useState<PlatformApiConfigMap>(mergedPlatformConfigs);
   const [remoteTextModels, setRemoteTextModels] = React.useState<string[]>([]);
@@ -637,6 +640,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     applyPlatformConfigToForm(savedPlatformPreset || 'yunwu', nextConfigs);
     setMaxConcurrencyValue(String(savedMaxConcurrency));
     setDownloadDirectoryName(savedDownloadDirectoryName || '');
+    setExportTemplate(savedExportTemplate || '{task_id}_{title}_{batch}');
     setCacheDirectoryName(savedCacheDirectoryName || '');
     setRemoteTextModels([]);
     setRemoteImageModels([]);
@@ -648,6 +652,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     open,
     platformConfigs,
     savedDownloadDirectoryName,
+    savedExportTemplate,
     savedCacheDirectoryName,
     savedMaxConcurrency,
     savedPlatformPreset,
@@ -1116,6 +1121,7 @@ const handleExportCurrentConfig = async () => {
     setProjectFields({
       platformPreset,
       downloadDirectoryName,
+      exportTemplate: exportTemplate.trim() || '{task_id}_{title}_{batch}',
       cacheDirectoryName,
       textModel: localTextModel,
       imageModel: localImageModel,
@@ -1400,6 +1406,18 @@ const handleExportCurrentConfig = async () => {
               >
                 清除目录
               </Button>
+            </div>
+            <div className="mt-3 rounded-2xl border border-border/60 bg-white/70 px-4 py-3">
+              <label className="text-[12.6px] font-medium text-text-primary">命名规则</label>
+              <Input
+                value={exportTemplate}
+                onChange={(event) => setExportTemplate(event.target.value)}
+                placeholder="{task_id}_{title}_{batch}"
+                className="mt-2 h-10 rounded-xl border-border bg-[#F7F4EE] text-[12.6px] shadow-none"
+              />
+              <p className="mt-2 text-[11.55px] leading-5 text-text-secondary">
+                支持：{'{task_id}'} {'{title}'} {'{batch}'} {'{model}'} {'{size}'} {'{ratio}'} {'{time}'} {'{status}'}
+              </p>
             </div>
             {!supportsDirectoryDownload() ? (
               <p className="text-[11.55px] text-text-secondary">
