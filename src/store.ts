@@ -150,30 +150,24 @@ const idbStorage: PersistStorage<Partial<AppState>, Promise<void>> = {
   setItem: async (name: string, value: StorageValue<Partial<AppState>>): Promise<void> => {
     pendingPersistValue = value;
     if (persistTimeout) clearTimeout(persistTimeout);
-    return new Promise((resolve) => {
-      pendingPersistResolvers.push(resolve);
-      persistTimeout = setTimeout(async () => {
-        const valueToPersist = pendingPersistValue;
-        pendingPersistValue = null;
-        persistTimeout = undefined;
+    const valueToPersist = pendingPersistValue;
+    pendingPersistValue = null;
+    persistTimeout = undefined;
 
-        if (valueToPersist) {
-          try {
-            const serialized = JSON.stringify(valueToPersist);
-            const compacted = compactPersistedStateValue(serialized);
-            if (compacted.compacted) {
-              queuePersistNotice();
-            }
-            await set(name, compacted.value);
-          } catch {
-            // Ignore storage failures in non-browser or restricted environments.
-          }
+    if (valueToPersist) {
+      try {
+        const serialized = JSON.stringify(valueToPersist);
+        const compacted = compactPersistedStateValue(serialized);
+        if (compacted.compacted) {
+          queuePersistNotice();
         }
+        await set(name, compacted.value);
+      } catch {
+        // Ignore storage failures in non-browser or restricted environments.
+      }
+    }
 
-        resolvePendingPersistWrites();
-      }, 1000);
-      (persistTimeout as { unref?: () => void }).unref?.();
-    });
+    resolvePendingPersistWrites();
   },
   removeItem: async (name: string): Promise<void> => {
     pendingPersistValue = null;

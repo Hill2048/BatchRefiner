@@ -22,6 +22,7 @@ test('compactPersistedStateValue strips task image payloads when snapshot is ove
   const raw = JSON.stringify({
     state: {
       projectName: 'oversized-project',
+      cacheDirectoryName: 'Cache Folder',
       globalReferenceImages: ['data:image/png;base64,global'],
       tasks: [
         {
@@ -30,6 +31,7 @@ test('compactPersistedStateValue strips task image payloads when snapshot is ove
           title: 'Heavy task',
           description: 'keep this text',
           sourceImage: `data:image/png;base64,${'a'.repeat(512)}`,
+          sourceImageAssetId: 'source-asset-1',
           referenceImages: [`data:image/png;base64,${'b'.repeat(256)}`],
           resultImage: `data:image/png;base64,${'c'.repeat(128)}`,
           resultImagePreview: `data:image/png;base64,${'d'.repeat(128)}`,
@@ -54,9 +56,11 @@ test('compactPersistedStateValue strips task image payloads when snapshot is ove
   const parsed = JSON.parse(result.value) as {
     state: {
       globalReferenceImages: string[];
+      cacheDirectoryName?: string;
       tasks: Array<{
         description: string;
         sourceImage?: string;
+        sourceImageAssetId?: string;
         referenceImages: string[];
         resultImage?: string;
         resultImages?: Array<{ id: string; src: string; assetId?: string }>;
@@ -67,9 +71,11 @@ test('compactPersistedStateValue strips task image payloads when snapshot is ove
   assert.equal(result.compacted, true);
   assert.equal(parsed.state.tasks[0].description, 'keep this text');
   assert.equal(parsed.state.tasks[0].sourceImage, undefined);
+  assert.equal(parsed.state.tasks[0].sourceImageAssetId, 'source-asset-1');
   assert.deepEqual(parsed.state.tasks[0].referenceImages, []);
   assert.equal(parsed.state.tasks[0].resultImage, undefined);
   assert.equal(parsed.state.tasks[0].resultImages?.[0].id, 'result-1');
   assert.equal(parsed.state.tasks[0].resultImages?.[0].src, '');
+  assert.equal(parsed.state.cacheDirectoryName, 'Cache Folder');
   assert.deepEqual(parsed.state.globalReferenceImages, []);
 });

@@ -47,6 +47,7 @@ export function Lightbox() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [resolvedAssetSrc, setResolvedAssetSrc] = useState<string | null>(null);
+  const [resolvedSourceAssetSrc, setResolvedSourceAssetSrc] = useState<string | null>(null);
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -56,10 +57,11 @@ export function Lightbox() {
   const currentResultImage = resultImages[lightboxImageIndex] || resultImages[0];
   const currentResultImageSrc = getResultFullSrc(currentResultImage);
   const displayResultImageSrc = resolvedAssetSrc || currentResultImageSrc;
+  const displaySourceImageSrc = task?.sourceImage || resolvedSourceAssetSrc || '';
   const hasResultGallery = resultImages.length > 1;
-  const hasCompareSource = Boolean(task?.sourceImage && displayResultImageSrc);
+  const hasCompareSource = Boolean(displaySourceImageSrc && displayResultImageSrc);
   const hasCompareView = hasCompareSource && compareEnabled;
-  const displayImage = displayResultImageSrc || task?.sourceImage;
+  const displayImage = displayResultImageSrc || displaySourceImageSrc;
   const canGoPrevImage = hasResultGallery ? lightboxImageIndex > 0 : taskIndex > 0;
   const canGoNextImage = hasResultGallery
     ? lightboxImageIndex < resultImages.length - 1
@@ -89,6 +91,25 @@ export function Lightbox() {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [currentResultImage?.assetId, currentResultImage?.id]);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    setResolvedSourceAssetSrc(null);
+    if (!task || task.sourceImage || !task.sourceImageAssetId) return undefined;
+
+    getStoredImageAsset(task.sourceImageAssetId).then((asset) => {
+      if (cancelled || !asset?.blob) return;
+      objectUrl = URL.createObjectURL(asset.blob);
+      setResolvedSourceAssetSrc(objectUrl);
+    });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [task?.id, task?.sourceImage, task?.sourceImageAssetId]);
 
   useEffect(() => {
     setCompareEnabled(false);
@@ -340,7 +361,7 @@ export function Lightbox() {
                       style={{ clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)` }}
                     >
                       <img
-                        src={task.sourceImage}
+                        src={displaySourceImageSrc}
                         className="absolute inset-0 h-full w-full select-none object-contain"
                         alt="原图"
                         draggable={false}

@@ -6,6 +6,7 @@ import { PlatformApiConfigMap, PlatformPreset } from '@/types';
 import { clearDownloadDirectory, pickDownloadDirectory, supportsDirectoryDownload } from '@/lib/downloadDirectory';
 import {
   clearCacheDirectoryHandle,
+  getCacheDirectoryHandle,
   pickCacheDirectory,
   supportsCacheDirectory,
 } from '@/lib/cacheDirectory';
@@ -567,6 +568,21 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     savedMaxConcurrency,
     savedPlatformPreset,
   ]);
+
+  React.useEffect(() => {
+    if (!open || cacheDirectoryName) return;
+
+    let cancelled = false;
+    getCacheDirectoryHandle().then((handle) => {
+      if (cancelled || !handle?.name) return;
+      setCacheDirectoryName(handle.name);
+      setProjectFields({ cacheDirectoryName: handle.name });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheDirectoryName, open, setProjectFields]);
 
   const textModelOptions = uniqSorted([...BUILT_IN_TEXT_MODELS, ...remoteTextModels]);
   const imageModelOptions = uniqSorted([...BUILT_IN_IMAGE_MODELS, ...remoteImageModels]);

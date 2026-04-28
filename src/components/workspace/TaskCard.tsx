@@ -235,12 +235,14 @@ export const TaskCard = React.memo(function TaskCard({
   const primaryResult = derivedResults.primaryTaskResult;
   const resultProgress = derivedResults.progress;
   const shouldReduceMotionEffects = isBatchRunning || tasksCount >= 12;
+  const [sourceAssetSrc, setSourceAssetSrc] = React.useState<string | null>(null);
+  const displaySourceImage = task.sourceImage || sourceAssetSrc || '';
   const thumbnailItems = React.useMemo<ThumbnailViewerItem[]>(() => {
     if (!isActive) return EMPTY_THUMBNAIL_ITEMS;
 
     const items: ThumbnailViewerItem[] = [];
-    if (task.sourceImage) {
-      items.push({ id: 'source', src: task.sourceImage, type: 'source' });
+    if (displaySourceImage) {
+      items.push({ id: 'source', src: displaySourceImage, type: 'source' });
     }
     resultImages.forEach((result, index) => {
       items.push({
@@ -251,7 +253,7 @@ export const TaskCard = React.memo(function TaskCard({
       });
     });
     return items;
-  }, [isActive, resultImages, task.sourceImage]);
+  }, [displaySourceImage, isActive, resultImages]);
   const primaryResultDimensions = React.useMemo(
     () => (primaryResult ? getResultImageAssetDimensions(primaryResult) : null),
     [primaryResult],
@@ -267,7 +269,7 @@ export const TaskCard = React.memo(function TaskCard({
 
     if (resultImages.length === 0) {
       setSelectedResultIndex(0);
-      if (!task.sourceImage) {
+      if (!displaySourceImage) {
         setViewerMode('result');
       } else if (!isRenderingVisual && viewerMode !== 'source') {
         setViewerMode('source');
@@ -282,14 +284,14 @@ export const TaskCard = React.memo(function TaskCard({
     } else if (selectedResultIndex > resultImages.length - 1) {
       setSelectedResultIndex(0);
     }
-    if (!task.sourceImage && viewerMode === 'source') {
+    if (!displaySourceImage && viewerMode === 'source') {
       setViewerMode('result');
       return;
     }
     if (!isRenderingVisual && viewerMode !== 'source') {
       setViewerMode('result');
     }
-  }, [resultImages.length, selectedResultIndex, viewerMode, task.sourceImage, isRenderingVisual, task.activeResultSessionId]);
+  }, [displaySourceImage, resultImages.length, selectedResultIndex, viewerMode, isRenderingVisual, task.activeResultSessionId]);
 
   React.useEffect(() => {
     if (!isActive || resultImages.length === 0) return;
@@ -299,7 +301,7 @@ export const TaskCard = React.memo(function TaskCard({
   }, [isActive, resultImages]);
 
   const activeResult = resultImages[selectedResultIndex] || primaryResult;
-  const coverImageSrc = getResultPreviewSrc(primaryResult) || task.sourceImage;
+  const coverImageSrc = getResultPreviewSrc(primaryResult) || displaySourceImage;
   const showProgressBadge = resultProgress.requested > 1 && resultImages.length > 0;
   const totalResultDuration = formatGenerationTime(getTotalGenerationTime(resultImages));
 
@@ -326,6 +328,25 @@ export const TaskCard = React.memo(function TaskCard({
     result?: TaskResultImage;
   } | null>(null);
   const [previewAssetSrc, setPreviewAssetSrc] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    setSourceAssetSrc(null);
+    if (task.sourceImage || !task.sourceImageAssetId) return undefined;
+
+    getStoredImageAsset(task.sourceImageAssetId).then((asset) => {
+      if (cancelled || !asset?.blob) return;
+      objectUrl = URL.createObjectURL(asset.blob);
+      setSourceAssetSrc(objectUrl);
+    });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [task.sourceImage, task.sourceImageAssetId]);
 
   React.useEffect(() => {
     const handleScroll = (e: CustomEvent) => {
@@ -640,7 +661,7 @@ export const TaskCard = React.memo(function TaskCard({
   const renderUnifiedViewer = () => {
     const mainImageSrc =
       viewerMode === 'source'
-        ? task.sourceImage
+        ? displaySourceImage
         : getResultPreviewSrc(resultImages[selectedResultIndex]) || getResultPreviewSrc(primaryResult);
     const activeAssetDimensions = activeResult ? getResultImageAssetDimensions(activeResult) : null;
     const showResultSize = viewerMode === 'result' && Boolean(activeAssetDimensions);
@@ -689,10 +710,10 @@ export const TaskCard = React.memo(function TaskCard({
                 title="双击查看大图"
               />
             </div>
-          ) : shouldAnimateViewerImage && task.sourceImage ? (
+          ) : shouldAnimateViewerImage && displaySourceImage ? (
             <div className="relative z-0 flex h-full w-full items-center justify-center">
               <img
-                src={task.sourceImage}
+                src={displaySourceImage}
                 alt={task.title}
                 decoding="async"
                 className="block h-full w-full scale-[1.03] object-cover blur-[12px] saturate-[0.9] opacity-92"

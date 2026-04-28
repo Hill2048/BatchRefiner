@@ -29,7 +29,7 @@ import { GenerateParamsSelector } from "../GenerateParamsSelector";
 import { MarkdownEditorDialog } from "../MarkdownEditorDialog";
 import { AspectRatio, Resolution, Task, TaskResultImage } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { optimizeDataUrlForUpload, optimizeImageToDataUrl, readImageFileToDataUrl } from "@/lib/taskFileImport";
+import { buildReferenceImagesFromFiles, optimizeImageToDataUrl } from "@/lib/taskFileImport";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
 import { getTaskResultImages } from "@/lib/taskResults";
 import { getTaskBatchFileName } from "@/lib/resultImageFileName";
@@ -76,6 +76,11 @@ function getExportableTaskImages(task: Task) {
   return getTaskResultImages(task);
 }
 
+function hasImageFiles(dataTransfer?: DataTransfer | null) {
+  if (!dataTransfer) return false;
+  return Array.from(dataTransfer.items || []).some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+}
+
 function getGlobalParamsLabel(imageModel?: string) {
   const normalized = (imageModel || "").trim().toLowerCase();
   if (normalized.startsWith("gpt-image") || normalized === "image2") {
@@ -114,6 +119,7 @@ export function Sidebar({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [isGlobalReferenceDragging, setIsGlobalReferenceDragging] = useState(false);
 
   const [isSkillEditing, setIsSkillEditing] = useState(false);
   const [isMarkdownEditorOpen, setIsMarkdownEditorOpen] = useState(false);
@@ -152,6 +158,7 @@ export function Sidebar({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mdInputRef = useRef<HTMLInputElement>(null);
   const chatFileRef = useRef<HTMLInputElement>(null);
+  const globalReferenceDragDepthRef = useRef(0);
 
   const [localSkillText, setLocalSkillText] = useState(globalSkillText || '');
   const [localTargetText, setLocalTargetText] = useState(globalTargetText || '');
@@ -620,29 +627,68 @@ export function Sidebar({
     }
   };
 
-  const handleGlobalImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      void (async () => {
-        const rawDataUrl = await readImageFileToDataUrl(file);
-        const insertIndex = useAppStore.getState().globalReferenceImages.length;
-        setProjectFields({
-          globalReferenceImages: [
-            ...useAppStore.getState().globalReferenceImages,
-            rawDataUrl,
-          ],
-        });
-
-        void (async () => {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-          const optimizedImage = await optimizeDataUrlForUpload(rawDataUrl);
-          const latestImages = [...useAppStore.getState().globalReferenceImages];
-          if (!latestImages[insertIndex] || latestImages[insertIndex] === optimizedImage) return;
-          latestImages[insertIndex] = optimizedImage;
-          setProjectFields({ globalReferenceImages: latestImages });
-        })();
-      })();
+  const importGlobalReferenceFiles = async (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      toast.info('没有找到可导入的图片');
+      return;
     }
+
+    const importedImages = await buildReferenceImagesFromFiles(imageFiles);
+    if (importedImages.length === 0) {
+      toast.info('没有成功导入图片');
+      return;
+    }
+
+    setProjectFields({
+      globalReferenceImages: [
+        ...useAppStore.getState().globalReferenceImages,
+        ...importedImages,
+      ],
+    });
+    toast.success(`已导入 ${importedImages.length} 张全局参考图`);
+  };
+
+  const handleGlobalImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? (Array.from(e.target.files) as File[]) : [];
+    e.target.value = '';
+    if (files.length === 0) return;
+    void importGlobalReferenceFiles(files);
+  };
+
+  const handleGlobalReferenceDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    globalReferenceDragDepthRef.current += 1;
+    setIsGlobalReferenceDragging(true);
+  };
+
+  const handleGlobalReferenceDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleGlobalReferenceDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    globalReferenceDragDepthRef.current = Math.max(0, globalReferenceDragDepthRef.current - 1);
+    if (globalReferenceDragDepthRef.current === 0) {
+      setIsGlobalReferenceDragging(false);
+    }
+  };
+
+  const handleGlobalReferenceDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    globalReferenceDragDepthRef.current = 0;
+    setIsGlobalReferenceDragging(false);
+    const files = Array.from(e.dataTransfer.files) as File[];
+    void importGlobalReferenceFiles(files);
   };
 
   return (
@@ -842,7 +888,15 @@ export function Sidebar({
             />
           </div>
           
-          <div className="flex flex-col">
+          <div
+            className={`flex flex-col rounded-2xl transition-colors ${
+              isGlobalReferenceDragging ? 'bg-button-main/[0.05] ring-1 ring-button-main/35' : ''
+            }`}
+            onDragEnter={handleGlobalReferenceDragEnter}
+            onDragOver={handleGlobalReferenceDragOver}
+            onDragLeave={handleGlobalReferenceDragLeave}
+            onDrop={handleGlobalReferenceDrop}
+          >
             <h3 className="text-[12.6px] font-medium text-text-secondary mb-3">
               全局参考图
             </h3>
@@ -872,15 +926,22 @@ export function Sidebar({
                 </div>
               ))}
               <div
-                className="aspect-square flex items-center justify-center border border-dashed border-[#D4D2CD] rounded-xl text-text-secondary cursor-pointer hover:bg-black/5 bg-transparent transition-colors"
+                className={`aspect-square flex flex-col items-center justify-center gap-1 border border-dashed rounded-xl text-text-secondary cursor-pointer bg-transparent px-2 text-center transition-colors ${
+                  isGlobalReferenceDragging
+                    ? 'border-button-main bg-button-main/[0.08] text-button-main'
+                    : 'border-[#D4D2CD] hover:bg-black/5'
+                }`}
                 onClick={() => fileInputRef.current?.click()}
+                title="点击选择，或拖入多张图片"
               >
                 <Upload className="w-4 h-4 opacity-70" strokeWidth={1.5} />
+                <span className="text-[9.45px] leading-tight">拖入多张</span>
               </div>
               <input
                 type="file"
                 className="hidden"
                 accept="image/*"
+                multiple
                 ref={fileInputRef}
                 onChange={handleGlobalImageUpload}
               />
