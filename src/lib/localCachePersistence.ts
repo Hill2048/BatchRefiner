@@ -65,6 +65,7 @@ function buildLocalCacheProjectSnapshot(): ProjectData {
     globalResolution: state.globalResolution,
     globalImageQuality: state.globalImageQuality,
     globalBatchCount: state.globalBatchCount,
+    cardDensity: state.cardDensity,
     generationLogs: state.generationLogs.slice(-MAX_LOCAL_CACHE_GENERATION_LOGS),
     createdAt: state.createdAt,
     updatedAt: state.updatedAt,

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Check, Download, Folder, FolderOpen, LayoutGrid, List, Plus, Save, Trash2, Upload } from 'lucide-react';
+import { Activity, Check, Download, Folder, FolderOpen, GalleryVertical, LayoutGrid, List, Plus, Save, Sparkles, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { buildImportedTasksFromFiles } from '@/lib/taskFileImport';
 import { exportCurrentProjectFile, importProjectFile } from '@/lib/projectFileActions';
@@ -26,13 +26,16 @@ type ImageImportProgress = {
 };
 
 export function Topbar({ isCompactLayout = false }: TopbarProps) {
-  const { importTasks, projectId, projectName, setProjectFields, viewMode } = useAppStore(
+  const { importTasks, projectId, projectName, setProjectFields, viewMode, cardDensity, tasks, generationLogs } = useAppStore(
     useShallow((state) => ({
       importTasks: state.importTasks,
       projectId: state.projectId,
       projectName: state.projectName,
       setProjectFields: state.setProjectFields,
       viewMode: state.viewMode,
+      cardDensity: state.cardDensity,
+      tasks: state.tasks,
+      generationLogs: state.generationLogs,
     })),
   );
 
@@ -166,6 +169,16 @@ export function Topbar({ isCompactLayout = false }: TopbarProps) {
   const importButtonLabel = imageImportProgress
     ? `${imageImportProgress.done}/${imageImportProgress.total}`
     : '导入图片';
+  const resultImageCount = React.useMemo(
+    () => tasks.reduce((count, task) => count + (task.resultImages?.length || 0), 0),
+    [tasks],
+  );
+  const healthLevel = tasks.length > 80 || resultImageCount > 240 || generationLogs.length > 400
+    ? 'heavy'
+    : tasks.length > 30 || resultImageCount > 80 || generationLogs.length > 160
+      ? 'medium'
+      : 'ok';
+  const healthLabel = healthLevel === 'heavy' ? '偏重' : healthLevel === 'medium' ? '偏大' : '正常';
 
   return (
     <header
@@ -348,7 +361,72 @@ export function Topbar({ isCompactLayout = false }: TopbarProps) {
             <List className="h-3.5 w-3.5" strokeWidth={1.8} />
             {!isCompactLayout && <span>列表</span>}
           </button>
+          <button
+            type="button"
+            onClick={() => setProjectFields({ viewMode: 'results' })}
+            className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-all duration-300 ${
+              viewMode === 'results'
+                ? 'bg-white text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                : 'text-text-secondary hover:bg-white/55 hover:text-foreground'
+            }`}
+            title="结果瀑布流"
+          >
+            <GalleryVertical className="h-3.5 w-3.5" strokeWidth={1.8} />
+            {!isCompactLayout && <span>结果</span>}
+          </button>
         </div>
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button variant="ghost" size="sm" className="h-9 rounded-full px-3 text-[12px] text-text-secondary hover:bg-black/5">
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                {!isCompactLayout && <span>{cardDensity === 'comfortable' ? '舒适' : cardDensity === 'compact' ? '紧凑' : '极简'}</span>}
+              </Button>
+            }
+          />
+          <PopoverContent className="w-[180px] rounded-2xl border-border bg-card p-2 shadow-lg" align="end">
+            {([
+              ['comfortable', '舒适', '信息完整'],
+              ['compact', '紧凑', '更多卡片'],
+              ['minimal', '极简', '快速浏览'],
+            ] as const).map(([value, label, desc]) => (
+              <button
+                key={value}
+                type="button"
+                className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[12px] transition-colors hover:bg-black/5 ${cardDensity === value ? 'text-button-main' : 'text-text-primary'}`}
+                onClick={() => setProjectFields({ cardDensity: value })}
+              >
+                <span>{label}</span>
+                <span className="text-[10px] text-text-secondary">{desc}</span>
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button variant="ghost" size="sm" className="h-9 rounded-full px-3 text-[12px] text-text-secondary hover:bg-black/5">
+                <Activity className="mr-1.5 h-3.5 w-3.5" />
+                {!isCompactLayout && <span>{healthLabel}</span>}
+              </Button>
+            }
+          />
+          <PopoverContent className="w-[240px] rounded-2xl border-border bg-card p-3 shadow-lg" align="end">
+            <div className="text-[12px] font-medium text-foreground">项目健康</div>
+            <div className="mt-2 grid gap-1.5 text-[11px] text-text-secondary">
+              <span>任务：{tasks.length} 个</span>
+              <span>结果图：{resultImageCount} 张</span>
+              <span>日志：{generationLogs.length} 条</span>
+            </div>
+            <div className="mt-3 rounded-xl bg-[#F7F4EE] px-3 py-2 text-[11px] leading-5 text-text-secondary">
+              {healthLevel === 'ok'
+                ? '当前项目负载正常。'
+                : healthLevel === 'medium'
+                  ? '项目开始偏大，建议使用结果视图挑图并定期导出。'
+                  : '项目较重，建议导出结果后清理失败日志或拆分项目。'}
+            </div>
+          </PopoverContent>
+        </Popover>
         {installPromptEvent && (
           <Button
             variant="outline"

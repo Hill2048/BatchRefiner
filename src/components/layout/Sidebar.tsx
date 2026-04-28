@@ -32,7 +32,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { buildReferenceImagesFromFiles, optimizeImageToDataUrl } from "@/lib/taskFileImport";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
 import { getTaskResultImages } from "@/lib/taskResults";
-import { getTaskBatchFileName } from "@/lib/resultImageFileName";
+import { buildResultImageFileName } from "@/lib/resultImageFileName";
 import { getResultImageAssetExtension } from "@/lib/resultImageAsset";
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from "@/lib/resultImageDownload";
 import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from "@/lib/appLogger";
@@ -438,8 +438,15 @@ export function Sidebar({
     const finalTasksToExport = tasksToExport.length > 0 ? tasksToExport : matchingTasks;
     const isReExport = tasksToExport.length === 0;
 
-    const getFilename = (task: (typeof tasksToExport)[number], imageIndex: number, extension: string) => {
-      return getTaskBatchFileName(task.index, imageIndex, extension);
+    const getFilename = (task: (typeof tasksToExport)[number], imageIndex: number, extension: string, result: TaskResultImage) => {
+      return buildResultImageFileName({
+        task,
+        imageIndex,
+        extension,
+        result,
+        template: exportTemplate,
+        model: task.imageModelOverride || imageModel,
+      });
     };
 
     const exportJobs = finalTasksToExport.flatMap((task) =>
@@ -447,7 +454,7 @@ export function Sidebar({
         task,
         result,
         imageIndex,
-        filename: getFilename(task, imageIndex, getResultImageAssetExtension(result)),
+        filename: getFilename(task, imageIndex, getResultImageAssetExtension(result), result),
       }))
     );
     const exportConcurrency = pLimit(4);

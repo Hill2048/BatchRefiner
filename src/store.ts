@@ -7,6 +7,8 @@ import {
   PlatformApiConfigMap,
   ProjectData,
   Task,
+  CardDensity,
+  WorkspaceViewMode,
 } from './types';
 import { extractProjectDataFromImport, mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from './lib/projectSnapshot';
 import { compactPersistedStateValue, OVERSIZED_PERSISTENCE_NOTICE } from './lib/persistedStateBudget';
@@ -85,7 +87,8 @@ interface AppState extends ProjectData {
   completedTaskCount: number;
   activeTaskId: string | null;
   isBatchRunning: boolean;
-  viewMode: 'grid' | 'list';
+  viewMode: WorkspaceViewMode;
+  cardDensity: CardDensity;
   lightboxTaskId: string | null;
   lightboxImageIndex: number;
   maxConcurrency: number;
@@ -116,7 +119,7 @@ interface AppState extends ProjectData {
   setBatchRunning: (isRunning: boolean) => void;
   importTasks: (tasks: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'status'>[]) => void;
   clearProject: () => void;
-  setViewMode: (mode: 'grid' | 'list') => void;
+  setViewMode: (mode: WorkspaceViewMode) => void;
   setLightboxTask: (id: string | null, imageIndex?: number) => void;
   setExportTemplate: (template: string) => void;
   setMaxConcurrency: (limit: number) => void;
@@ -232,6 +235,7 @@ export const useAppStore = create<AppState>()(
       activeTaskId: null,
       isBatchRunning: false,
       viewMode: 'grid',
+      cardDensity: 'comfortable',
       lightboxTaskId: null,
       lightboxImageIndex: 0,
       maxConcurrency: 3,
@@ -467,6 +471,7 @@ export const useAppStore = create<AppState>()(
         globalBatchCount: state.globalBatchCount,
         tasks: state.tasks,
         viewMode: state.viewMode,
+        cardDensity: state.cardDensity,
         maxConcurrency: state.maxConcurrency,
         exportTemplate: state.exportTemplate,
         selectedTaskIds: state.selectedTaskIds,

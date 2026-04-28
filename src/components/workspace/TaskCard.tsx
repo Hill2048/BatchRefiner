@@ -13,7 +13,7 @@ import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { GenerateParamsSelector } from '../GenerateParamsSelector';
 import { useAutoSaveTextEditor } from './useAutoSaveTextEditor';
-import { getTaskBatchFileName } from '@/lib/resultImageFileName';
+import { buildResultImageFileName } from '@/lib/resultImageFileName';
 import {
   getResultImageAssetDimensions,
   getResultImageAssetExtension,
@@ -167,6 +167,7 @@ export const TaskCard = React.memo(function TaskCard({
   const removeTask = useAppStore(state => state.removeTask);
   const setLightboxTask = useAppStore(state => state.setLightboxTask);
   const viewMode = useAppStore(state => state.viewMode);
+  const cardDensity = useAppStore(state => state.cardDensity);
   const isSelected = useAppStore(state => Boolean(state.selectedTaskIdLookup[taskId]));
   const toggleTaskSelection = useAppStore(state => state.toggleTaskSelection);
   const globalReferenceImages = useAppStore(state => state.globalReferenceImages);
@@ -174,6 +175,7 @@ export const TaskCard = React.memo(function TaskCard({
   const globalResolution = useAppStore(state => state.globalResolution);
   const globalImageQuality = useAppStore(state => state.globalImageQuality);
   const globalBatchCount = useAppStore(state => state.globalBatchCount);
+  const exportTemplate = useAppStore(state => state.exportTemplate);
   const enablePromptOptimization = useAppStore(state => state.enablePromptOptimization !== false);
   const imageModel = useAppStore(state => state.imageModel);
   const isBatchRunning = useAppStore((state) => state.isBatchRunning);
@@ -184,6 +186,8 @@ export const TaskCard = React.memo(function TaskCard({
   const effectiveBatchCount = getEffectiveBatchCount(task, globalBatchCount);
   const isRenderingVisual = task.status === 'Rendering';
   const isListMode = viewMode === 'list';
+  const isMinimalDensity = cardDensity === 'minimal';
+  const isCompactDensity = cardDensity === 'compact' || isMinimalDensity;
   const [selectedResultIndex, setSelectedResultIndex] = React.useState(0);
   const [viewerMode, setViewerMode] = React.useState<ViewerMode>('result');
   const descriptionEditor = useAutoSaveTextEditor({
@@ -612,7 +616,7 @@ export const TaskCard = React.memo(function TaskCard({
   const collapsedPreviewText = enablePromptOptimization
     ? (task.description || '').trim()
     : ((task.promptText || task.description || '').trim());
-  const collapsedPreviewLineClamp = enablePromptOptimization ? 'line-clamp-2' : 'line-clamp-3';
+  const collapsedPreviewLineClamp = isMinimalDensity ? 'line-clamp-1' : enablePromptOptimization ? 'line-clamp-2' : 'line-clamp-3';
   const shouldFadeCollapsedPreview = shouldShowCollapsedFade(collapsedPreviewText, enablePromptOptimization ? 2 : 3);
   const collapsedLineClassMap: Record<number, string> = {
     2: 'line-clamp-2',
@@ -845,7 +849,14 @@ export const TaskCard = React.memo(function TaskCard({
                   className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-text-secondary shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
                   onClick={(e) => {
                     e.stopPropagation();
-                    downloadResultImage(activeResult, getTaskBatchFileName(task.index, selectedResultIndex, getResultImageAssetExtension(activeResult)));
+                    downloadResultImage(activeResult, buildResultImageFileName({
+                      task,
+                      imageIndex: selectedResultIndex,
+                      extension: getResultImageAssetExtension(activeResult),
+                      result: activeResult,
+                      template: exportTemplate,
+                      model: task.imageModelOverride || imageModel,
+                    }));
                   }}
                   title="下载结果图"
                 >
@@ -896,7 +907,7 @@ export const TaskCard = React.memo(function TaskCard({
       }}
       style={style}
       className={`p-0 gap-0 bg-white flex overflow-hidden cursor-pointer transition-all duration-300 ease-out relative group
-      ${isListMode ? 'flex-col sm:flex-row sm:items-center min-h-[140px]' : 'flex-col'}
+      ${isListMode ? `flex-col sm:flex-row sm:items-center ${isCompactDensity ? 'min-h-[118px]' : 'min-h-[140px]'}` : 'flex-col'}
       ${isActive ? (isListMode ? 'border border-black/8 shadow-[0_8px_30px_rgb(0,0,0,0.08)] rounded-2xl h-auto items-stretch' : 'md:col-span-2 md:row-span-2 shadow-[0_12px_40px_-5px_rgba(0,0,0,0.12)] scale-[1.01] rounded-[24px] z-40 border border-black/8') : 'border border-black/8 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-black/14 rounded-2xl hover:-translate-y-0.5'}
       ${isSelected ? 'ring-2 ring-button-main ring-offset-2' : ''}
       ${isFileDropTarget ? 'ring-2 ring-button-main/70 ring-offset-2 shadow-[0_12px_40px_-5px_rgba(223,122,87,0.22)]' : ''}`}
@@ -950,7 +961,7 @@ export const TaskCard = React.memo(function TaskCard({
         <div
           className={`bg-[#FBFAF7] flex items-center justify-center relative isolate overflow-hidden min-h-0 shrink-0
           ${isListMode ? 'border-b sm:border-b-0 sm:border-r border-border/40' : 'border-b border-border/40'}
-          ${isListMode ? 'w-full h-[180px] sm:w-[180px] sm:h-full' : 'flex-1 w-full aspect-[4/3] rounded-t-2xl'}`}
+          ${isListMode ? `${isCompactDensity ? 'w-full h-[132px] sm:w-[144px]' : 'w-full h-[180px] sm:w-[180px]'} sm:h-full` : `flex-1 w-full ${isMinimalDensity ? 'aspect-[5/3]' : isCompactDensity ? 'aspect-[16/10]' : 'aspect-[4/3]'} rounded-t-2xl`}`}
           style={{ contain: 'paint' }}
         >
           {isRenderingVisual && !primaryResult?.src && (
@@ -1008,7 +1019,7 @@ export const TaskCard = React.memo(function TaskCard({
         </div>
       ) : null}
 
-      <div className={`${isActive ? 'px-0 pt-0 pb-3' : 'p-3'} shrink-0 bg-white flex flex-col flex-1 ${showCollapsedHeaderMedia ? 'border-t border-transparent' : ''} relative z-10 w-full`}>
+      <div className={`${isActive ? 'px-0 pt-0 pb-3' : isCompactDensity ? 'p-2.5' : 'p-3'} shrink-0 bg-white flex flex-col flex-1 ${showCollapsedHeaderMedia ? 'border-t border-transparent' : ''} relative z-10 w-full`}>
         {!isActive ? renderInfoHeader(true) : null}
 
         {!isActive ? (
@@ -1025,7 +1036,7 @@ export const TaskCard = React.memo(function TaskCard({
                 </div>
               ) : null}
             </div>
-            {collapsedPreviewText ? (
+            {collapsedPreviewText && !isMinimalDensity ? (
               <div className="relative overflow-hidden rounded-[12px] bg-transparent pr-1">
                 <div className={`text-[11.55px] leading-[1.65] text-black/58 ${collapsedPreviewLineClamp}`}>
                   {collapsedPreviewText}

@@ -9,6 +9,7 @@ import {
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Settings,
   X,
 } from 'lucide-react';
@@ -26,7 +27,7 @@ import { Textarea } from '../ui/textarea';
 import { buildReferenceImagesFromFiles } from '@/lib/taskFileImport';
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from '@/lib/downloadDirectory';
 import { getTaskResultImages } from '@/lib/taskResults';
-import { getTaskBatchFileName } from '@/lib/resultImageFileName';
+import { buildResultImageFileName } from '@/lib/resultImageFileName';
 import { getResultImageAssetExtension } from '@/lib/resultImageAsset';
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from '@/lib/resultImageDownload';
 import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from '@/lib/appLogger';
@@ -380,6 +381,7 @@ export function FloatingTaskDock() {
     globalImageQuality,
     globalBatchCount,
     imageModel,
+    exportTemplate,
     enablePromptOptimization,
     projectName,
     updateTask,
@@ -403,6 +405,7 @@ export function FloatingTaskDock() {
       globalImageQuality: state.globalImageQuality,
       globalBatchCount: state.globalBatchCount,
       imageModel: state.imageModel,
+      exportTemplate: state.exportTemplate,
       enablePromptOptimization: state.enablePromptOptimization !== false,
       projectName: state.projectName,
       updateTask: state.updateTask,
@@ -457,6 +460,69 @@ export function FloatingTaskDock() {
     }
     processBatch(batchMode);
   }, [isBatchRunning]);
+
+  const handleRetryFailedTasks = React.useCallback(() => {
+    const failedTaskIds = useAppStore.getState().tasks
+      .filter((task) => task.status === 'Error' || (task.failedResultCount || 0) > 0)
+      .map((task) => task.id);
+    if (failedTaskIds.length === 0) {
+      toast.info('没有需要重试的失败任务');
+      return;
+    }
+    setProjectFields({ selectedTaskIds: failedTaskIds });
+    processBatch('all');
+  }, [setProjectFields]);
+
+  const handleRestoreGlobalParams = React.useCallback(() => {
+    const currentTasks = useAppStore.getState().tasks;
+    const targetIds = selectedTaskIds.length > 0
+      ? selectedTaskIds
+      : activeTask
+        ? [activeTask.id]
+        : [];
+    if (targetIds.length === 0) {
+      toast.info('请先选择任务');
+      return;
+    }
+    const targetSet = new Set(targetIds);
+    setProjectFields({
+      tasks: currentTasks.map((task) =>
+        targetSet.has(task.id)
+          ? {
+              ...task,
+              imageModelOverride: undefined,
+              aspectRatio: undefined,
+              resolution: undefined,
+              imageQuality: undefined,
+              batchCount: undefined,
+            }
+          : task,
+      ),
+    });
+    toast.success(`已恢复 ${targetIds.length} 个任务的全局参数`);
+  }, [activeTask, selectedTaskIds, setProjectFields]);
+
+  const handleFillMissingDescriptions = React.useCallback(() => {
+    const currentTasks = useAppStore.getState().tasks;
+    let updatedCount = 0;
+    const nextTasks = currentTasks.map((task) => {
+      if (task.description.trim() || task.promptText?.trim()) return task;
+      updatedCount += 1;
+      const title = task.title.replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim() || `任务 ${task.index}`;
+      return {
+        ...task,
+        title,
+        description: `基于「${title}」生成高质量图片，保持主体清晰、画面完整、细节自然。`,
+        promptInputSignature: undefined,
+      };
+    });
+    if (updatedCount === 0) {
+      toast.info('没有需要补全的空任务');
+      return;
+    }
+    setProjectFields({ tasks: nextTasks });
+    toast.success(`已补全 ${updatedCount} 个任务描述`);
+  }, [setProjectFields]);
 
   const handleRunActiveTask = React.useCallback(() => {
     if (!activeTask) {
@@ -692,8 +758,15 @@ export function FloatingTaskDock() {
     const finalTasksToExport = tasksToExport.length > 0 ? tasksToExport : matchingTasks;
     const isReExport = tasksToExport.length === 0;
 
-    const getFilename = (task: Task, imageIndex: number, extension: string) => {
-      return getTaskBatchFileName(task.index, imageIndex, extension);
+    const getFilename = (task: Task, imageIndex: number, extension: string, result: TaskResultImage) => {
+      return buildResultImageFileName({
+        task,
+        imageIndex,
+        extension,
+        result,
+        template: exportTemplate,
+        model: task.imageModelOverride || imageModel,
+      });
     };
 
     const exportJobs = finalTasksToExport.flatMap((task) =>
@@ -701,7 +774,7 @@ export function FloatingTaskDock() {
         task,
         result,
         imageIndex,
-        filename: getFilename(task, imageIndex, getResultImageAssetExtension(result)),
+        filename: getFilename(task, imageIndex, getResultImageAssetExtension(result), result),
       })),
     );
 
@@ -896,7 +969,7 @@ export function FloatingTaskDock() {
     } else {
       toast.success(zipMessage, { id: progressToastId });
     }
-  }, [projectName, selectedTaskIds, updateTask]);
+  }, [exportTemplate, imageModel, projectName, selectedTaskIds, updateTask]);
 
   React.useEffect(() => {
     const openHistory = () => setIsHistoryOpen(true);
@@ -1278,6 +1351,40 @@ export function FloatingTaskDock() {
                     <span className={`h-2.5 w-2.5 rounded-full ${enablePromptOptimization ? 'bg-button-main' : 'bg-black/20'}`} />
                   </button>
                 ) : null}
+                {isGlobalMode ? (
+                  <Popover>
+                    <PopoverTrigger
+                      render={
+                        <Button type="button" variant="outline" size="sm" className={toolbarButtonClass}>
+                          命名
+                        </Button>
+                      }
+                    />
+                    <PopoverContent className="w-[320px] rounded-[20px] border-border/80 bg-card p-3 shadow-xl" align="start">
+                      <div className="text-[12px] font-medium text-foreground">下载命名模板</div>
+                      <input
+                        value={exportTemplate}
+                        onChange={(event) => setProjectFields({ exportTemplate: event.target.value })}
+                        className="mt-2 w-full rounded-xl border border-black/8 bg-[#F7F4EE] px-3 py-2 text-[12px] outline-none focus:border-button-main"
+                        placeholder="{task_id}_{title}_{batch}"
+                      />
+                      <div className="mt-2 text-[10.5px] leading-5 text-text-secondary">
+                        支持：{'{task_id}'} {'{title}'} {'{batch}'} {'{model}'} {'{size}'} {'{ratio}'} {'{time}'} {'{status}'}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                ) : null}
+                {isGlobalMode ? (
+                  <Button type="button" variant="outline" size="sm" className={toolbarButtonClass} onClick={handleFillMissingDescriptions}>
+                    补全描述
+                  </Button>
+                ) : null}
+                {!isGlobalMode ? (
+                  <Button type="button" variant="outline" size="sm" className={toolbarButtonClass} onClick={handleRestoreGlobalParams}>
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                    恢复全局
+                  </Button>
+                ) : null}
                 {!isGlobalMode && activeTask && enablePromptOptimization ? (
                   <Button
                     type="button"
@@ -1325,6 +1432,10 @@ export function FloatingTaskDock() {
                             <button type="button" className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[12px] text-text-primary hover:bg-black/5" onClick={() => handleRunBatch('images')}>
                               <ImageIcon className="h-3.5 w-3.5 opacity-70" />
                               仅执行生图
+                            </button>
+                            <button type="button" className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[12px] text-text-primary hover:bg-black/5" onClick={handleRetryFailedTasks}>
+                              <RotateCcw className="h-3.5 w-3.5 opacity-70" />
+                              重试失败任务
                             </button>
                           </div>
                         </PopoverContent>

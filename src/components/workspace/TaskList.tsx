@@ -1,8 +1,10 @@
 import * as React from 'react';
-import { Upload } from 'lucide-react';
+import { Image as ImageIcon, Plus, Upload } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { TaskCard } from './TaskCard';
 import { buildImportedTasksFromFiles, buildReferenceImagesFromFiles } from '@/lib/taskFileImport';
+import { getTaskResultImages } from '@/lib/taskResults';
+import { getResultImageAssetDimensions } from '@/lib/resultImageAsset';
 import {
   DndContext,
   closestCenter,
@@ -67,7 +69,7 @@ type MarqueeSelectionState = {
 
 type DeferredTaskCardProps = {
   taskId: string;
-  viewMode: 'grid' | 'list';
+  viewMode: 'grid' | 'list' | 'results';
   scrollRoot: HTMLDivElement | null;
   forceRender: boolean;
   isFileDropTarget: boolean;
@@ -160,7 +162,12 @@ export function TaskList() {
   const taskIds = useAppStore((state) => state.taskIds);
   const tasksCount = useAppStore((state) => state.tasksCount);
   const viewMode = useAppStore((state) => state.viewMode);
+  const cardDensity = useAppStore((state) => state.cardDensity);
+  const tasks = useAppStore((state) => state.tasks);
   const selectedTaskIds = useAppStore((state) => state.selectedTaskIds);
+  const activeTaskId = useAppStore((state) => state.activeTaskId);
+  const addTask = useAppStore((state) => state.addTask);
+  const updateTask = useAppStore((state) => state.updateTask);
   const importTasks = useAppStore((state) => state.importTasks);
   const setProjectFields = useAppStore((state) => state.setProjectFields);
   const selectAllTasks = useAppStore((state) => state.selectAllTasks);
@@ -546,7 +553,8 @@ export function TaskList() {
       viewMode === 'grid'
         ? Math.max(1, Math.floor((scrollMetrics.width + GRID_GAP) / (GRID_MIN_COLUMN_WIDTH + GRID_GAP)))
         : 1;
-    const rowHeight = viewMode === 'grid' ? GRID_ITEM_HEIGHT : LIST_ITEM_HEIGHT;
+    const densityScale = cardDensity === 'minimal' ? 0.72 : cardDensity === 'compact' ? 0.84 : 1;
+    const rowHeight = viewMode === 'grid' ? GRID_ITEM_HEIGHT * densityScale : LIST_ITEM_HEIGHT * densityScale;
     const rowCount = Math.ceil(taskIds.length / columnCount);
     const firstRow = Math.max(0, Math.floor(scrollMetrics.top / rowHeight) - WINDOW_OVERSCAN_ROWS);
     const visibleRows = Math.ceil(scrollMetrics.height / rowHeight) + WINDOW_OVERSCAN_ROWS * 2;
@@ -559,7 +567,39 @@ export function TaskList() {
       topSpacer: firstRow * rowHeight,
       bottomSpacer: Math.max(0, (rowCount - lastRow) * rowHeight),
     };
-  }, [scrollMetrics.height, scrollMetrics.top, scrollMetrics.width, taskIds, viewMode]);
+  }, [cardDensity, scrollMetrics.height, scrollMetrics.top, scrollMetrics.width, taskIds, viewMode]);
+
+  const resultItems = React.useMemo(() => tasks.flatMap((task) =>
+    getTaskResultImages(task).map((result, resultIndex) => ({ task, result, resultIndex })),
+  ), [tasks]);
+
+  const addResultAsNewTask = React.useCallback((src: string, title: string) => {
+    const nextIndex = useAppStore.getState().tasks.length + 1;
+    addTask({
+      index: nextIndex,
+      title: `${title} 复用`,
+      description: '',
+      sourceImage: src,
+      sourceImagePreview: src,
+      referenceImages: [],
+    });
+    const newestTask = useAppStore.getState().tasks.at(-1);
+    if (newestTask) {
+      setActiveTask(newestTask.id);
+      setProjectFields({ selectedTaskIds: [newestTask.id], viewMode: 'grid' });
+      window.dispatchEvent(new CustomEvent('scroll-to-task', { detail: { id: newestTask.id } }));
+    }
+  }, [addTask, setActiveTask, setProjectFields]);
+
+  const addResultToSelectedTasks = React.useCallback((src: string) => {
+    const targetIds = selectedTaskIds.length > 0 ? selectedTaskIds : activeTaskId ? [activeTaskId] : [];
+    if (targetIds.length === 0) return;
+    targetIds.forEach((id) => {
+      const task = useAppStore.getState().taskLookup[id];
+      if (!task) return;
+      updateTask(id, { referenceImages: [...(task.referenceImages || []), src] });
+    });
+  }, [activeTaskId, selectedTaskIds, updateTask]);
 
   return (
     <div
@@ -645,7 +685,73 @@ export function TaskList() {
         </div>
       </div>
 
-      {tasksCount === 0 ? (
+      {viewMode === 'results' ? (
+        resultItems.length === 0 ? (
+          <div className="flex h-52 flex-col items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-transparent px-6 text-center text-[14.7px] text-text-secondary md:h-64">
+            <ImageIcon className="mb-3 h-8 w-8 opacity-40" />
+            <p className="font-medium opacity-80">暂无结果图，生成后会在这里集中挑选</p>
+          </div>
+        ) : (
+          <div className="columns-2 gap-4 pb-[420px] sm:columns-3 lg:columns-4 2xl:columns-5">
+            {resultItems.map(({ task, result, resultIndex }) => {
+              const src = result.previewSrc || result.src || result.assetSrc || result.originalSrc || '';
+              const dimensions = getResultImageAssetDimensions(result);
+              return (
+                <div key={`${task.id}-${result.id}`} className="group/result mb-4 break-inside-avoid overflow-hidden rounded-[22px] border border-black/8 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(31,24,18,0.12)]">
+                  <button
+                    type="button"
+                    className="block w-full bg-[#F7F4EE]"
+                    onClick={() => {
+                      setActiveTask(task.id);
+                      useAppStore.getState().setLightboxTask(task.id, resultIndex);
+                    }}
+                  >
+                    {src ? (
+                      <img src={src} loading="lazy" decoding="async" className="w-full object-cover" alt={task.title} draggable={false} />
+                    ) : (
+                      <div className="flex aspect-square items-center justify-center text-text-secondary">无预览</div>
+                    )}
+                  </button>
+                  <div className="space-y-2 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-[12px] font-medium text-foreground">#{String(task.index).padStart(3, '0')} {task.title}</div>
+                        <div className="mt-0.5 text-[10px] text-text-secondary">
+                          {dimensions ? `${dimensions.width} × ${dimensions.height}` : '尺寸未知'} / 第 {resultIndex + 1} 张
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1F1D1A] text-white opacity-0 transition-opacity group-hover/result:opacity-100"
+                        title="作为新任务原图"
+                        onClick={() => addResultAsNewTask(result.src || src, task.title)}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-full bg-[#F4EFE7] px-2.5 py-1 text-[10px] text-text-secondary hover:bg-white"
+                        onClick={() => addResultToSelectedTasks(result.src || src)}
+                      >
+                        加到选中
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full bg-[#F4EFE7] px-2.5 py-1 text-[10px] text-text-secondary hover:bg-white"
+                        onClick={() => setProjectFields({ globalReferenceImages: [...useAppStore.getState().globalReferenceImages, result.src || src] })}
+                      >
+                        全局参考
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : tasksCount === 0 ? (
         <div className="flex h-52 flex-col items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-transparent px-6 text-center text-[14.7px] text-text-secondary md:h-64">
           <p className="font-medium opacity-80">暂无任务，请从左侧栏导入或直接拖拽图片到此处</p>
         </div>

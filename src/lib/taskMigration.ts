@@ -128,6 +128,7 @@ export const initialProjectState: ProjectData = {
   imageToImageModel: 'gemini-3.1-flash-image-preview',
   globalImageQuality: 'auto',
   globalBatchCount: 'x1',
+  cardDensity: 'comfortable',
   generationLogs: [],
   createdAt: Date.now(),
   updatedAt: Date.now(),

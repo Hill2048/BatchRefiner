@@ -4,7 +4,7 @@ import { Download, Image as ImageIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/store";
 import { Task, TaskResultImage } from "@/types";
-import { getTaskBatchFileName } from "@/lib/resultImageFileName";
+import { buildResultImageFileName } from "@/lib/resultImageFileName";
 import { getResultImageAssetDimensions, getResultImageAssetExtension, getResultImageDownloadSourceType } from "@/lib/resultImageAsset";
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from "@/lib/resultImageDownload";
 import { getStoredImageAsset } from "@/lib/imageAssetStore";
@@ -93,6 +93,8 @@ function buildHistoryGroups(tasks: Task[]) {
 export function GenerationHistoryDialog({ open, onOpenChange }: GenerationHistoryDialogProps) {
   const tasks = useAppStore((state) => state.tasks);
   const updateTask = useAppStore((state) => state.updateTask);
+  const exportTemplate = useAppStore((state) => state.exportTemplate);
+  const imageModel = useAppStore((state) => state.imageModel);
   const groups = React.useMemo(() => buildHistoryGroups(tasks), [tasks]);
   const totalImageCount = React.useMemo(
     () => groups.reduce((sum, group) => sum + group.images.length, 0),
@@ -250,7 +252,14 @@ export function GenerationHistoryDialog({ open, onOpenChange }: GenerationHistor
                       {group.images.map((image, index) => {
                         const previewSrc = getResultPreviewSrc(image) || "";
                         const dimensions = getResultImageAssetDimensions(image);
-                        const fileName = getTaskBatchFileName(group.task.index, index, getResultImageAssetExtension(image));
+                        const fileName = buildResultImageFileName({
+                          task: group.task,
+                          imageIndex: index,
+                          extension: getResultImageAssetExtension(image),
+                          result: image,
+                          template: exportTemplate,
+                          model: group.task.imageModelOverride || imageModel,
+                        });
 
                         return (
                           <div key={image.id} className="group/history-card overflow-hidden rounded-[18px] border border-black/8 bg-[#FBFAF7]">
