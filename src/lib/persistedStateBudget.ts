@@ -1,6 +1,7 @@
 import type { Task, TaskResultImage } from '@/types';
 
 export const MAX_PERSISTED_STATE_LENGTH = 12 * 1024 * 1024;
+const MAX_SOURCE_IMAGE_PREVIEW_LENGTH = 360_000;
 export const OVERSIZED_PERSISTENCE_NOTICE =
   '检测到上次保存的项目过大，已自动清理图片数据以避免页面闪退。任务文字仍会保留。';
 
@@ -23,6 +24,11 @@ function isImageDataUrl(value?: string | null) {
   return Boolean(value?.startsWith('data:image/'));
 }
 
+function keepCompactImagePreview(value?: string) {
+  if (!isImageDataUrl(value)) return value;
+  return value.length <= MAX_SOURCE_IMAGE_PREVIEW_LENGTH ? value : undefined;
+}
+
 function stripResultImageBinaryPayload(image: TaskResultImage): TaskResultImage {
   const displaySrc = isImageDataUrl(image.src) ? image.previewSrc || '' : image.src;
   return {
@@ -41,6 +47,7 @@ function stripTaskBinaryPayload(task: Task): Task {
   return {
     ...task,
     sourceImage: isImageDataUrl(task.sourceImage) ? undefined : task.sourceImage,
+    sourceImagePreview: keepCompactImagePreview(task.sourceImagePreview),
     referenceImages: [],
     resultImage: primaryResult?.src || undefined,
     resultImagePreview: primaryResult?.previewSrc || undefined,

@@ -100,6 +100,7 @@ export interface Task {
   title: string;
   description: string;
   sourceImage?: string;
+  sourceImagePreview?: string;
   sourceImageAssetId?: string;
   referenceImages: string[];
   referenceImageAssetIds?: string[];

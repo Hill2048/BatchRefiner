@@ -236,7 +236,7 @@ export const TaskCard = React.memo(function TaskCard({
   const resultProgress = derivedResults.progress;
   const shouldReduceMotionEffects = isBatchRunning || tasksCount >= 12;
   const [sourceAssetSrc, setSourceAssetSrc] = React.useState<string | null>(null);
-  const displaySourceImage = task.sourceImage || sourceAssetSrc || '';
+  const displaySourceImage = task.sourceImage || sourceAssetSrc || task.sourceImagePreview || '';
   const thumbnailItems = React.useMemo<ThumbnailViewerItem[]>(() => {
     if (!isActive) return EMPTY_THUMBNAIL_ITEMS;
 
@@ -336,11 +336,13 @@ export const TaskCard = React.memo(function TaskCard({
     setSourceAssetSrc(null);
     if (task.sourceImage || !task.sourceImageAssetId) return undefined;
 
-    getStoredImageAsset(task.sourceImageAssetId).then((asset) => {
-      if (cancelled || !asset?.blob) return;
-      objectUrl = URL.createObjectURL(asset.blob);
-      setSourceAssetSrc(objectUrl);
-    });
+    getStoredImageAsset(task.sourceImageAssetId)
+      .then((asset) => {
+        if (cancelled || !asset?.blob) return;
+        objectUrl = URL.createObjectURL(asset.blob);
+        setSourceAssetSrc(objectUrl);
+      })
+      .catch(() => undefined);
 
     return () => {
       cancelled = true;

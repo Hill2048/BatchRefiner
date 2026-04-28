@@ -26,27 +26,38 @@ export interface OptimizedImageAsset {
 }
 
 export async function optimizeImageToAsset(file: File, kind: 'source' | 'reference'): Promise<OptimizedImageAsset> {
-  const dataUrl = await optimizeImageToDataUrl(file);
+  const rawDataUrl = await readImageFileToDataUrl(file);
+  await yieldToMainThread();
+  const dataUrl = await optimizeDataUrlForUpload(rawDataUrl);
+  await yieldToMainThread();
+  const previewSrc = await optimizeDataUrlForPreview(dataUrl);
   const asset = await storeImageAssetFromDataUrl(dataUrl, {
     kind,
-    previewSrc: dataUrl,
+    previewSrc,
     originalName: file.name,
   });
 
   return {
     dataUrl,
     assetId: asset.assetId,
-    previewSrc: asset.previewSrc,
+    previewSrc: asset.previewSrc || previewSrc,
     metadata: asset.metadata,
     storageStatus: asset.storageStatus,
   };
 }
 
 export async function optimizeDataUrlForUpload(dataUrl: string): Promise<string> {
+  return optimizeDataUrl(dataUrl, 4000, 0.88);
+}
+
+export async function optimizeDataUrlForPreview(dataUrl: string): Promise<string> {
+  return optimizeDataUrl(dataUrl, 768, 0.72);
+}
+
+async function optimizeDataUrl(dataUrl: string, maxSize: number, quality: number): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const maxSize = 4000;
       let width = img.width;
       let height = img.height;
       if (width > maxSize || height > maxSize) {
@@ -63,7 +74,7 @@ export async function optimizeDataUrlForUpload(dataUrl: string): Promise<string>
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.88));
+        resolve(canvas.toDataURL('image/jpeg', quality));
       } else {
         const reader = new FileReader();
         reader.onload = (event) => resolve(event.target?.result as string);
@@ -83,9 +94,9 @@ export async function optimizeDataUrlForUpload(dataUrl: string): Promise<string>
 export async function buildImportedTasksFromFiles(
   files: File[],
   startIndex: number,
-): Promise<Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'sourceImageAssetId' | 'referenceImages'>>> {
+): Promise<Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'sourceImagePreview' | 'sourceImageAssetId' | 'referenceImages'>>> {
   const images = files.filter((file) => file.type.startsWith('image/'));
-  const tasks: Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'sourceImageAssetId' | 'referenceImages'>> = [];
+  const tasks: Array<Pick<Task, 'index' | 'title' | 'description' | 'sourceImage' | 'sourceImagePreview' | 'sourceImageAssetId' | 'referenceImages'>> = [];
 
   await runWithBackgroundYields(images, async (file, index) => {
     const imageAsset = await optimizeImageToAsset(file, 'source');
@@ -94,6 +105,7 @@ export async function buildImportedTasksFromFiles(
       title: file.name,
       description: '',
       sourceImage: imageAsset.dataUrl,
+      sourceImagePreview: imageAsset.previewSrc,
       sourceImageAssetId: imageAsset.assetId,
       referenceImages: [],
     });

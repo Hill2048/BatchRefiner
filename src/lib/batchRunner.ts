@@ -6,7 +6,7 @@ import { normalizeTaskConcurrency, runTaskExecutionQueue } from "./taskExecution
 import { getExecutablePromptText, getPreparedPromptText, isPromptOptimizationEnabled } from "./promptExecution";
 import { dataUrlToBlob, primeResultImageCache, primeTaskResultImageCache, storeResultImageBlob } from "./resultImageCache";
 import { getResultImageAssetSrc, inferResultImageAssetMetadata, isValidResultImageAssetSrc } from "./resultImageAsset";
-import { storeImageAssetFromDataUrl } from "./imageAssetStore";
+import { getStoredImageAsset, storeImageAssetFromDataUrl } from "./imageAssetStore";
 import {
   appendGenerationLogEvent,
   buildGenerationTaskSnapshot,
@@ -124,7 +124,7 @@ function summarizeTextForLog(text: string, previewLength = 180) {
 }
 
 async function summarizeGenerationImageInputs(task: Task, imageInputs: string[]) {
-  const sources = getTaskImageInputsDetailed(task, useAppStore.getState().globalReferenceImages);
+  const sources = await getTaskImageInputsDetailed(task, useAppStore.getState().globalReferenceImages);
   const summaries = await Promise.all(
     imageInputs.map(async (image, index) => {
       const dimensions = await measureImageDimensions(image);
@@ -471,22 +471,46 @@ function getMissingPromptError() {
 export function taskHasImageInputs(task: Task, globalReferenceImages: string[]) {
   return Boolean(
     task.sourceImage ||
+    task.sourceImageAssetId ||
+    task.sourceImagePreview ||
     (task.referenceImages && task.referenceImages.length > 0) ||
     globalReferenceImages.length > 0
   );
 }
 
-function getTaskImageInputs(task: Task, globalReferenceImages: string[]) {
-  const images: string[] = [];
-  if (task.sourceImage) images.push(task.sourceImage);
-  if (task.referenceImages?.length) images.push(...task.referenceImages);
-  if (globalReferenceImages.length) images.push(...globalReferenceImages);
-  return images;
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(event.target?.result as string);
+    reader.onerror = () => reject(reader.error || new Error("Failed to read image asset"));
+    reader.readAsDataURL(blob);
+  });
 }
 
-function getTaskImageInputsDetailed(task: Task, globalReferenceImages: string[]) {
+async function resolveTaskSourceImageInput(task: Task) {
+  if (task.sourceImage) return task.sourceImage;
+
+  if (task.sourceImageAssetId) {
+    try {
+      const asset = await getStoredImageAsset(task.sourceImageAssetId);
+      if (asset?.blob) return await blobToDataUrl(asset.blob);
+    } catch {
+      // Fall back to the compact preview when browser storage cannot restore the full asset.
+    }
+  }
+
+  return task.sourceImagePreview;
+}
+
+async function getTaskImageInputs(task: Task, globalReferenceImages: string[]) {
+  const detailedInputs = await getTaskImageInputsDetailed(task, globalReferenceImages);
+  return detailedInputs.map((input) => input.src);
+}
+
+async function getTaskImageInputsDetailed(task: Task, globalReferenceImages: string[]) {
   const images: Array<{ type: 'source' | 'reference' | 'global_reference'; src: string }> = [];
-  if (task.sourceImage) images.push({ type: 'source', src: task.sourceImage });
+  const sourceImage = await resolveTaskSourceImageInput(task);
+  if (sourceImage) images.push({ type: 'source', src: sourceImage });
   if (task.referenceImages?.length) {
     images.push(...task.referenceImages.map((src) => ({ type: 'reference' as const, src })));
   }
@@ -1943,7 +1967,7 @@ export async function generateTaskPrompt(taskId: string, context: GenerationLogC
   const promptStartedAt = Date.now();
 
   updateTaskProgress(taskId, "Prompting", "整理提示词输入");
-  const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
+  const imageInputs = await getTaskImageInputs(task, store.globalReferenceImages);
   const systemPrompt = "你负责根据用户输入整理出一段可直接用于生图或改图的最终提示词，不强制英文，不额外解释。";
   const contentMsg = buildPromptGenerationText(task, store.globalSkillText || "");
   const platformPreset = getPlatformPreset();
@@ -2372,12 +2396,13 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
       : IMAGE_REQUEST_TIMEOUT_MS;
   const supportsStreamAttempt = platformPreset === 'comfly-chat' || (platformPreset === 'yunwu' && isYunwuGptImage);
   const aspectRatio = getEffectiveAspectRatio(task);
-  const imageInputs = getTaskImageInputs(task, store.globalReferenceImages);
+  const imageInputs = await getTaskImageInputs(task, store.globalReferenceImages);
   const hasImageInputs = imageInputs.length > 0;
   if (hasImageInputs) {
     updateTaskProgress(taskId, "Rendering", "准备图片");
   }
-  const sourceImageDimensions = task.sourceImage ? await measureImageDimensions(task.sourceImage) : null;
+  const sourceImageInput = task.sourceImage || task.sourceImageAssetId || task.sourceImagePreview ? imageInputs[0] : undefined;
+  const sourceImageDimensions = sourceImageInput ? await measureImageDimensions(sourceImageInput) : null;
   const resolvedAspectRatio = resolveAspectRatioForImage2(task, aspectRatio, sourceImageDimensions);
   const expectedOutputSize =
     (isGptImageModel(resolvedModel.actualModel) ||

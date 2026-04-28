@@ -57,7 +57,7 @@ export function Lightbox() {
   const currentResultImage = resultImages[lightboxImageIndex] || resultImages[0];
   const currentResultImageSrc = getResultFullSrc(currentResultImage);
   const displayResultImageSrc = resolvedAssetSrc || currentResultImageSrc;
-  const displaySourceImageSrc = task?.sourceImage || resolvedSourceAssetSrc || '';
+  const displaySourceImageSrc = task?.sourceImage || resolvedSourceAssetSrc || task?.sourceImagePreview || '';
   const hasResultGallery = resultImages.length > 1;
   const hasCompareSource = Boolean(displaySourceImageSrc && displayResultImageSrc);
   const hasCompareView = hasCompareSource && compareEnabled;
@@ -99,11 +99,13 @@ export function Lightbox() {
     setResolvedSourceAssetSrc(null);
     if (!task || task.sourceImage || !task.sourceImageAssetId) return undefined;
 
-    getStoredImageAsset(task.sourceImageAssetId).then((asset) => {
-      if (cancelled || !asset?.blob) return;
-      objectUrl = URL.createObjectURL(asset.blob);
-      setResolvedSourceAssetSrc(objectUrl);
-    });
+    getStoredImageAsset(task.sourceImageAssetId)
+      .then((asset) => {
+        if (cancelled || !asset?.blob) return;
+        objectUrl = URL.createObjectURL(asset.blob);
+        setResolvedSourceAssetSrc(objectUrl);
+      })
+      .catch(() => undefined);
 
     return () => {
       cancelled = true;
