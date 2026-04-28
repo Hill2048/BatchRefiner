@@ -12,6 +12,11 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['flora.svg'],
+        workbox: {
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
+        },
         manifest: {
           name: 'BatchRefiner',
           short_name: 'BatchRefiner',

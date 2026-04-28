@@ -9,7 +9,12 @@ interface ImportMeta {
 }
 
 declare module 'virtual:pwa-register' {
-  export function registerSW(options?: { immediate?: boolean }): (reloadPage?: boolean) => Promise<void>;
+  export function registerSW(options?: {
+    immediate?: boolean;
+    onNeedRefresh?: () => void;
+    onOfflineReady?: () => void;
+    onRegisteredSW?: (swUrl: string, registration: ServiceWorkerRegistration | undefined) => void;
+  }): (reloadPage?: boolean) => Promise<void>;
 }
 
 interface BeforeInstallPromptEvent extends Event {
