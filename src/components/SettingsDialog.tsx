@@ -50,14 +50,14 @@ const PLATFORM_PRESETS: Array<{
   {
     value: 'yunwu',
     label: '云雾',
-    defaultBaseUrl: 'https://yunwu.ai',
+    defaultBaseUrl: '',
     defaultTextModel: 'gemini-3.1-flash-lite-preview',
     defaultImageModel: 'gemini-3.1-flash-image-preview',
   },
   {
     value: 'comfly-chat',
     label: 'comfly.chat',
-    defaultBaseUrl: 'https://ai.comfly.chat',
+    defaultBaseUrl: '',
     defaultTextModel: 'gemini-3.1-flash-lite-preview',
     defaultImageModel: 'gemini-3.1-flash-image-preview',
   },
@@ -121,13 +121,13 @@ function getPresetConfig(preset: PlatformPreset) {
 function createDefaultPlatformConfigs(): PlatformApiConfigMap {
   return {
     'yunwu': {
-      apiBaseUrl: 'https://yunwu.ai',
-      textApiBaseUrl: 'https://yunwu.ai',
-      imageApiBaseUrl: 'https://yunwu.ai',
+      apiBaseUrl: '',
+      textApiBaseUrl: '',
+      imageApiBaseUrl: '',
       imageApiPath: '',
-      textToImageApiBaseUrl: 'https://yunwu.ai',
+      textToImageApiBaseUrl: '',
       textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: 'https://yunwu.ai',
+      imageToImageApiBaseUrl: '',
       imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       apiKey: '',
       textApiKey: '',
@@ -140,13 +140,13 @@ function createDefaultPlatformConfigs(): PlatformApiConfigMap {
       imageToImageModel: 'gemini-3.1-flash-image-preview',
     },
     'comfly-chat': {
-      apiBaseUrl: 'https://ai.comfly.chat',
-      textApiBaseUrl: 'https://ai.comfly.chat',
-      imageApiBaseUrl: 'https://ai.comfly.chat',
+      apiBaseUrl: '',
+      textApiBaseUrl: '',
+      imageApiBaseUrl: '',
       imageApiPath: '',
-      textToImageApiBaseUrl: 'https://ai.comfly.chat',
+      textToImageApiBaseUrl: '',
       textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: 'https://ai.comfly.chat',
+      imageToImageApiBaseUrl: '',
       imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       apiKey: '',
       textApiKey: '',
@@ -237,14 +237,14 @@ function normalizePlatformConfig(config: PlatformApiConfigMap[PlatformPreset]): 
     textApiBaseUrl: config.textApiBaseUrl ?? config.apiBaseUrl,
     imageApiBaseUrl: config.imageApiBaseUrl ?? config.apiBaseUrl,
     imageApiPath: config.imageApiPath ?? '',
-    textToImageApiBaseUrl: config.textToImageApiBaseUrl ?? config.imageApiBaseUrl ?? config.apiBaseUrl,
+    textToImageApiBaseUrl: config.textToImageApiBaseUrl ?? '',
     textToImageApiPath: config.textToImageApiPath || config.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
-    imageToImageApiBaseUrl: config.imageToImageApiBaseUrl ?? config.imageApiBaseUrl ?? config.apiBaseUrl,
+    imageToImageApiBaseUrl: config.imageToImageApiBaseUrl ?? '',
     imageToImageApiPath: config.imageToImageApiPath || config.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
     textApiKey: config.textApiKey ?? config.apiKey,
     imageApiKey: config.imageApiKey ?? config.apiKey,
-    textToImageApiKey: config.textToImageApiKey ?? config.imageApiKey ?? config.apiKey,
-    imageToImageApiKey: config.imageToImageApiKey ?? config.imageApiKey ?? config.apiKey,
+    textToImageApiKey: config.textToImageApiKey ?? '',
+    imageToImageApiKey: config.imageToImageApiKey ?? '',
     textToImageModel: config.textToImageModel ?? config.imageModel,
     imageToImageModel: config.imageToImageModel ?? config.imageModel,
   };
@@ -261,7 +261,7 @@ function normalizeOpenAIBaseUrl(baseUrl: string) {
 
 function normalizeComflyBaseUrl(baseUrl: string) {
   let normalized = baseUrl.trim().replace(/\/+$/, '');
-  if (!normalized) normalized = 'https://ai.comfly.chat';
+  if (!normalized) return '';
   return normalizeOpenAIBaseUrl(normalized);
 }
 
@@ -379,43 +379,18 @@ function getRouteTransportClassName(transport: ResolvedRoute['transport']) {
 
 function RouteSummaryCard({ route }: { route: ResolvedRoute }) {
   return (
-    <div className="rounded-2xl border border-border/70 bg-white/85 px-4 py-3 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-xl border border-border/60 bg-white/75 px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[12.6px] font-medium text-text-primary">{route.title}</div>
-          <p className="mt-1 text-[11.55px] leading-5 text-text-secondary">{route.summary}</p>
+          <div className="mt-1 break-all font-mono text-[10.5px] leading-4 text-text-secondary">
+            {route.requestPath || '未配置'}
+          </div>
         </div>
-        <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10.5px] font-medium ${getRouteTransportClassName(route.transport)}`}>
+        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${getRouteTransportClassName(route.transport)}`}>
           {getRouteTransportLabel(route.transport)}
         </span>
       </div>
-
-      <div className="mt-2 space-y-1">
-        {route.detailLines.map((line, index) => (
-          <div
-            key={`${route.title}-${index}`}
-            className={`text-[11.55px] leading-5 text-text-secondary ${line.startsWith('请求：') ? 'break-all font-mono text-[11.1px]' : ''}`}
-          >
-            {line}
-          </div>
-        ))}
-      </div>
-
-      {route.notes.length ? (
-        <div className="mt-2 rounded-xl border border-black/5 bg-[#F5F1E8]/80 px-3 py-2 text-[11.55px] leading-5 text-text-secondary">
-          {route.notes.map((note, index) => (
-            <div key={`${route.title}-note-${index}`}>{note}</div>
-          ))}
-        </div>
-      ) : null}
-
-      {route.warnings.length ? (
-        <div className="mt-2 rounded-xl border border-amber-200/80 bg-amber-50/85 px-3 py-2 text-[11.55px] leading-5 text-amber-700">
-          {route.warnings.map((warning, index) => (
-            <div key={`${route.title}-warning-${index}`}>{warning}</div>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -566,11 +541,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [textApiBaseUrl, setTextApiBaseUrlValue] = React.useState(savedTextApiBaseUrl || savedApiBaseUrl);
   const [imageApiBaseUrl, setImageApiBaseUrlValue] = React.useState(savedImageApiBaseUrl || savedApiBaseUrl);
   const [imageApiPath, setImageApiPathValue] = React.useState(savedImageApiPath || '');
-  const [textToImageApiKey, setTextToImageApiKeyValue] = React.useState(savedTextToImageApiKey || savedImageApiKey || savedApiKey);
-  const [textToImageApiBaseUrl, setTextToImageApiBaseUrlValue] = React.useState(savedTextToImageApiBaseUrl || savedImageApiBaseUrl || savedApiBaseUrl);
+  const [textToImageApiKey, setTextToImageApiKeyValue] = React.useState(savedTextToImageApiKey || '');
+  const [textToImageApiBaseUrl, setTextToImageApiBaseUrlValue] = React.useState(savedTextToImageApiBaseUrl || '');
   const [textToImageApiPath, setTextToImageApiPathValue] = React.useState(savedTextToImageApiPath || savedImageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH);
-  const [imageToImageApiKey, setImageToImageApiKeyValue] = React.useState(savedImageToImageApiKey || savedImageApiKey || savedApiKey);
-  const [imageToImageApiBaseUrl, setImageToImageApiBaseUrlValue] = React.useState(savedImageToImageApiBaseUrl || savedImageApiBaseUrl || savedApiBaseUrl);
+  const [imageToImageApiKey, setImageToImageApiKeyValue] = React.useState(savedImageToImageApiKey || '');
+  const [imageToImageApiBaseUrl, setImageToImageApiBaseUrlValue] = React.useState(savedImageToImageApiBaseUrl || '');
   const [imageToImageApiPath, setImageToImageApiPathValue] = React.useState(savedImageToImageApiPath || savedImageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH);
   const [maxConcurrency, setMaxConcurrencyValue] = React.useState(String(savedMaxConcurrency));
   const [localTextModel, setLocalTextModel] = React.useState(savedTextModel || 'gemini-3.1-flash-lite-preview');
@@ -601,11 +576,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setTextApiBaseUrlValue(next.textApiBaseUrl || next.apiBaseUrl);
     setImageApiBaseUrlValue(next.imageApiBaseUrl || next.apiBaseUrl);
     setImageApiPathValue(next.imageApiPath || '');
-    setTextToImageApiKeyValue(next.textToImageApiKey || next.imageApiKey || next.apiKey);
-    setTextToImageApiBaseUrlValue(next.textToImageApiBaseUrl || next.imageApiBaseUrl || next.apiBaseUrl);
+    setTextToImageApiKeyValue(next.textToImageApiKey || '');
+    setTextToImageApiBaseUrlValue(next.textToImageApiBaseUrl || '');
     setTextToImageApiPathValue(next.textToImageApiPath || next.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH);
-    setImageToImageApiKeyValue(next.imageToImageApiKey || next.imageApiKey || next.apiKey);
-    setImageToImageApiBaseUrlValue(next.imageToImageApiBaseUrl || next.imageApiBaseUrl || next.apiBaseUrl);
+    setImageToImageApiKeyValue(next.imageToImageApiKey || '');
+    setImageToImageApiBaseUrlValue(next.imageToImageApiBaseUrl || '');
     setImageToImageApiPathValue(next.imageToImageApiPath || next.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH);
     setLocalTextModel(next.textModel);
     setLocalImageModel(next.imageModel);
@@ -773,15 +748,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         textApiBaseUrl: data.textApiBaseUrl || data.apiBaseUrl,
         imageApiBaseUrl: data.imageApiBaseUrl || data.apiBaseUrl,
         imageApiPath: data.imageApiPath || '',
-        textToImageApiBaseUrl: data.textToImageApiBaseUrl || data.imageApiBaseUrl || data.apiBaseUrl,
+        textToImageApiBaseUrl: data.textToImageApiBaseUrl || '',
         textToImageApiPath: data.textToImageApiPath || data.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
-        imageToImageApiBaseUrl: data.imageToImageApiBaseUrl || data.imageApiBaseUrl || data.apiBaseUrl,
+        imageToImageApiBaseUrl: data.imageToImageApiBaseUrl || '',
         imageToImageApiPath: data.imageToImageApiPath || data.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
         apiKey: data.apiKey,
         textApiKey: data.textApiKey || data.apiKey,
         imageApiKey: data.imageApiKey || data.apiKey,
-        textToImageApiKey: data.textToImageApiKey || data.imageApiKey || data.apiKey,
-        imageToImageApiKey: data.imageToImageApiKey || data.imageApiKey || data.apiKey,
+        textToImageApiKey: data.textToImageApiKey || '',
+        imageToImageApiKey: data.imageToImageApiKey || '',
         textModel: data.textModel,
         imageModel: data.imageModel,
         textToImageModel: data.textToImageModel || data.imageModel,
@@ -1259,7 +1234,7 @@ const handleExportCurrentConfig = async () => {
                       type="text"
                       name="batch-refiner-text-to-image-api-base"
                       autoComplete="off"
-                      placeholder="文生图 API 地址，留空则使用通用生图 API 地址"
+                      placeholder="文生图 API 地址，必填，例如 https://api.example.com"
                       value={textToImageApiBaseUrl}
                       onChange={(e) => setTextToImageApiBaseUrlValue(e.target.value)}
                       className={mergedInputClassName}
@@ -1285,7 +1260,7 @@ const handleExportCurrentConfig = async () => {
                       data-form-type="other"
                       data-lpignore="true"
                       data-1p-ignore="true"
-                      placeholder="文生图 API Key，留空则使用通用生图 API Key"
+                      placeholder="文生图 API Key，必填"
                       value={textToImageApiKey}
                       onChange={(e) => setTextToImageApiKeyValue(e.target.value)}
                       className={mergedInputClassName}
@@ -1307,7 +1282,7 @@ const handleExportCurrentConfig = async () => {
                       type="text"
                       name="batch-refiner-image-to-image-api-base"
                       autoComplete="off"
-                      placeholder="图生图 API 地址，留空则使用通用生图 API 地址"
+                      placeholder="图生图 API 地址，必填，例如 https://api.example.com"
                       value={imageToImageApiBaseUrl}
                       onChange={(e) => setImageToImageApiBaseUrlValue(e.target.value)}
                       className={mergedInputClassName}
@@ -1333,7 +1308,7 @@ const handleExportCurrentConfig = async () => {
                       data-form-type="other"
                       data-lpignore="true"
                       data-1p-ignore="true"
-                      placeholder="图生图 API Key，留空则使用通用生图 API Key"
+                      placeholder="图生图 API Key，必填"
                       value={imageToImageApiKey}
                       onChange={(e) => setImageToImageApiKeyValue(e.target.value)}
                       className={mergedInputClassName}
@@ -1349,64 +1324,9 @@ const handleExportCurrentConfig = async () => {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-[12.6px] font-medium text-text-secondary">生图 API</label>
-                <div className="rounded-xl border border-border bg-white shadow-sm transition-colors focus-within:border-button-main/40 focus-within:ring-2 focus-within:ring-button-main/20">
-                  <Input
-                    type="text"
-                    name="batch-refiner-image-api-base"
-                    autoComplete="off"
-                    placeholder="生图 API 地址，留空则使用文本 API 地址"
-                    value={imageApiBaseUrl}
-                    onChange={(e) => setImageApiBaseUrlValue(e.target.value)}
-                    className={mergedInputClassName}
-                  />
-                  <div className="h-px bg-border/70" />
-                  <Input
-                    type="text"
-                    name="batch-refiner-image-api-path"
-                    autoComplete="off"
-                    placeholder="生图接口路径，例如 /v1/images/edits"
-                    value={imageApiPath}
-                    onChange={(e) => setImageApiPathValue(e.target.value)}
-                    className={mergedInputClassName}
-                  />
-                  <div className="h-px bg-border/70" />
-                  <Input
-                    type="password"
-                    name="batch-refiner-image-api-key"
-                    autoComplete="off"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-form-type="other"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    placeholder="生图 API Key，留空则使用文本 API Key"
-                    value={imageApiKey}
-                    onChange={(e) => setImageApiKeyValue(e.target.value)}
-                    className={mergedInputClassName}
-                  />
-                  <div className="h-px bg-border/70" />
-                  <ModelInput
-                    value={localImageModel}
-                    onChange={setLocalImageModel}
-                    options={imageModelOptions}
-                    placeholder="图片模型，例如 gemini-3.1-flash-image-preview"
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border/70 bg-[#F6F1E8]/70 p-3 shadow-inner">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[12.6px] font-medium text-text-primary">实际生效关系</div>
-                    <p className="mt-1 text-[11.55px] leading-5 text-text-secondary">
-                      这里显示的是当前设置保存后，提示词和生图请求真正会走到哪条接口。
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-2">
+              <div className="rounded-2xl border border-border/60 bg-[#F6F1E8]/50 p-3">
+                <div className="mb-2 text-[12.6px] font-medium text-text-primary">接口走向</div>
+                <div className="space-y-1.5">
                   <RouteSummaryCard route={textRoute} />
                   <RouteSummaryCard route={imageRouteWithoutInput} />
                   <RouteSummaryCard route={imageRouteWithInput} />

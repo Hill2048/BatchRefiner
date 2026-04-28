@@ -416,18 +416,12 @@ export function resolveImageRoute(
       source: options.hasImageInputs ? 'imageToImageApiBaseUrl' : 'textToImageApiBaseUrl',
       value: options.hasImageInputs ? input.imageToImageApiBaseUrl : input.textToImageApiBaseUrl,
     },
-    { source: 'imageApiBaseUrl', value: input.imageApiBaseUrl },
-    { source: 'apiBaseUrl', value: input.apiBaseUrl },
-    { source: 'textApiBaseUrl', value: input.textApiBaseUrl },
   ]);
   const imageKey = pickFirstValue([
     {
       source: options.hasImageInputs ? 'imageToImageApiKey' : 'textToImageApiKey',
       value: options.hasImageInputs ? input.imageToImageApiKey : input.textToImageApiKey,
     },
-    { source: 'imageApiKey', value: input.imageApiKey },
-    { source: 'textApiKey', value: input.textApiKey },
-    { source: 'apiKey', value: input.apiKey },
   ]);
   const imagePath = pickFirstValue([
     {

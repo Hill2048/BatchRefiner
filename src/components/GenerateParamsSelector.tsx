@@ -29,9 +29,9 @@ const GEMINI_RESOLUTIONS: Array<{ value: Resolution; label: string }> = [
 ];
 
 const GPT_RESOLUTIONS: Array<{ value: Resolution; label: string }> = [
-  { value: "1K", label: "1K" },
-  { value: "2K", label: "2K" },
-  { value: "4K", label: "4K 实验" },
+  { value: "1K", label: "高清 1K" },
+  { value: "2K", label: "高清 2K" },
+  { value: "4K", label: "超清 4K" },
 ];
 
 const GEMINI_ASPECT_RATIOS: AspectRatio[] = [
@@ -40,7 +40,7 @@ const GEMINI_ASPECT_RATIOS: AspectRatio[] = [
 ];
 
 const GPT_ASPECT_RATIOS: AspectRatio[] = [
-  "auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21",
+  "auto", "21:9", "16:9", "3:2", "4:3", "1:1", "3:4", "2:3", "9:16", "5:4", "4:5", "9:21",
 ];
 
 const GPT_IMAGE_QUALITIES: Array<{ value: ImageQuality; label: string }> = [
@@ -126,7 +126,7 @@ function validateGptCustomSize(width: number, height: number) {
 }
 
 function renderRatioIcon(ar: AspectRatio) {
-  if (ar === "auto") return <div className="h-4 w-5 rounded-sm border border-dashed border-current opacity-60" />;
+  if (ar === "auto") return <div className="h-4 w-4 rounded-sm border border-dashed border-current opacity-70" />;
   if (ar === "1:1") return <Square className="h-4 w-4 opacity-70" />;
 
   const parts = ar.split(":");
@@ -146,7 +146,7 @@ function renderRatioIcon(ar: AspectRatio) {
 }
 
 function getRatioLabel(ar: AspectRatio) {
-  if (ar === "auto") return "自动";
+  if (ar === "auto") return "智能";
   return ar;
 }
 
@@ -221,59 +221,22 @@ export function GenerateParamsSelector({
           </Button>
         }
       />
-      <PopoverContent className="w-[min(380px,calc(100vw-2rem))] rounded-2xl border-border bg-card p-4 shadow-lg" align="start">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <span className="text-[12.6px] font-medium text-text-secondary">分辨率</span>
-            <div className="flex gap-2">
-              {resolutions.map((item) => (
-                <button
-                  key={item.value}
-                  onClick={() => onResolutionChange(item.value)}
-                  className={`flex-1 rounded-lg border py-1.5 text-[12.6px] font-mono transition-colors ${
-                    resolution === item.value
-                      ? "border-button-main bg-button-main font-medium text-[#FFFFFF] shadow-md"
-                      : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {family === "gpt" && onImageQualityChange ? (
-            <div className="flex flex-col gap-2">
-              <span className="text-[12.6px] font-medium text-text-secondary">质量</span>
-              <div className="flex gap-2">
-                {GPT_IMAGE_QUALITIES.map((item) => (
-                  <button
-                    key={item.value}
-                    onClick={() => onImageQualityChange(item.value)}
-                    className={`flex-1 rounded-lg border py-1.5 text-[12.6px] transition-colors ${
-                      imageQuality === item.value
-                        ? "border-button-main bg-button-main font-medium text-[#FFFFFF] shadow-md"
-                        : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex flex-col gap-2">
-            <span className="text-[12.6px] font-medium text-text-secondary">比例</span>
-            <div className="grid grid-cols-5 gap-2">
+      <PopoverContent
+        className="w-[min(460px,calc(100vw-2rem))] rounded-[22px] border border-white/70 bg-white/92 p-4 shadow-[0_18px_55px_rgba(23,18,14,0.12)] backdrop-blur-xl"
+        align="start"
+      >
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-3">
+            <span className="text-[12.6px] font-medium text-text-secondary">选择比例</span>
+            <div className="grid grid-cols-5 overflow-hidden rounded-xl bg-[#F7F5F1] p-1 sm:grid-cols-9">
               {aspectRatios.map((ar) => (
                 <button
                   key={ar}
                   onClick={() => onAspectRatioChange(ar)}
-                  className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border py-2 transition-all ${
+                  className={`flex min-h-[56px] flex-col items-center justify-center gap-1.5 rounded-lg border border-transparent px-1.5 py-2 transition-all ${
                     aspectRatio === ar
-                      ? "border-button-main bg-button-main text-white shadow-md"
-                      : "border-border/40 bg-transparent text-text-primary hover:border-border hover:bg-black/5"
+                      ? "bg-white text-text-primary shadow-[0_6px_18px_rgba(23,18,14,0.08)]"
+                      : "text-text-primary hover:bg-white/62"
                   }`}
                 >
                   <div className="flex h-5 w-5 items-center justify-center">
@@ -287,18 +250,102 @@ export function GenerateParamsSelector({
             </div>
           </div>
 
+          <div className="flex flex-col gap-3">
+            <span className="text-[12.6px] font-medium text-text-secondary">选择分辨率</span>
+            <div className="grid grid-cols-2 overflow-hidden rounded-xl bg-[#F7F5F1] p-1">
+              {resolutions.map((item) => (
+                <button
+                  key={item.value}
+                  onClick={() => onResolutionChange(item.value)}
+                  className={`rounded-lg py-2.5 text-[12.6px] transition-colors ${
+                    resolution === item.value
+                      ? "bg-white font-medium text-[#2C2B29] shadow-[0_6px_18px_rgba(23,18,14,0.07)]"
+                      : "font-medium text-text-secondary hover:bg-white/62 hover:text-text-primary"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {family === "gpt" ? (
+            <div className="flex flex-col gap-3">
+              <span className="text-[12.6px] font-medium text-text-secondary">尺寸</span>
+              <div className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3">
+                <Input
+                  value={customWidth}
+                  onChange={(e) => setCustomWidth(e.target.value.replace(/[^\d]/g, ""))}
+                  placeholder="W"
+                  name="image2-custom-width"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  inputMode="numeric"
+                  className="h-10 rounded-lg border-transparent bg-[#F7F5F1] text-center text-[12.6px] text-text-primary shadow-none placeholder:text-text-secondary/42 focus-visible:ring-1 focus-visible:ring-button-main"
+                />
+                <span className="text-[12px] text-text-secondary">↔</span>
+                <Input
+                  value={customHeight}
+                  onChange={(e) => setCustomHeight(e.target.value.replace(/[^\d]/g, ""))}
+                  placeholder="H"
+                  name="image2-custom-height"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  inputMode="numeric"
+                  className="h-10 rounded-lg border-transparent bg-[#F7F5F1] text-center text-[12.6px] text-text-primary shadow-none placeholder:text-text-secondary/42 focus-visible:ring-1 focus-visible:ring-button-main"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={applyCustomSize}
+                  disabled={!customWidth || !customHeight || Boolean(customValidationMessage)}
+                  className="h-10 rounded-lg px-3 text-[12px] font-medium text-text-secondary hover:bg-[#F7F5F1] disabled:opacity-45"
+                >
+                  PX
+                </Button>
+              </div>
+              {customValidationMessage ? <p className="text-[11px] leading-5 text-red-600">{customValidationMessage}</p> : null}
+            </div>
+          ) : null}
+
+          {family === "gpt" && onImageQualityChange ? (
+            <div className="flex flex-col gap-3">
+              <span className="text-[12.6px] font-medium text-text-secondary">质量</span>
+              <div className="grid grid-cols-4 overflow-hidden rounded-xl bg-[#F7F5F1] p-1">
+                {GPT_IMAGE_QUALITIES.map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => onImageQualityChange(item.value)}
+                    className={`rounded-lg py-2 text-[12.6px] transition-colors ${
+                      imageQuality === item.value
+                        ? "bg-white font-medium text-[#2C2B29] shadow-[0_6px_18px_rgba(23,18,14,0.07)]"
+                        : "text-text-secondary hover:bg-white/62 hover:text-text-primary"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {onBatchCountChange ? (
-            <div className="flex flex-col gap-2">
-              <span className="text-[12.6px] font-medium text-text-secondary">批次</span>
+            <div className="flex flex-col gap-3">
+              <span className="text-[12.6px] font-medium text-text-secondary">张数</span>
               <div className="flex flex-wrap gap-2">
                 {allowBatchInherit ? (
                   <button
                     type="button"
                     onClick={onClearBatchCount}
-                    className={`rounded-lg border px-3 py-1.5 text-[12px] transition-colors ${
+                    className={`rounded-lg px-3 py-1.5 text-[12px] transition-colors ${
                       !batchCount
-                        ? "border-button-main bg-button-main text-white shadow-md"
-                        : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
+                        ? "bg-white text-text-primary shadow-[0_6px_18px_rgba(23,18,14,0.07)]"
+                        : "bg-[#F7F5F1] text-text-secondary hover:bg-white"
                     }`}
                   >
                     {inheritedBatchLabel}
@@ -309,60 +356,16 @@ export function GenerateParamsSelector({
                     key={option}
                     type="button"
                     onClick={() => onBatchCountChange(option)}
-                    className={`rounded-lg border px-3 py-1.5 text-[12px] font-mono transition-colors ${
+                    className={`rounded-lg px-3 py-1.5 text-[12px] font-mono transition-colors ${
                       batchCount === option
-                        ? "border-button-main bg-button-main text-white shadow-md"
-                        : "border-border/60 bg-transparent text-text-secondary hover:border-button-main/50 hover:bg-black/5"
+                        ? "bg-white text-text-primary shadow-[0_6px_18px_rgba(23,18,14,0.07)]"
+                        : "bg-[#F7F5F1] text-text-secondary hover:bg-white"
                     }`}
                   >
                     {option}
                   </button>
                 ))}
               </div>
-            </div>
-          ) : null}
-
-          {family === "gpt" ? (
-            <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-white/70 p-3">
-              <span className="text-[12.6px] font-medium text-text-secondary">自定义宽高</span>
-              <div className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
-                <Input
-                  value={customWidth}
-                  onChange={(e) => setCustomWidth(e.target.value.replace(/[^\d]/g, ""))}
-                  placeholder="宽"
-                  name="image2-custom-width"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  inputMode="numeric"
-                  className="h-8 rounded-lg text-[12.6px]"
-                />
-                <span className="text-[12px] text-text-secondary">x</span>
-                <Input
-                  value={customHeight}
-                  onChange={(e) => setCustomHeight(e.target.value.replace(/[^\d]/g, ""))}
-                  placeholder="高"
-                  name="image2-custom-height"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  inputMode="numeric"
-                  className="h-8 rounded-lg text-[12.6px]"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={applyCustomSize}
-                  disabled={!customWidth || !customHeight || Boolean(customValidationMessage)}
-                  className="h-8 rounded-lg px-3 text-[12px]"
-                >
-                  应用
-                </Button>
-              </div>
-              {customValidationMessage ? <p className="text-[11px] leading-5 text-red-600">{customValidationMessage}</p> : null}
             </div>
           ) : null}
         </div>

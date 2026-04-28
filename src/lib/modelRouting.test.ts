@@ -33,9 +33,9 @@ test('云雾 image2 会映射到 OpenAI 图片接口', () => {
   const route = resolveImageRoute(
     {
       platformPreset: 'yunwu',
-      imageApiBaseUrl: 'https://yunwu.ai',
-      imageApiKey: 'image-key',
-      imageApiPath: '/v1/images/edits',
+      imageToImageApiBaseUrl: 'https://yunwu.ai',
+      imageToImageApiKey: 'image-key',
+      imageToImageApiPath: '/v1/images/edits',
       imageModel: 'image2',
     },
     { hasImageInputs: true },
@@ -44,7 +44,7 @@ test('云雾 image2 会映射到 OpenAI 图片接口', () => {
   assert.equal(route.transport, 'openai-images');
   assert.equal(route.actualModel, 'gpt-image-2-all');
   assert.equal(route.requestPath, 'https://yunwu.ai/v1/images/edits');
-  assert.ok(route.warnings.some((warning) => warning.includes('旧版通用生图接口路径')));
+  assert.equal(route.warnings.length, 0);
 });
 
 test('文生图和图生图可以使用不同图片接口路径', () => {
@@ -75,8 +75,8 @@ test('comfly 带参考图且非 gpt-image 时走 chat/completions', () => {
   const route = resolveImageRoute(
     {
       platformPreset: 'comfly-chat',
-      imageApiBaseUrl: 'https://ai.comfly.chat',
-      imageApiKey: 'image-key',
+      imageToImageApiBaseUrl: 'https://ai.comfly.chat',
+      imageToImageApiKey: 'image-key',
       imageModel: 'gemini-3.1-flash-image-preview',
       resolution: '2K',
     },

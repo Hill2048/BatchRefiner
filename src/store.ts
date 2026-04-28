@@ -55,6 +55,10 @@ function buildTaskIds(tasks: Task[]) {
   return tasks.map((task) => task.id);
 }
 
+function buildSelectedTaskIdLookup(selectedTaskIds: string[]) {
+  return Object.fromEntries(selectedTaskIds.map((id) => [id, true])) as Record<string, true>;
+}
+
 function countCompletedTasks(tasks: Task[]) {
   return tasks.reduce((count, task) => count + (task.status === 'Success' ? 1 : 0), 0);
 }
@@ -87,6 +91,7 @@ interface AppState extends ProjectData {
   maxConcurrency: number;
   exportTemplate: string;
   selectedTaskIds: string[];
+  selectedTaskIdLookup: Record<string, true>;
   apiKey: string;
   textApiKey: string;
   imageApiKey: string;
@@ -232,16 +237,17 @@ export const useAppStore = create<AppState>()(
       maxConcurrency: 3,
       exportTemplate: '{task_id}_{title}',
       selectedTaskIds: [],
+      selectedTaskIdLookup: {},
       apiKey: '',
       textApiKey: '',
       imageApiKey: '',
-      apiBaseUrl: 'https://yunwu.ai',
-      textApiBaseUrl: 'https://yunwu.ai',
-      imageApiBaseUrl: 'https://yunwu.ai',
+      apiBaseUrl: '',
+      textApiBaseUrl: '',
+      imageApiBaseUrl: '',
       imageApiPath: '',
-      textToImageApiBaseUrl: 'https://yunwu.ai',
+      textToImageApiBaseUrl: '',
       textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: 'https://yunwu.ai',
+      imageToImageApiBaseUrl: '',
       imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
       textToImageApiKey: '',
       imageToImageApiKey: '',
@@ -255,10 +261,14 @@ export const useAppStore = create<AppState>()(
           const taskCollectionState = hasTaskField
             ? buildTaskCollectionState(fields.tasks ?? [])
             : {};
+          const selectedTaskIdLookup = Object.prototype.hasOwnProperty.call(fields, 'selectedTaskIds')
+            ? buildSelectedTaskIdLookup(fields.selectedTaskIds ?? [])
+            : state.selectedTaskIdLookup;
           return {
             ...state,
             ...fields,
             ...taskCollectionState,
+            selectedTaskIdLookup,
             updatedAt: Date.now(),
           };
         }),
@@ -307,13 +317,15 @@ export const useAppStore = create<AppState>()(
           const nextTasks = state.tasks.filter((task) => task.id !== id);
           const nextTaskLookup = { ...state.taskLookup };
           delete nextTaskLookup[id];
+          const selectedTaskIds = state.selectedTaskIds.filter((selectedId) => selectedId !== id);
           return {
             ...buildTaskCollectionState(nextTasks),
             taskLookup: nextTaskLookup,
             activeTaskId: state.activeTaskId === id ? null : state.activeTaskId,
             lightboxTaskId: state.lightboxTaskId === id ? null : state.lightboxTaskId,
             lightboxImageIndex: state.lightboxTaskId === id ? 0 : state.lightboxImageIndex,
-            selectedTaskIds: state.selectedTaskIds.filter((selectedId) => selectedId !== id),
+            selectedTaskIds,
+            selectedTaskIdLookup: buildSelectedTaskIdLookup(selectedTaskIds),
             updatedAt: Date.now(),
           };
         }),
@@ -336,6 +348,7 @@ export const useAppStore = create<AppState>()(
           ...buildTaskCollectionState(initialProjectState.tasks),
           projectId: uuidv4(),
           selectedTaskIds: [],
+          selectedTaskIdLookup: {},
           lightboxTaskId: null,
           lightboxImageIndex: 0,
         }),
@@ -361,24 +374,33 @@ export const useAppStore = create<AppState>()(
               lightboxTaskId: null,
               lightboxImageIndex: 0,
               selectedTaskIds: [],
+              selectedTaskIdLookup: {},
             }));
           }
         } catch (_error) {}
       },
 
       toggleTaskSelection: (id) =>
-        set((state) => ({
-          selectedTaskIds: state.selectedTaskIds.includes(id)
+        set((state) => {
+          const selectedTaskIds = state.selectedTaskIdLookup[id]
             ? state.selectedTaskIds.filter((taskId) => taskId !== id)
-            : [...state.selectedTaskIds, id],
-        })),
+            : [...state.selectedTaskIds, id];
+          return {
+            selectedTaskIds,
+            selectedTaskIdLookup: buildSelectedTaskIdLookup(selectedTaskIds),
+          };
+        }),
 
       selectAllTasks: () =>
-        set((state) => ({
-          selectedTaskIds: [...state.taskIds],
-        })),
+        set((state) => {
+          const selectedTaskIds = [...state.taskIds];
+          return {
+            selectedTaskIds,
+            selectedTaskIdLookup: buildSelectedTaskIdLookup(selectedTaskIds),
+          };
+        }),
 
-      clearTaskSelection: () => set({ selectedTaskIds: [] }),
+      clearTaskSelection: () => set({ selectedTaskIds: [], selectedTaskIdLookup: {} }),
       setApiKey: (key) => set({ apiKey: key, textApiKey: key, imageApiKey: key }),
       setTextApiKey: (key) => set({ textApiKey: key, apiKey: key }),
       setImageApiKey: (key) => set({ imageApiKey: key }),
@@ -419,6 +441,7 @@ export const useAppStore = create<AppState>()(
         state.setProjectFields({
           ...withDefaultSkill(state),
           tasks: recoverInterruptedTasks(state.tasks),
+          selectedTaskIds: state.selectedTaskIds,
           activeTaskId: null,
           lightboxTaskId: null,
           lightboxImageIndex: 0,
@@ -446,6 +469,8 @@ export const useAppStore = create<AppState>()(
         viewMode: state.viewMode,
         maxConcurrency: state.maxConcurrency,
         exportTemplate: state.exportTemplate,
+        selectedTaskIds: state.selectedTaskIds,
+        selectedTaskIdLookup: buildSelectedTaskIdLookup(state.selectedTaskIds),
         apiKey: state.apiKey,
         textApiKey: state.textApiKey,
         imageApiKey: state.imageApiKey,

@@ -167,7 +167,7 @@ export const TaskCard = React.memo(function TaskCard({
   const removeTask = useAppStore(state => state.removeTask);
   const setLightboxTask = useAppStore(state => state.setLightboxTask);
   const viewMode = useAppStore(state => state.viewMode);
-  const isSelected = useAppStore(state => state.selectedTaskIds.includes(taskId));
+  const isSelected = useAppStore(state => Boolean(state.selectedTaskIdLookup[taskId]));
   const toggleTaskSelection = useAppStore(state => state.toggleTaskSelection);
   const globalReferenceImages = useAppStore(state => state.globalReferenceImages);
   const globalAspectRatio = useAppStore(state => state.globalAspectRatio);
@@ -679,7 +679,7 @@ export const TaskCard = React.memo(function TaskCard({
       placeholder: true,
     }));
     const visibleThumbnailItems = [...thumbnailItems, ...placeholderItems];
-    const hasThumbnailStrip = visibleThumbnailItems.length > 0;
+    const hasThumbnailStrip = visibleThumbnailItems.length > 1;
     const hasResolvedActiveResult = viewerMode === 'result' && Boolean(activeResult?.src) && selectedResultIndex < resultImages.length;
     const shouldAnimateViewerImage = !shouldReduceMotionEffects && isRenderingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
 
@@ -758,16 +758,23 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
           </div>
 
+          {showResultSize ? (
+            <div className="pointer-events-none absolute bottom-[72px] right-3 z-20 shrink-0 whitespace-nowrap rounded-full border border-black/10 bg-white/92 px-2.5 py-1 text-[10px] font-mono font-medium leading-4 text-black/78 shadow-[0_8px_20px_rgba(0,0,0,0.10)] backdrop-blur-md">
+              {activeAssetDimensions?.width} × {activeAssetDimensions?.height}
+              {activeResultDuration ? ` / ${activeResultDuration}` : ''}
+            </div>
+          ) : null}
+
           <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch gap-2 bg-gradient-to-t from-black/14 via-black/0 to-transparent px-3 pb-3 pt-10 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
-            <div className="flex min-w-0 flex-1 items-end gap-2">
+            <div className="flex min-w-0 flex-1 items-end gap-2 overflow-hidden">
               {hasThumbnailStrip ? (
-                <div className="flex min-h-[52px] w-fit max-w-full items-center gap-1.5 overflow-hidden rounded-[18px] border border-white/70 bg-[rgba(255,255,255,0.88)] px-2 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.1)] backdrop-blur-md sm:min-h-[56px] sm:gap-2 sm:px-2.5">
+                <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-[18px] border border-white/70 bg-[rgba(255,255,255,0.88)] px-2 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.1)] backdrop-blur-md sm:min-h-[56px] sm:gap-2 sm:px-2.5">
                   {visibleThumbnailItems.map((item) => {
                     if (item.type === 'placeholder') {
                       return (
                         <div
                           key={item.id}
-                          className="relative h-9 w-12 shrink-0 overflow-hidden rounded-[12px] border border-black/10 bg-[#f3efe8] sm:h-10 sm:w-[54px]"
+                          className="relative h-9 min-w-0 flex-1 basis-10 overflow-hidden rounded-[12px] border border-black/10 bg-[#f3efe8] sm:h-10 sm:basis-[46px]"
                           aria-hidden="true"
                         >
                           <div className="absolute inset-0 bg-[linear-gradient(135deg,#f6f1ea_0%,#efe6da_52%,#eadfce_100%)]" />
@@ -795,7 +802,7 @@ export const TaskCard = React.memo(function TaskCard({
                           setSelectedResultIndex(item.resultIndex ?? 0);
                           setViewerMode('result');
                         }}
-                        className={`group/thumb relative h-9 w-12 shrink-0 overflow-hidden rounded-[12px] border transition-all duration-200 ease-out sm:h-10 sm:w-[54px] ${
+                        className={`group/thumb relative h-9 min-w-0 flex-1 basis-10 overflow-hidden rounded-[12px] border transition-all duration-200 ease-out sm:h-10 sm:basis-[46px] ${
                           isActiveThumb
                             ? 'border-[#D97757] bg-white shadow-[0_10px_20px_rgba(217,119,87,0.22)] scale-[1.03]'
                             : 'border-black/8 bg-white/75 hover:-translate-y-[1px] hover:border-black/14 hover:bg-white'
@@ -806,7 +813,7 @@ export const TaskCard = React.memo(function TaskCard({
                           src={item.src}
                           loading="lazy"
                           decoding="async"
-                          className={`h-full w-full object-cover transition-transform duration-200 ease-out ${
+                          className={`h-full w-full object-contain transition-transform duration-200 ease-out ${
                             isActiveThumb ? 'scale-[1.02]' : 'group-hover/thumb:scale-[1.03]'
                           }`}
                           alt={item.type === 'source' ? '原图' : `${task.title}-${(item.resultIndex ?? 0) + 1}`}
@@ -829,12 +836,6 @@ export const TaskCard = React.memo(function TaskCard({
                 </div>
               ) : null}
 
-              {showResultSize ? (
-                <div className="rounded-full border border-black/10 bg-white px-2.5 py-1 text-[10px] font-mono font-medium text-black/78 shadow-[0_8px_20px_rgba(0,0,0,0.10)]">
-                  {activeAssetDimensions?.width} × {activeAssetDimensions?.height}
-                  {activeResultDuration ? ` / ${activeResultDuration}` : ''}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex shrink-0 items-center justify-end gap-2 self-end">
@@ -887,6 +888,8 @@ export const TaskCard = React.memo(function TaskCard({
 
   return (
     <Card
+      data-task-card
+      data-task-id={task.id}
       ref={(node: any) => {
         setNodeRef(node);
         if (node) cardRef.current = node;
@@ -1039,7 +1042,7 @@ export const TaskCard = React.memo(function TaskCard({
           <div className="content-safe-zone mt-0 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-300 w-full min-w-0">
             {renderUnifiedViewer()}
 
-            <div className="px-3">
+            <div className="hidden px-3">
               {renderInfoHeader(false)}
             </div>
 
@@ -1222,7 +1225,7 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
             </div>
 
-            <div className="flex flex-col gap-2 px-3">
+            <div className="hidden flex-col gap-2 px-3">
               {enablePromptOptimization ? (
                 <div ref={descriptionEditor.containerRef} className={textSectionClass}>
                   <span className={textLabelClass}>生成指令</span>
@@ -1293,7 +1296,7 @@ export const TaskCard = React.memo(function TaskCard({
               ) : null}
             </div>
 
-            <div className="mt-0.5 flex flex-col gap-2 px-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-0.5 hidden flex-col gap-2 px-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-1.5">
                 {enablePromptOptimization ? (
                   <Button type="button" variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>

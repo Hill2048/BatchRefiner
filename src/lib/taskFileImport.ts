@@ -1,6 +1,10 @@
 import { Task } from '@/types';
 import { runWithBackgroundYields, yieldToMainThread } from './backgroundQueue';
-import { storeImageAssetFromDataUrl, type StoreImageAssetResult } from './imageAssetStore';
+import { storeImageAssetBlob, type StoreImageAssetResult } from './imageAssetStore';
+
+const SOURCE_UPLOAD_MAX_SIZE = 4000;
+const REFERENCE_UPLOAD_MAX_SIZE = 2400;
+const PREVIEW_MAX_SIZE = 640;
 
 export async function readImageFileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -28,13 +32,20 @@ export interface OptimizedImageAsset {
 export async function optimizeImageToAsset(file: File, kind: 'source' | 'reference'): Promise<OptimizedImageAsset> {
   const rawDataUrl = await readImageFileToDataUrl(file);
   await yieldToMainThread();
-  const dataUrl = await optimizeDataUrlForUpload(rawDataUrl);
+  const uploadMaxSize = kind === 'reference' ? REFERENCE_UPLOAD_MAX_SIZE : SOURCE_UPLOAD_MAX_SIZE;
+  const dataUrl = await optimizeDataUrl(rawDataUrl, uploadMaxSize, 0.88);
   await yieldToMainThread();
   const previewSrc = await optimizeDataUrlForPreview(dataUrl);
-  const asset = await storeImageAssetFromDataUrl(dataUrl, {
+  await yieldToMainThread();
+  const blob = await dataUrlToBlobForStorage(dataUrl);
+  const asset = await storeImageAssetBlob(blob, {
     kind,
     previewSrc,
-    originalName: file.name,
+    metadata: {
+      originalName: file.name,
+      mimeType: blob.type || 'image/jpeg',
+      size: blob.size,
+    },
   });
 
   return {
@@ -47,11 +58,26 @@ export async function optimizeImageToAsset(file: File, kind: 'source' | 'referen
 }
 
 export async function optimizeDataUrlForUpload(dataUrl: string): Promise<string> {
-  return optimizeDataUrl(dataUrl, 4000, 0.88);
+  return optimizeDataUrl(dataUrl, SOURCE_UPLOAD_MAX_SIZE, 0.88);
 }
 
 export async function optimizeDataUrlForPreview(dataUrl: string): Promise<string> {
-  return optimizeDataUrl(dataUrl, 768, 0.72);
+  return optimizeDataUrl(dataUrl, PREVIEW_MAX_SIZE, 0.72);
+}
+
+async function dataUrlToBlobForStorage(dataUrl: string) {
+  try {
+    return await fetch(dataUrl).then((response) => response.blob());
+  } catch {
+    const [header, base64 = ''] = dataUrl.split(',');
+    const mimeType = header.match(/^data:(.*?);base64$/i)?.[1] || 'application/octet-stream';
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeType });
+  }
 }
 
 async function optimizeDataUrl(dataUrl: string, maxSize: number, quality: number): Promise<string> {
@@ -104,7 +130,7 @@ export async function buildImportedTasksFromFiles(
       index: startIndex + index,
       title: file.name,
       description: '',
-      sourceImage: imageAsset.dataUrl,
+      sourceImage: imageAsset.assetId ? undefined : imageAsset.dataUrl,
       sourceImagePreview: imageAsset.previewSrc,
       sourceImageAssetId: imageAsset.assetId,
       referenceImages: [],

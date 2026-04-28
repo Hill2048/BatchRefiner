@@ -1,6 +1,7 @@
 import { delMany, get, keys, set } from 'idb-keyval';
 
 const RESULT_IMAGE_CACHE_PREFIX = 'batch-refiner-result-image:';
+const RESULT_IMAGE_PRIME_CONCURRENCY = 3;
 
 export type ResultImageCacheStatus = 'primed' | 'miss' | 'failed';
 
@@ -43,6 +44,24 @@ export function dataUrlToBlob(dataUrl: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
+async function dataUrlToBlobAsync(dataUrl: string) {
+  try {
+    return await fetch(dataUrl).then((response) => response.blob());
+  } catch {
+    return dataUrlToBlob(dataUrl);
+  }
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      globalThis.setTimeout(resolve, 0);
+      return;
+    }
+    window.setTimeout(resolve, 0);
+  });
+}
+
 async function fetchRemoteImageBlob(src: string) {
   const response = await fetch(src);
   if (!response.ok) {
@@ -54,7 +73,7 @@ async function fetchRemoteImageBlob(src: string) {
 export async function getResultImageBlobWithStatus(src: string): Promise<{ blob: Blob; cacheStatus: ResultImageCacheStatus }> {
   if (isDataUrl(src)) {
     return {
-      blob: dataUrlToBlob(src),
+      blob: await dataUrlToBlobAsync(src),
       cacheStatus: 'primed',
     };
   }
@@ -107,7 +126,21 @@ export async function primeResultImageCache(src?: string | null): Promise<Result
 
 export async function primeTaskResultImageCache(sources: Array<string | undefined | null>) {
   const uniqueSources = Array.from(new Set(sources.filter(Boolean))) as string[];
-  return Promise.all(uniqueSources.map((src) => primeResultImageCache(src)));
+  const results: ResultImageCacheStatus[] = [];
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < uniqueSources.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await primeResultImageCache(uniqueSources[index]);
+      await yieldToBrowser();
+    }
+  }
+
+  const workerCount = Math.min(RESULT_IMAGE_PRIME_CONCURRENCY, uniqueSources.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 export async function clearResultImageCache() {

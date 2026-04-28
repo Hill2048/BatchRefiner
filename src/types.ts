@@ -114,6 +114,7 @@ export interface Task {
   referenceImageAssetIds?: string[];
   promptText?: string;
   promptInputSignature?: string;
+  imageModelOverride?: string;
   resultImage?: string;
   resultImagePreview?: string;
   resultImageOriginal?: string;

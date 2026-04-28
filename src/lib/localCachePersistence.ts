@@ -6,9 +6,11 @@ import { markProjectCacheSaved } from './projectSafetyStatus';
 
 const LOCAL_CACHE_AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
 const LARGE_DATA_URL_LENGTH = 240_000;
+const MAX_LOCAL_CACHE_GENERATION_LOGS = 120;
 
 let autoSaveTimer: number | null = null;
 let isSavingSnapshot = false;
+let lastAutoSavedSignature: string | null = null;
 
 function isLargeDataUrl(value?: string | null) {
   return Boolean(value?.startsWith('data:image/') && value.length > LARGE_DATA_URL_LENGTH);
@@ -30,6 +32,7 @@ function compactResultImageForLocalCache(result: TaskResultImage): TaskResultIma
 function compactTaskForLocalCache(task: Task): Task {
   const nextTask: Task = {
     ...task,
+    sourceImage: task.sourceImageAssetId && isLargeDataUrl(task.sourceImage) ? undefined : task.sourceImage,
     resultImages: task.resultImages?.map(compactResultImageForLocalCache) || [],
   };
 
@@ -62,7 +65,7 @@ function buildLocalCacheProjectSnapshot(): ProjectData {
     globalResolution: state.globalResolution,
     globalImageQuality: state.globalImageQuality,
     globalBatchCount: state.globalBatchCount,
-    generationLogs: state.generationLogs,
+    generationLogs: state.generationLogs.slice(-MAX_LOCAL_CACHE_GENERATION_LOGS),
     createdAt: state.createdAt,
     updatedAt: state.updatedAt,
     tasks: state.tasks.map(compactTaskForLocalCache),
@@ -71,17 +74,24 @@ function buildLocalCacheProjectSnapshot(): ProjectData {
 
 export async function saveLocalCacheSnapshot(options: { requestPermission?: boolean } = {}) {
   if (isSavingSnapshot) return false;
+  const stateBeforeSave = useAppStore.getState();
+  const signature = `${stateBeforeSave.projectId}:${stateBeforeSave.updatedAt}`;
+  if (!options.requestPermission && signature === lastAutoSavedSignature) {
+    return false;
+  }
+
   isSavingSnapshot = true;
 
   try {
     const payload = buildProjectExportPayload(buildLocalCacheProjectSnapshot());
-    const content = JSON.stringify(payload, null, 2);
+    const content = JSON.stringify(payload);
     const saved = options.requestPermission
       ? await writeCacheTextWithPermission('project-autosave.json', content)
       : await writeCacheText('project-autosave.json', content);
     if (saved) {
       const state = useAppStore.getState();
       markProjectCacheSaved(state.projectId, state.updatedAt);
+      lastAutoSavedSignature = `${state.projectId}:${state.updatedAt}`;
     }
     return saved;
   } catch {

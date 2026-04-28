@@ -35,6 +35,35 @@ const LIST_ITEM_HEIGHT = 206;
 const WINDOW_OVERSCAN_ROWS = 3;
 const GRID_MIN_COLUMN_WIDTH = 300;
 const GRID_GAP = 24;
+const MARQUEE_SELECT_THRESHOLD = 6;
+
+type MarqueeRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+type MarqueeCandidateRect = {
+  id: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+type MarqueeSelectionState = {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  currentClientX: number;
+  currentClientY: number;
+  additive: boolean;
+  baseSelectedIds: string[];
+  candidateRects: MarqueeCandidateRect[];
+  lastSelectedIds: string[];
+  hasMoved: boolean;
+};
 
 type DeferredTaskCardProps = {
   taskId: string;
@@ -121,6 +150,11 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
   );
 });
 
+function areStringArraysEqual(first: string[], second: string[]) {
+  if (first.length !== second.length) return false;
+  return first.every((item, index) => item === second[index]);
+}
+
 export function TaskList() {
   const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
   const taskIds = useAppStore((state) => state.taskIds);
@@ -132,6 +166,7 @@ export function TaskList() {
   const selectAllTasks = useAppStore((state) => state.selectAllTasks);
   const clearTaskSelection = useAppStore((state) => state.clearTaskSelection);
   const reorderTasks = useAppStore((state) => state.reorderTasks);
+  const setActiveTask = useAppStore((state) => state.setActiveTask);
 
   const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
   const [dragMode, setDragMode] = React.useState<'idle' | 'workspace-drop' | 'task-drop'>('idle');
@@ -143,6 +178,10 @@ export function TaskList() {
   });
   const workspaceDragDepthRef = React.useRef(0);
   const scrollFrameRef = React.useRef<number | null>(null);
+  const marqueeStateRef = React.useRef<MarqueeSelectionState | null>(null);
+  const marqueeFrameRef = React.useRef<number | null>(null);
+  const suppressNextClickRef = React.useRef(false);
+  const [marqueeRect, setMarqueeRect] = React.useState<MarqueeRect | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -196,6 +235,159 @@ export function TaskList() {
     });
   }, [updateScrollMetrics]);
 
+  const handleWorkspaceClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    if (
+      target.closest('[data-task-card]') ||
+      target.closest('[data-task-toolbar]') ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('textarea') ||
+      target.closest('[role="button"]')
+    ) {
+      return;
+    }
+
+    setActiveTask(null);
+    window.dispatchEvent(new CustomEvent('batch-refiner:new-task-mode'));
+  }, [setActiveTask]);
+
+  const updateMarqueeSelection = React.useCallback((state: MarqueeSelectionState) => {
+    const left = Math.min(state.startClientX, state.currentClientX);
+    const right = Math.max(state.startClientX, state.currentClientX);
+    const top = Math.min(state.startClientY, state.currentClientY);
+    const bottom = Math.max(state.startClientY, state.currentClientY);
+    const hitIds = state.candidateRects
+      .filter((rect) => rect.left <= right && rect.right >= left && rect.top <= bottom && rect.bottom >= top)
+      .map((rect) => rect.id);
+
+    const selectedIds = state.additive
+      ? Array.from(new Set([...state.baseSelectedIds, ...hitIds]))
+      : hitIds;
+
+    if (areStringArraysEqual(state.lastSelectedIds, selectedIds)) return;
+    state.lastSelectedIds = selectedIds;
+    setProjectFields({ selectedTaskIds: selectedIds });
+  }, [setProjectFields]);
+
+  const updateMarqueeRect = React.useCallback((state: MarqueeSelectionState) => {
+    const node = scrollContainerRef.current;
+    if (!node) return;
+
+    const bounds = node.getBoundingClientRect();
+    setMarqueeRect({
+      left: Math.min(state.startClientX, state.currentClientX) - bounds.left + node.scrollLeft,
+      top: Math.min(state.startClientY, state.currentClientY) - bounds.top + node.scrollTop,
+      width: Math.abs(state.currentClientX - state.startClientX),
+      height: Math.abs(state.currentClientY - state.startClientY),
+    });
+  }, []);
+
+  const flushMarqueeFrame = React.useCallback(() => {
+    marqueeFrameRef.current = null;
+    const state = marqueeStateRef.current;
+    if (!state?.hasMoved) return;
+
+    updateMarqueeRect(state);
+    updateMarqueeSelection(state);
+  }, [updateMarqueeRect, updateMarqueeSelection]);
+
+  const scheduleMarqueeFrame = React.useCallback(() => {
+    if (marqueeFrameRef.current != null) return;
+    marqueeFrameRef.current = window.requestAnimationFrame(flushMarqueeFrame);
+  }, [flushMarqueeFrame]);
+
+  const handleWorkspacePointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.pointerType === 'touch') return;
+
+    const target = event.target as HTMLElement;
+    if (
+      target.closest('[data-task-card]') ||
+      target.closest('[data-task-toolbar]') ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('textarea') ||
+      target.closest('[role="button"]')
+    ) {
+      return;
+    }
+
+    const node = scrollContainerRef.current;
+    if (!node) return;
+
+    const cards = node.querySelectorAll('[data-task-card][data-task-id]') as NodeListOf<HTMLElement>;
+    const candidateRects = Array.from(cards)
+      .map((card) => {
+        const rect = card.getBoundingClientRect();
+        const id = card.dataset.taskId;
+        if (!id) return null;
+        return {
+          id,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+        };
+      })
+      .filter((rect): rect is MarqueeCandidateRect => rect !== null);
+
+    marqueeStateRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      currentClientX: event.clientX,
+      currentClientY: event.clientY,
+      additive: event.shiftKey || event.ctrlKey || event.metaKey,
+      baseSelectedIds: selectedTaskIds,
+      candidateRects,
+      lastSelectedIds: selectedTaskIds,
+      hasMoved: false,
+    };
+    node.setPointerCapture(event.pointerId);
+  }, [selectedTaskIds]);
+
+  const handleWorkspacePointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const state = marqueeStateRef.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+
+    state.currentClientX = event.clientX;
+    state.currentClientY = event.clientY;
+
+    const distance = Math.hypot(state.currentClientX - state.startClientX, state.currentClientY - state.startClientY);
+    if (!state.hasMoved && distance < MARQUEE_SELECT_THRESHOLD) return;
+
+    state.hasMoved = true;
+    event.preventDefault();
+    scheduleMarqueeFrame();
+  }, [scheduleMarqueeFrame]);
+
+  const finishMarqueeSelection = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const state = marqueeStateRef.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+
+    const node = scrollContainerRef.current;
+    if (node?.hasPointerCapture(event.pointerId)) {
+      node.releasePointerCapture(event.pointerId);
+    }
+
+    if (state.hasMoved) {
+      suppressNextClickRef.current = true;
+    }
+    if (marqueeFrameRef.current != null) {
+      window.cancelAnimationFrame(marqueeFrameRef.current);
+      marqueeFrameRef.current = null;
+      updateMarqueeRect(state);
+      updateMarqueeSelection(state);
+    }
+    marqueeStateRef.current = null;
+    setMarqueeRect(null);
+  }, [updateMarqueeRect, updateMarqueeSelection]);
+
   React.useLayoutEffect(() => {
     updateScrollMetrics();
     const node = scrollContainerRef.current;
@@ -208,6 +400,10 @@ export function TaskList() {
       if (scrollFrameRef.current != null) {
         window.cancelAnimationFrame(scrollFrameRef.current);
         scrollFrameRef.current = null;
+      }
+      if (marqueeFrameRef.current != null) {
+        window.cancelAnimationFrame(marqueeFrameRef.current);
+        marqueeFrameRef.current = null;
       }
     };
   }, [updateScrollMetrics]);
@@ -333,9 +529,8 @@ export function TaskList() {
 
   const allSelected = tasksCount > 0 && selectedTaskIds.length === tasksCount;
   const selectedTaskIdSet = React.useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
-  const shouldRenderFullList = Boolean(activeDragId) || dragMode !== 'idle';
   const virtualWindow = React.useMemo(() => {
-    if (shouldRenderFullList || taskIds.length === 0) {
+    if (taskIds.length === 0) {
       return {
         ids: taskIds,
         topSpacer: 0,
@@ -360,7 +555,7 @@ export function TaskList() {
       topSpacer: firstRow * rowHeight,
       bottomSpacer: Math.max(0, (rowCount - lastRow) * rowHeight),
     };
-  }, [dragMode, activeDragId, scrollMetrics.height, scrollMetrics.top, scrollMetrics.width, shouldRenderFullList, taskIds, viewMode]);
+  }, [scrollMetrics.height, scrollMetrics.top, scrollMetrics.width, taskIds, viewMode]);
 
   return (
     <div
@@ -370,8 +565,25 @@ export function TaskList() {
       onDragOver={handleWorkspaceDragOver}
       onDragLeave={handleWorkspaceDragLeave}
       onDrop={handleWorkspaceDrop}
+      onClick={handleWorkspaceClick}
+      onPointerDown={handleWorkspacePointerDown}
+      onPointerMove={handleWorkspacePointerMove}
+      onPointerUp={finishMarqueeSelection}
+      onPointerCancel={finishMarqueeSelection}
       className="relative mx-auto flex w-full max-w-[1600px] flex-1 flex-col overflow-y-auto p-4 outline-none custom-scrollbar md:p-6 xl:p-8"
     >
+      {marqueeRect ? (
+        <div
+          className="pointer-events-none absolute z-[60] rounded-[18px] border border-button-main/45 bg-button-main/10 shadow-[0_10px_28px_rgba(217,119,87,0.12)] backdrop-blur-[1px]"
+          style={{
+            left: marqueeRect.left,
+            top: marqueeRect.top,
+            width: marqueeRect.width,
+            height: marqueeRect.height,
+          }}
+        />
+      ) : null}
+
       {dragMode === 'workspace-drop' && (
         <div className="pointer-events-none absolute inset-0 z-50 m-4 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-button-main/40 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-md animate-in fade-in duration-200">
           <Upload className="mb-4 h-12 w-12 text-button-main/60" strokeWidth={1.5} />
@@ -382,7 +594,7 @@ export function TaskList() {
         </div>
       )}
 
-      <div className="mb-6 flex shrink-0 flex-col gap-4 md:mb-8 lg:flex-row lg:items-center lg:justify-between">
+      <div data-task-toolbar className="mb-6 flex shrink-0 flex-col gap-4 md:mb-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <h2 className="text-[18.9px] font-serif font-medium tracking-tight text-foreground">
             当前任务
@@ -427,29 +639,6 @@ export function TaskList() {
             </div>
           )}
         </div>
-
-        <div className="flex self-start rounded-full border border-border/60 bg-background p-1 shadow-sm lg:self-auto">
-          <button
-            onClick={() => setProjectFields({ viewMode: 'grid' })}
-            className={`rounded-full px-3.5 py-1 text-[12.6px] font-medium transition-all duration-300 ${
-              viewMode === 'grid'
-                ? 'bg-white text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
-                : 'text-text-secondary hover:text-foreground'
-            }`}
-          >
-            网格
-          </button>
-          <button
-            onClick={() => setProjectFields({ viewMode: 'list' })}
-            className={`rounded-full px-3.5 py-1 text-[12.6px] font-medium transition-all duration-300 ${
-              viewMode === 'list'
-                ? 'bg-white text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
-                : 'text-text-secondary hover:text-foreground'
-            }`}
-          >
-            列表
-          </button>
-        </div>
       </div>
 
       {tasksCount === 0 ? (
@@ -464,11 +653,11 @@ export function TaskList() {
           onDragEnd={handleDragEnd}
         >
           <SortableContext
-            items={shouldRenderFullList ? taskIds : virtualWindow.ids}
+            items={virtualWindow.ids}
             strategy={viewMode === 'grid' ? rectSortingStrategy : verticalListSortingStrategy}
           >
             <div
-              className="grid gap-4 pb-12 transition-all duration-300 md:gap-6"
+              className="grid gap-4 pb-[420px] transition-all duration-300 md:gap-6"
               style={{
                 gridTemplateColumns:
                   viewMode === 'grid'
@@ -492,7 +681,7 @@ export function TaskList() {
                   taskId={id}
                   viewMode={viewMode}
                   scrollRoot={scrollContainerRef.current}
-                  forceRender={shouldRenderFullList}
+                  forceRender={activeDragId === id || hoverTaskId === id}
                   isFileDropTarget={hoverTaskId === id}
                   onFileDragEnter={handleTaskFileDragEnter}
                   onFileDragLeave={handleTaskFileDragLeave}

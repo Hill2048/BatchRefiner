@@ -21,7 +21,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const PROMPT_REQUEST_TIMEOUT_MS = 90_000;
 const IMAGE_REQUEST_TIMEOUT_MS = 180_000;
 const YUNWU_GPT_IMAGE_REQUEST_TIMEOUT_MS = 300_000;
-const IMAGE_UPDATE_FLUSH_MS = 350;
+const IMAGE_UPDATE_FLUSH_MS = 650;
 
 const GEMINI_NATIVE_IMAGE_INPUT_MODELS = [
   "gemini-2.0-flash-preview-image-generation",
@@ -388,19 +388,10 @@ function getImageRequestMode(hasImageInputs: boolean): ImageRequestMode {
 }
 
 function getImageApiBaseUrl(store: {
-  apiBaseUrl?: string;
-  imageApiBaseUrl?: string;
-  textApiBaseUrl?: string;
   textToImageApiBaseUrl?: string;
   imageToImageApiBaseUrl?: string;
 }, mode?: ImageRequestMode) {
-  const modeBaseUrl =
-    mode === "image-to-image"
-      ? store.imageToImageApiBaseUrl
-      : mode === "text-to-image"
-        ? store.textToImageApiBaseUrl
-        : "";
-  return (modeBaseUrl || store.imageApiBaseUrl || store.apiBaseUrl || store.textApiBaseUrl || "").trim();
+  return ((mode === "image-to-image" ? store.imageToImageApiBaseUrl : store.textToImageApiBaseUrl) || "").trim();
 }
 
 function getImageApiPath(store: { imageApiPath?: string; textToImageApiPath?: string; imageToImageApiPath?: string }, mode?: ImageRequestMode) {
@@ -436,23 +427,22 @@ function getTextApiKey(store: { apiKey?: string; textApiKey?: string }) {
 }
 
 function getImageApiKey(store: {
-  apiKey?: string;
-  imageApiKey?: string;
-  textApiKey?: string;
   textToImageApiKey?: string;
   imageToImageApiKey?: string;
 }, mode?: ImageRequestMode) {
-  const modeKey =
-    mode === "image-to-image"
-      ? store.imageToImageApiKey
-      : mode === "text-to-image"
-        ? store.textToImageApiKey
-        : "";
-  return (modeKey || store.imageApiKey || store.textApiKey || store.apiKey || "").trim();
+  return ((mode === "image-to-image" ? store.imageToImageApiKey : store.textToImageApiKey) || "").trim();
 }
 
 function getImageModelForMode(store: { imageModel?: string; textToImageModel?: string; imageToImageModel?: string }, mode: ImageRequestMode) {
   return (mode === "image-to-image" ? store.imageToImageModel : store.textToImageModel) || store.imageModel || "";
+}
+
+function getEffectiveImageModelForMode(
+  task: Pick<Task, "imageModelOverride"> | undefined,
+  store: { imageModel?: string; textToImageModel?: string; imageToImageModel?: string },
+  mode: ImageRequestMode,
+) {
+  return task?.imageModelOverride?.trim() || getImageModelForMode(store, mode);
 }
 
 function isGeminiGatewayPreset(platformPreset: PlatformPreset) {
@@ -506,6 +496,27 @@ function getExecutionReadyTaskPrompt(task: Pick<Task, "promptText" | "descriptio
 
 function getMissingPromptError() {
   return createStageError("当前任务缺少可执行文本，请先填写生成指令或 AI 提示词。", "Image Generation");
+}
+
+function getMissingImageApiConfigError(mode: ImageRequestMode, missing: Array<"url" | "key">) {
+  const label = mode === "image-to-image" ? "图生图" : "文生图";
+  const missingLabel = missing.map((item) => (item === "url" ? "API URL" : "API Key")).join(" 和 ");
+  return createStageError(`请先在 API 设置里填写${label}的 ${missingLabel}，当前不会使用任何预设地址或 Key。`, "Image Generation");
+}
+
+function getImageApiConfigErrorForTask(task: Task, store: ReturnType<typeof useAppStore.getState>) {
+  const mode = getImageRequestMode(taskHasImageInputs(task, store.globalReferenceImages));
+  const baseUrl = getImageApiBaseUrl(store, mode);
+  const apiKey = getImageApiKey(store, mode);
+  const missing: Array<"url" | "key"> = [];
+  if (!baseUrl) missing.push("url");
+  if (!apiKey) missing.push("key");
+  return missing.length > 0 ? getMissingImageApiConfigError(mode, missing) : null;
+}
+
+function assertImageApiConfiguredForTask(task: Task) {
+  const error = getImageApiConfigErrorForTask(task, useAppStore.getState());
+  if (error) throw error;
 }
 
 export function taskHasImageInputs(task: Task, globalReferenceImages: string[]) {
@@ -665,7 +676,7 @@ function assertImageInputSupport(task: Task) {
   const imageRequestMode = getImageRequestMode(true);
   const imageApiBaseUrl = getImageApiBaseUrl(store, imageRequestMode);
   const imageApiKey = getImageApiKey(store, imageRequestMode);
-  const imageModel = getImageModelForMode(store, imageRequestMode);
+  const imageModel = getEffectiveImageModelForMode(task, store, imageRequestMode);
 
   if (!supportsImageInput(imageModel, imageApiBaseUrl, imageApiKey, platformPreset)) {
     throw createStageError(
@@ -1716,12 +1727,23 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
   const useSelected = selectedTaskIds.length > 0;
   const tasksToProcess = store.tasks.filter(t => {
     if (useSelected && !selectedTaskIds.includes(t.id)) return false;
-    return t.status !== "Success";
+    return mode === "prompts" ? t.status !== "Success" : true;
   });
 
   if (tasksToProcess.length === 0) {
     store.setBatchRunning(false);
     return;
+  }
+
+  if (mode === "all" || mode === "images") {
+    const firstConfigError = tasksToProcess
+      .map((task) => getImageApiConfigErrorForTask(task, useAppStore.getState()))
+      .find(Boolean);
+    if (firstConfigError) {
+      toast.error(firstConfigError.message);
+      store.setBatchRunning(false);
+      return;
+    }
   }
 
   await runTaskExecutionQueue({
@@ -1747,7 +1769,7 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
           mode,
           platformPreset: getPlatformPreset(),
           textModel: store.textModel,
-          imageModel: store.imageModel,
+          imageModel: task.imageModelOverride || store.imageModel,
           enablePromptOptimization: promptOptimizationEnabled,
           globalReferenceImageCount: store.globalReferenceImages.length,
         }),
@@ -1906,7 +1928,7 @@ export async function processSingleTask(taskId: string) {
     data: buildGenerationTaskSnapshot(task, {
       platformPreset: getPlatformPreset(),
       textModel: store.textModel,
-      imageModel: store.imageModel,
+      imageModel: task.imageModelOverride || store.imageModel,
       enablePromptOptimization: shouldOptimizePrompts(),
       globalReferenceImageCount: store.globalReferenceImages.length,
     }),
@@ -1915,6 +1937,7 @@ export async function processSingleTask(taskId: string) {
   try {
     const currentTask = useAppStore.getState().taskLookup[taskId];
     if (!currentTask) return;
+    assertImageApiConfiguredForTask(currentTask);
 
     let promptText = getExecutionReadyTaskPrompt(currentTask);
     if (shouldOptimizePrompts() && !isTaskPromptCurrent(currentTask)) {
@@ -1974,6 +1997,7 @@ export async function processSingleTask(taskId: string) {
       requestCount: getBatchCountNumber(getEffectiveTaskBatchCount(currentTask)),
     });
   } catch (error: any) {
+    if (error?.message) toast.error(error.message);
     store.updateTask(taskId, {
       status: "Error",
       progressStage: undefined,
@@ -2419,6 +2443,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
   const task = store.taskLookup[taskId];
   const effectivePromptText = task ? getRenderableTaskPrompt(task) : null;
   if (!task || !effectivePromptText) throw getMissingPromptError();
+  assertImageApiConfiguredForTask(task);
   const startedAt = Date.now();
   const logSessionId = ensureGenerationLogSession(taskId, context);
   updateTaskProgress(taskId, "Rendering", "准备参数");
@@ -2432,7 +2457,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
   const imageApiBaseUrl = getImageApiBaseUrl(store, imageRequestMode);
   const imageApiKey = getImageApiKey(store, imageRequestMode);
   const imageApiPath = getImageApiPath(store, imageRequestMode);
-  const requestedImageModel = getImageModelForMode(store, imageRequestMode);
+  const requestedImageModel = getEffectiveImageModelForMode(task, store, imageRequestMode);
   const resolvedModel = resolveImageModel(requestedImageModel, resolution, platformPreset);
   const isYunwuGptImage = isYunwuGptImageModel(resolvedModel.actualModel, platformPreset);
   const isGeminiGateway = platformPreset === "yunwu" && !!imageApiBaseUrl && !!imageApiKey && !isYunwuGptImage;
@@ -2680,39 +2705,6 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         },
       });
 
-      appendGenerationLogEvent(logSessionId, {
-        stage: "image",
-        event: "image.request.started",
-        message: "开始请求生图 API",
-        data: {
-          requestPath: getRequestPathLabel(generationsUrl),
-          method: "POST",
-          requestType: "openai_image_generations",
-          body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
-        },
-      });
-      appendGenerationLogEvent(logSessionId, {
-        stage: "image",
-        event: "image.request.started",
-        message: "寮€濮嬭姹傜敓鍥?API",
-        data: {
-          requestPath: getRequestPathLabel(generationsUrl),
-          method: "POST",
-          requestType: "openai_image_generations",
-          body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
-        },
-      });
-      appendGenerationLogEvent(logSessionId, {
-        stage: "image",
-        event: "image.request.started",
-        message: "寮€濮嬭姹傜敓鍥?API",
-        data: {
-          requestPath: getRequestPathLabel(generationsUrl),
-          method: "POST",
-          requestType: "openai_image_generations",
-          body: summarizeJsonImageRequestBody(requestBody, promptForGeneration),
-        },
-      });
       const extracted = await fetchImageResultWithOptionalStream(generationsUrl, {
         method: "POST",
         headers: {
@@ -2924,10 +2916,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
       return finalized;
     }
 
-    const apiKey = getBuiltInGeminiApiKey();
-    if (!apiKey) {
-      throw new Error("Missing built-in Gemini API Key for image generation. For public deployments, use the in-app API settings instead of bundling a key into the frontend.");
-    }
+    const geminiBaseUrl = normalizeGeminiBaseUrl(imageApiBaseUrl);
 
     if (hasImageInputs) {
       updateTaskProgress(taskId, "Rendering", "上传到 API");
@@ -2945,7 +2934,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
         });
       });
 
-      const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel.actualModel}:generateContent?key=${apiKey}`, {
+      const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${resolvedModel.actualModel}:generateContent?key=${encodeURIComponent(imageApiKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2996,7 +2985,7 @@ async function runSingleImageGeneration(taskId: string, context: GenerationLogCo
     }
 
     updateTaskProgress(taskId, "Rendering", "请求 API");
-    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel.actualModel}:predict?key=${apiKey}`, {
+    const res = await fetchWithTimeout(`${geminiBaseUrl}/models/${resolvedModel.actualModel}:predict?key=${encodeURIComponent(imageApiKey)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -3107,7 +3096,7 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
           },
         });
       }
-      imageNotifier?.queue(createdImage, [...images], failedCount);
+      imageNotifier?.queue(createdImage, images, failedCount);
     } catch (error) {
       failedCount += 1;
       if (logSessionId) {
