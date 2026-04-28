@@ -14,6 +14,7 @@ import { Lightbox } from './components/workspace/Lightbox';
 import { QuotaStatus } from './components/layout/QuotaStatus';
 import { Toaster } from './components/ui/sonner';
 import { Button } from './components/ui/button';
+import { UnsavedRefreshGuard } from './components/UnsavedRefreshGuard';
 import { useAppStore } from './store';
 import { startLocalCacheAutoSave } from './lib/localCachePersistence';
 
@@ -256,6 +257,7 @@ export default function App() {
 
       <Toaster position="bottom-right" />
       <Lightbox />
+      <UnsavedRefreshGuard />
     </div>
   );
 }

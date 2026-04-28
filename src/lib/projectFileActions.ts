@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 import { useAppStore } from "@/store";
 import { buildProjectExportPayload } from "@/lib/projectSnapshot";
+import { markProjectFileSaved } from "@/lib/projectSafetyStatus";
 import {
   clearProjectFileHandle,
   ensureProjectFilePermission,
@@ -35,6 +36,7 @@ export async function exportCurrentProjectFile() {
       }
 
       await writeProjectFile(handle, data);
+      markProjectFileSaved(state.projectId, state.updatedAt);
       toast.success(
         reusedExistingFile
           ? `项目空间已覆盖保存，并写入 ${successfulPromptCount} 条成功提示词`
@@ -49,6 +51,7 @@ export async function exportCurrentProjectFile() {
   const { saveAs } = await import("file-saver");
   const blob = new Blob([data], { type: "application/json;charset=utf-8" });
   saveAs(blob, filename);
+  markProjectFileSaved(state.projectId, state.updatedAt);
   toast.success(`项目空间已导出，并写入 ${successfulPromptCount} 条成功提示词`);
 }
 
@@ -65,6 +68,8 @@ export function importProjectFile() {
       const result = loadEvent.target?.result;
       if (typeof result !== "string") return;
       useAppStore.getState().loadProjectFromJson(result);
+      const state = useAppStore.getState();
+      markProjectFileSaved(state.projectId, state.updatedAt);
       toast.success("成功加载项目空间");
     };
     reader.readAsText(file);

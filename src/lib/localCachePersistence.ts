@@ -1,7 +1,8 @@
 import { useAppStore } from '@/store';
 import type { ProjectData, Task, TaskResultImage } from '@/types';
 import { buildProjectExportPayload } from './projectSnapshot';
-import { writeCacheText } from './cacheDirectory';
+import { writeCacheText, writeCacheTextWithPermission } from './cacheDirectory';
+import { markProjectCacheSaved } from './projectSafetyStatus';
 
 const LOCAL_CACHE_AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
 const LARGE_DATA_URL_LENGTH = 240_000;
@@ -68,13 +69,21 @@ function buildLocalCacheProjectSnapshot(): ProjectData {
   };
 }
 
-export async function saveLocalCacheSnapshot() {
+export async function saveLocalCacheSnapshot(options: { requestPermission?: boolean } = {}) {
   if (isSavingSnapshot) return false;
   isSavingSnapshot = true;
 
   try {
     const payload = buildProjectExportPayload(buildLocalCacheProjectSnapshot());
-    return await writeCacheText('project-autosave.json', JSON.stringify(payload, null, 2));
+    const content = JSON.stringify(payload, null, 2);
+    const saved = options.requestPermission
+      ? await writeCacheTextWithPermission('project-autosave.json', content)
+      : await writeCacheText('project-autosave.json', content);
+    if (saved) {
+      const state = useAppStore.getState();
+      markProjectCacheSaved(state.projectId, state.updatedAt);
+    }
+    return saved;
   } catch {
     return false;
   } finally {

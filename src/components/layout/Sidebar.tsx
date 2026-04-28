@@ -104,6 +104,15 @@ function getQuickSwitchImageModel(target: "gemini" | "gpt", currentModel?: strin
   }
   return "gemini-3.1-flash-image-preview";
 }
+
+const GLOBAL_REFERENCE_IMPORT_BATCH_SIZE = 4;
+
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
 export function Sidebar({
   className = "",
   style,
@@ -120,6 +129,10 @@ export function Sidebar({
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [isGlobalReferenceDragging, setIsGlobalReferenceDragging] = useState(false);
+  const [globalReferenceImportProgress, setGlobalReferenceImportProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   const [isSkillEditing, setIsSkillEditing] = useState(false);
   const [isMarkdownEditorOpen, setIsMarkdownEditorOpen] = useState(false);
@@ -634,19 +647,60 @@ export function Sidebar({
       return;
     }
 
-    const importedImages = await buildReferenceImagesFromFiles(imageFiles);
-    if (importedImages.length === 0) {
-      toast.info('没有成功导入图片');
+    if (globalReferenceImportProgress) {
+      toast.info('参考图正在导入中，请稍等当前批次完成');
       return;
     }
 
-    setProjectFields({
-      globalReferenceImages: [
-        ...useAppStore.getState().globalReferenceImages,
-        ...importedImages,
-      ],
-    });
-    toast.success(`已导入 ${importedImages.length} 张全局参考图`);
+    let importedCount = 0;
+    let failedCount = 0;
+    const totalCount = imageFiles.length;
+    const progressToastId = toast.loading(`正在分批导入参考图 0/${totalCount}`);
+    setGlobalReferenceImportProgress({ done: 0, total: totalCount });
+
+    try {
+      for (let index = 0; index < imageFiles.length; index += GLOBAL_REFERENCE_IMPORT_BATCH_SIZE) {
+        const batch = imageFiles.slice(index, index + GLOBAL_REFERENCE_IMPORT_BATCH_SIZE);
+
+        try {
+          const importedImages = await buildReferenceImagesFromFiles(batch);
+          if (importedImages.length > 0) {
+            importedCount += importedImages.length;
+            setProjectFields({
+              globalReferenceImages: [
+                ...useAppStore.getState().globalReferenceImages,
+                ...importedImages,
+              ],
+            });
+          }
+          failedCount += batch.length - importedImages.length;
+        } catch {
+          failedCount += batch.length;
+        }
+
+        const doneCount = Math.min(index + batch.length, totalCount);
+        setGlobalReferenceImportProgress({ done: doneCount, total: totalCount });
+        toast.loading(`正在分批导入参考图 ${doneCount}/${totalCount}，已加入 ${importedCount} 张`, {
+          id: progressToastId,
+        });
+        await waitForNextPaint();
+      }
+
+      if (importedCount === 0) {
+        toast.info('没有成功导入图片', { id: progressToastId });
+        return;
+      }
+
+      if (failedCount > 0) {
+        toast.warning(`已导入 ${importedCount} 张全局参考图，失败 ${failedCount} 张`, {
+          id: progressToastId,
+        });
+      } else {
+        toast.success(`已导入 ${importedCount} 张全局参考图`, { id: progressToastId });
+      }
+    } finally {
+      setGlobalReferenceImportProgress(null);
+    }
   };
 
   const handleGlobalImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -927,15 +981,23 @@ export function Sidebar({
               ))}
               <div
                 className={`aspect-square flex flex-col items-center justify-center gap-1 border border-dashed rounded-xl text-text-secondary cursor-pointer bg-transparent px-2 text-center transition-colors ${
-                  isGlobalReferenceDragging
+                  globalReferenceImportProgress
+                    ? 'border-button-main/40 bg-button-main/[0.06] text-button-main'
+                    : isGlobalReferenceDragging
                     ? 'border-button-main bg-button-main/[0.08] text-button-main'
                     : 'border-[#D4D2CD] hover:bg-black/5'
                 }`}
-                onClick={() => fileInputRef.current?.click()}
-                title="点击选择，或拖入多张图片"
+                onClick={() => {
+                  if (!globalReferenceImportProgress) fileInputRef.current?.click();
+                }}
+                title={globalReferenceImportProgress ? '参考图正在分批导入' : '点击选择，或拖入多张图片'}
               >
                 <Upload className="w-4 h-4 opacity-70" strokeWidth={1.5} />
-                <span className="text-[9.45px] leading-tight">拖入多张</span>
+                <span className="text-[9.45px] leading-tight">
+                  {globalReferenceImportProgress
+                    ? `${globalReferenceImportProgress.done}/${globalReferenceImportProgress.total}`
+                    : '拖入多张'}
+                </span>
               </div>
               <input
                 type="file"

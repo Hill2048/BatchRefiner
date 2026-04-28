@@ -81,11 +81,17 @@ export async function ensureCacheDirectoryPermission(
   return requested === 'granted';
 }
 
-export async function writeCacheBlob(filename: string, blob: Blob) {
+export async function writeCacheBlob(
+  filename: string,
+  blob: Blob,
+  options: { requestPermission?: boolean } = {},
+) {
   const handle = await getCacheDirectoryHandle();
   if (!handle) return false;
 
-  const hasPermission = await ensureCacheDirectoryPermission(handle, { request: false });
+  const hasPermission = await ensureCacheDirectoryPermission(handle, {
+    request: options.requestPermission === true,
+  });
   if (!hasPermission) return false;
 
   const root = await getCacheRootDirectory(handle, true);
@@ -98,6 +104,12 @@ export async function writeCacheBlob(filename: string, blob: Blob) {
 
 export async function writeCacheText(filename: string, content: string) {
   return writeCacheBlob(filename, new Blob([content], { type: 'application/json;charset=utf-8' }));
+}
+
+export async function writeCacheTextWithPermission(filename: string, content: string) {
+  return writeCacheBlob(filename, new Blob([content], { type: 'application/json;charset=utf-8' }), {
+    requestPermission: true,
+  });
 }
 
 export async function clearCacheDirectoryFiles() {
