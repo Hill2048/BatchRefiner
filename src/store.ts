@@ -23,6 +23,7 @@ let persistTimeout: ReturnType<typeof setTimeout> | undefined;
 let pendingPersistNotice: string | null = null;
 let pendingPersistValue: StorageValue<Partial<AppState>> | null = null;
 let pendingPersistResolvers: Array<() => void> = [];
+const PERSIST_WRITE_DELAY_MS = 800;
 
 const draftFlushers = new Map<string, () => void>();
 
@@ -120,10 +121,33 @@ interface AppState extends ProjectData {
   unregisterDraftFlusher: (id: string) => void;
 }
 
+function resolvePersistWrites(resolvers: Array<() => void>) {
+  resolvers.forEach((resolve) => resolve());
+}
+
 function resolvePendingPersistWrites() {
   const resolvers = pendingPersistResolvers;
   pendingPersistResolvers = [];
-  resolvers.forEach((resolve) => resolve());
+  resolvePersistWrites(resolvers);
+}
+
+async function writePersistedValue(
+  name: string,
+  value: StorageValue<Partial<AppState>>,
+  resolvers: Array<() => void>,
+) {
+  try {
+    const serialized = JSON.stringify(value);
+    const compacted = compactPersistedStateValue(serialized);
+    if (compacted.compacted) {
+      queuePersistNotice();
+    }
+    await set(name, compacted.value);
+  } catch {
+    // Ignore storage failures in non-browser or restricted environments.
+  } finally {
+    resolvePersistWrites(resolvers);
+  }
 }
 
 const idbStorage: PersistStorage<Partial<AppState>, Promise<void>> = {
@@ -147,27 +171,27 @@ const idbStorage: PersistStorage<Partial<AppState>, Promise<void>> = {
       return null;
     }
   },
-  setItem: async (name: string, value: StorageValue<Partial<AppState>>): Promise<void> => {
+  setItem: (name: string, value: StorageValue<Partial<AppState>>): Promise<void> => {
     pendingPersistValue = value;
     if (persistTimeout) clearTimeout(persistTimeout);
-    const valueToPersist = pendingPersistValue;
-    pendingPersistValue = null;
-    persistTimeout = undefined;
 
-    if (valueToPersist) {
-      try {
-        const serialized = JSON.stringify(valueToPersist);
-        const compacted = compactPersistedStateValue(serialized);
-        if (compacted.compacted) {
-          queuePersistNotice();
+    return new Promise((resolve) => {
+      pendingPersistResolvers.push(resolve);
+      persistTimeout = setTimeout(() => {
+        const valueToPersist = pendingPersistValue;
+        const resolvers = pendingPersistResolvers;
+        pendingPersistValue = null;
+        pendingPersistResolvers = [];
+        persistTimeout = undefined;
+
+        if (!valueToPersist) {
+          resolvePersistWrites(resolvers);
+          return;
         }
-        await set(name, compacted.value);
-      } catch {
-        // Ignore storage failures in non-browser or restricted environments.
-      }
-    }
 
-    resolvePendingPersistWrites();
+        void writePersistedValue(name, valueToPersist, resolvers);
+      }, PERSIST_WRITE_DELAY_MS);
+    });
   },
   removeItem: async (name: string): Promise<void> => {
     pendingPersistValue = null;
