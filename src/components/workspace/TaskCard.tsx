@@ -167,7 +167,7 @@ export const TaskCard = React.memo(function TaskCard({
   const enablePromptOptimization = useAppStore(state => state.enablePromptOptimization !== false);
   const imageModel = useAppStore(state => state.imageModel);
   const isBatchRunning = useAppStore((state) => state.isBatchRunning);
-  const tasksCount = useAppStore((state) => state.tasks.length);
+  const tasksCount = useAppStore((state) => state.tasksCount);
 
   if (!task) return null;
 
@@ -512,7 +512,7 @@ export const TaskCard = React.memo(function TaskCard({
     e.stopPropagation();
     flushPendingTextChanges();
     const previewPromise = generateTaskPrompt(task.id).then((generatedPrompt) => {
-      const latestTask = useAppStore.getState().tasks.find((item) => item.id === task.id);
+      const latestTask = useAppStore.getState().taskLookup[task.id];
       const hasAnyResults = Boolean(latestTask?.resultImages?.length || latestTask?.resultImage);
       updateTask(task.id, {
         promptText: generatedPrompt.promptText,

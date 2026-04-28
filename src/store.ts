@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist, StateStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
+import type { PersistStorage, StorageValue } from 'zustand/middleware';
 import { del, get, set } from 'idb-keyval';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -18,9 +19,10 @@ import {
   withDefaultSkill,
 } from './lib/taskMigration';
 
-let persistTimeout: ReturnType<typeof setTimeout>;
-let pendingState: string | null = null;
+let persistTimeout: ReturnType<typeof setTimeout> | undefined;
 let pendingPersistNotice: string | null = null;
+let pendingPersistValue: StorageValue<Partial<AppState>> | null = null;
+let pendingPersistResolvers: Array<() => void> = [];
 
 const draftFlushers = new Map<string, () => void>();
 
@@ -45,64 +47,34 @@ function buildTaskLookup(tasks: Task[]) {
   return Object.fromEntries(tasks.map((task) => [task.id, task])) as Record<string, Task>;
 }
 
+function buildTaskIds(tasks: Task[]) {
+  return tasks.map((task) => task.id);
+}
+
+function countCompletedTasks(tasks: Task[]) {
+  return tasks.reduce((count, task) => count + (task.status === 'Success' ? 1 : 0), 0);
+}
+
+function buildTaskCollectionState(tasks: Task[]) {
+  return {
+    tasks,
+    taskLookup: buildTaskLookup(tasks),
+    taskIds: buildTaskIds(tasks),
+    tasksCount: tasks.length,
+    completedTaskCount: countCompletedTasks(tasks),
+  };
+}
+
 function hasTaskUpdates(existingTask: Task, updates: Partial<Task>) {
   const updateKeys = Object.keys(updates) as Array<keyof Task>;
   return updateKeys.some((key) => !Object.is(existingTask[key], updates[key]));
 }
 
-const idbStorage: StateStorage = {
-  getItem: async (name: string): Promise<string | null> => {
-    try {
-      const storedValue = (await get(name)) || null;
-      if (typeof storedValue !== 'string') return null;
-
-      const compacted = compactPersistedStateValue(storedValue);
-      if (compacted.compacted) {
-        queuePersistNotice();
-        try {
-          await set(name, compacted.value);
-        } catch {
-          // Ignore storage failures in non-browser or restricted environments.
-        }
-      }
-
-      return compacted.value;
-    } catch {
-      return null;
-    }
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    const compacted = compactPersistedStateValue(value);
-    pendingState = compacted.value;
-    if (compacted.compacted) {
-      queuePersistNotice();
-    }
-    if (persistTimeout) clearTimeout(persistTimeout);
-    return new Promise((resolve) => {
-      persistTimeout = setTimeout(async () => {
-        if (pendingState) {
-          try {
-            await set(name, pendingState);
-          } catch {
-            // Ignore storage failures in non-browser or restricted environments.
-          }
-          pendingState = null;
-        }
-        resolve();
-      }, 500);
-    });
-  },
-  removeItem: async (name: string): Promise<void> => {
-    try {
-      await del(name);
-    } catch {
-      // Ignore storage failures in non-browser or restricted environments.
-    }
-  },
-};
-
 interface AppState extends ProjectData {
   taskLookup: Record<string, Task>;
+  taskIds: string[];
+  tasksCount: number;
+  completedTaskCount: number;
   activeTaskId: string | null;
   isBatchRunning: boolean;
   viewMode: 'grid' | 'list';
@@ -148,11 +120,81 @@ interface AppState extends ProjectData {
   unregisterDraftFlusher: (id: string) => void;
 }
 
+function resolvePendingPersistWrites() {
+  const resolvers = pendingPersistResolvers;
+  pendingPersistResolvers = [];
+  resolvers.forEach((resolve) => resolve());
+}
+
+const idbStorage: PersistStorage<Partial<AppState>, Promise<void>> = {
+  getItem: async (name: string): Promise<StorageValue<Partial<AppState>> | null> => {
+    try {
+      const storedValue = (await get(name)) || null;
+      if (typeof storedValue !== 'string') return null;
+
+      const compacted = compactPersistedStateValue(storedValue);
+      if (compacted.compacted) {
+        queuePersistNotice();
+        try {
+          await set(name, compacted.value);
+        } catch {
+          // Ignore storage failures in non-browser or restricted environments.
+        }
+      }
+
+      return JSON.parse(compacted.value) as StorageValue<Partial<AppState>>;
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (name: string, value: StorageValue<Partial<AppState>>): Promise<void> => {
+    pendingPersistValue = value;
+    if (persistTimeout) clearTimeout(persistTimeout);
+    return new Promise((resolve) => {
+      pendingPersistResolvers.push(resolve);
+      persistTimeout = setTimeout(async () => {
+        const valueToPersist = pendingPersistValue;
+        pendingPersistValue = null;
+        persistTimeout = undefined;
+
+        if (valueToPersist) {
+          try {
+            const serialized = JSON.stringify(valueToPersist);
+            const compacted = compactPersistedStateValue(serialized);
+            if (compacted.compacted) {
+              queuePersistNotice();
+            }
+            await set(name, compacted.value);
+          } catch {
+            // Ignore storage failures in non-browser or restricted environments.
+          }
+        }
+
+        resolvePendingPersistWrites();
+      }, 1000);
+      (persistTimeout as { unref?: () => void }).unref?.();
+    });
+  },
+  removeItem: async (name: string): Promise<void> => {
+    pendingPersistValue = null;
+    if (persistTimeout) {
+      clearTimeout(persistTimeout);
+      persistTimeout = undefined;
+    }
+    resolvePendingPersistWrites();
+    try {
+      await del(name);
+    } catch {
+      // Ignore storage failures in non-browser or restricted environments.
+    }
+  },
+};
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       ...initialProjectState,
-      taskLookup: buildTaskLookup(initialProjectState.tasks),
+      ...buildTaskCollectionState(initialProjectState.tasks),
       activeTaskId: null,
       isBatchRunning: false,
       viewMode: 'grid',
@@ -172,12 +214,14 @@ export const useAppStore = create<AppState>()(
 
       setProjectFields: (fields) =>
         set((state) => {
-          const nextTasks = fields.tasks ?? state.tasks;
+          const hasTaskField = Object.prototype.hasOwnProperty.call(fields, 'tasks');
+          const taskCollectionState = hasTaskField
+            ? buildTaskCollectionState(fields.tasks ?? [])
+            : {};
           return {
             ...state,
             ...fields,
-            tasks: nextTasks,
-            taskLookup: buildTaskLookup(nextTasks),
+            ...taskCollectionState,
             updatedAt: Date.now(),
           };
         }),
@@ -186,8 +230,7 @@ export const useAppStore = create<AppState>()(
         set((state) => {
           const nextTasks = [...state.tasks, normalizeIncomingTask(taskInfo)];
           return {
-            tasks: nextTasks,
-            taskLookup: buildTaskLookup(nextTasks),
+            ...buildTaskCollectionState(nextTasks),
             updatedAt: Date.now(),
           };
         }),
@@ -214,6 +257,10 @@ export const useAppStore = create<AppState>()(
               ...state.taskLookup,
               [id]: nextTask,
             },
+            completedTaskCount:
+              state.completedTaskCount +
+              (nextTask.status === 'Success' ? 1 : 0) -
+              (existingTask.status === 'Success' ? 1 : 0),
             updatedAt,
           };
         }),
@@ -224,7 +271,7 @@ export const useAppStore = create<AppState>()(
           const nextTaskLookup = { ...state.taskLookup };
           delete nextTaskLookup[id];
           return {
-            tasks: nextTasks,
+            ...buildTaskCollectionState(nextTasks),
             taskLookup: nextTaskLookup,
             activeTaskId: state.activeTaskId === id ? null : state.activeTaskId,
             lightboxTaskId: state.lightboxTaskId === id ? null : state.lightboxTaskId,
@@ -241,8 +288,7 @@ export const useAppStore = create<AppState>()(
         set((state) => {
           const nextTasks = [...state.tasks, ...tasksInfo.map((task) => normalizeIncomingTask(task))];
           return {
-            tasks: nextTasks,
-            taskLookup: buildTaskLookup(nextTasks),
+            ...buildTaskCollectionState(nextTasks),
             updatedAt: Date.now(),
           };
         }),
@@ -250,7 +296,7 @@ export const useAppStore = create<AppState>()(
       clearProject: () =>
         set({
           ...initialProjectState,
-          taskLookup: buildTaskLookup(initialProjectState.tasks),
+          ...buildTaskCollectionState(initialProjectState.tasks),
           projectId: uuidv4(),
           selectedTaskIds: [],
           lightboxTaskId: null,
@@ -272,8 +318,7 @@ export const useAppStore = create<AppState>()(
             set((state) => ({
               ...state,
               ...mergeProjectSnapshotWithGlobalConfig(sanitizedProject, state),
-              tasks: recoveredTasks,
-              taskLookup: buildTaskLookup(recoveredTasks),
+              ...buildTaskCollectionState(recoveredTasks),
               isBatchRunning: false,
               activeTaskId: null,
               lightboxTaskId: null,
@@ -293,7 +338,7 @@ export const useAppStore = create<AppState>()(
 
       selectAllTasks: () =>
         set((state) => ({
-          selectedTaskIds: state.tasks.map((task) => task.id),
+          selectedTaskIds: [...state.taskIds],
         })),
 
       clearTaskSelection: () => set({ selectedTaskIds: [] }),
@@ -311,8 +356,7 @@ export const useAppStore = create<AppState>()(
           const [removed] = tasks.splice(startIndex, 1);
           tasks.splice(endIndex, 0, removed);
           return {
-            tasks,
-            taskLookup: buildTaskLookup(tasks),
+            ...buildTaskCollectionState(tasks),
             updatedAt: Date.now(),
           };
         }),
@@ -331,7 +375,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'batch-refiner-idb',
-      storage: createJSONStorage(() => idbStorage),
+      storage: idbStorage,
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         state.setBatchRunning(false);

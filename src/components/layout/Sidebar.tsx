@@ -48,18 +48,10 @@ import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from "
 
 function SidebarProgress() {
   const { tasksCount, completedCount } = useAppStore(
-    useShallow((state) => {
-      let completed = 0;
-      state.tasks.forEach((task) => {
-        if (task.status === "Success") {
-          completed += 1;
-        }
-      });
-      return {
-        tasksCount: state.tasks.length,
-        completedCount: completed,
-      };
-    }),
+    useShallow((state) => ({
+      tasksCount: state.tasksCount,
+      completedCount: state.completedTaskCount,
+    })),
   );
   const progressPercent = tasksCount === 0 ? 0 : Math.round((completedCount / tasksCount) * 100);
 
@@ -159,7 +151,7 @@ export function Sidebar({
   const selectedTaskIds = useAppStore((state) => state.selectedTaskIds);
   const projectName = useAppStore((state) => state.projectName);
   const projectId = useAppStore((state) => state.projectId);
-  const tasksCount = useAppStore((state) => state.tasks.length);
+  const tasksCount = useAppStore((state) => state.tasksCount);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
   const getLatestTaskLogSessionId = React.useCallback(
     (taskId: string) => getLatestGenerationLogSessionForTask(taskId)?.id,

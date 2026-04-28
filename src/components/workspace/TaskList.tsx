@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { Upload } from 'lucide-react';
-import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '@/store';
 import { TaskCard } from './TaskCard';
 import { buildImportedTasksFromFiles, buildReferenceImagesFromFiles } from '@/lib/taskFileImport';
@@ -116,8 +115,8 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
 
 export function TaskList() {
   const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
-  const taskIds = useAppStore(useShallow((state) => state.tasks.map((task) => task.id)));
-  const tasksCount = useAppStore((state) => state.tasks.length);
+  const taskIds = useAppStore((state) => state.taskIds);
+  const tasksCount = useAppStore((state) => state.tasksCount);
   const viewMode = useAppStore((state) => state.viewMode);
   const selectedTaskIds = useAppStore((state) => state.selectedTaskIds);
   const importTasks = useAppStore((state) => state.importTasks);
