@@ -888,18 +888,57 @@ function createBufferedImageNotifier(
   };
 }
 
+async function createResultPreviewDataUrl(src: string, dimensions?: ImageDimensions | null) {
+  if (!src.startsWith('data:image/') || typeof document === 'undefined') return undefined;
+
+  const maxEdge = 640;
+  const measured = dimensions || await measureImageDimensions(src);
+  if (!measured?.width || !measured.height) return undefined;
+
+  const scale = Math.min(1, maxEdge / Math.max(measured.width, measured.height));
+  const width = Math.max(1, Math.round(measured.width * scale));
+  const height = Math.max(1, Math.round(measured.height * scale));
+
+  return new Promise<string | undefined>((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d', { alpha: true });
+        if (!context) {
+          resolve(undefined);
+          return;
+        }
+        context.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/webp', 0.72));
+      } catch {
+        resolve(undefined);
+      }
+    };
+    image.onerror = () => resolve(undefined);
+    image.src = src;
+  });
+}
+
 async function createTaskResultImage(result: GeneratedImageResult, sessionId?: string): Promise<TaskResultImage> {
   const assetSrc = result.src;
   const hasValidAssetSrc = isValidResultImageAssetSrc(assetSrc);
   const dimensions = hasValidAssetSrc ? await measureImageDimensions(assetSrc) : null;
+  const generatedPreviewSrc = assetSrc.startsWith('data:image/')
+    ? await createResultPreviewDataUrl(assetSrc, dimensions)
+    : undefined;
+  const previewSrc = generatedPreviewSrc || result.previewSrc;
   const storedAsset = assetSrc.startsWith('data:image/')
     ? await storeImageAssetFromDataUrl(assetSrc, {
         kind: 'result',
-        previewSrc: result.previewSrc || assetSrc,
+        previewSrc: previewSrc || assetSrc,
         width: result.assetWidth || dimensions?.width,
         height: result.assetHeight || dimensions?.height,
       })
     : null;
+  const hasStoredOriginal = Boolean(storedAsset?.assetId);
   let downloadCacheStatus = result.downloadCacheStatus;
   let normalizationStatus = result.normalizationStatus;
   let downloadStatus = result.downloadStatus;
@@ -914,27 +953,36 @@ async function createTaskResultImage(result: GeneratedImageResult, sessionId?: s
     downloadFailureReason = '结果图源无效';
   } else if (!downloadCacheStatus) {
     if (assetSrc.startsWith("data:")) {
-      const blob = dataUrlToBlob(assetSrc);
-      await storeResultImageBlob(assetSrc, blob);
-      if (result.src && result.src !== assetSrc) {
-        await storeResultImageBlob(result.src, blob);
+      if (hasStoredOriginal) {
+        result.assetMimeType = result.assetMimeType || storedAsset?.metadata.mimeType;
+        result.assetExtension = result.assetExtension || storedAsset?.metadata.extension;
+      } else {
+        const blob = dataUrlToBlob(assetSrc);
+        await storeResultImageBlob(assetSrc, blob);
+        if (result.src && result.src !== assetSrc) {
+          await storeResultImageBlob(result.src, blob);
+        }
+        const assetMetadata = inferResultImageAssetMetadata(assetSrc, blob);
+        result.assetMimeType = result.assetMimeType || assetMetadata.mimeType;
+        result.assetExtension = result.assetExtension || assetMetadata.extension;
       }
       downloadCacheStatus = 'primed';
-      const assetMetadata = inferResultImageAssetMetadata(assetSrc, blob);
-      result.assetMimeType = result.assetMimeType || assetMetadata.mimeType;
-      result.assetExtension = result.assetExtension || assetMetadata.extension;
     } else {
       downloadCacheStatus = await primeResultImageCache(assetSrc);
     }
   }
 
-  if (hasValidAssetSrc) {
+  if (hasValidAssetSrc && !hasStoredOriginal) {
     await cacheDownloadableResultSources({ ...result, assetSrc });
   }
-  void primeTaskResultImageCache([assetSrc, result.src, result.previewSrc, result.originalSrc]);
+  void primeTaskResultImageCache([previewSrc, result.previewSrc]);
   const assetWidth = result.assetWidth || dimensions?.width;
   const assetHeight = result.assetHeight || dimensions?.height;
   const assetMetadata = inferResultImageAssetMetadata(assetSrc);
+  const canUseLightweightState = hasStoredOriginal && Boolean(previewSrc);
+  const displaySrc = canUseLightweightState ? previewSrc! : result.src;
+  const retainedOriginalSrc = canUseLightweightState ? undefined : result.originalSrc;
+  const retainedAssetSrc = canUseLightweightState ? undefined : assetSrc;
   normalizationStatus =
     normalizationStatus ||
     (hasValidAssetSrc ? "ok" : "invalid_source");
@@ -961,14 +1009,14 @@ async function createTaskResultImage(result: GeneratedImageResult, sessionId?: s
         : undefined);
   return {
     id: crypto.randomUUID(),
-    src: result.src,
-    previewSrc: result.previewSrc,
-    originalSrc: result.originalSrc,
+    src: displaySrc,
+    previewSrc,
+    originalSrc: retainedOriginalSrc,
     assetId: result.assetId || storedAsset?.assetId,
-    assetSrc,
+    assetSrc: retainedAssetSrc,
     assetStorageStatus: result.assetStorageStatus || storedAsset?.storageStatus || (assetSrc.startsWith('data:image/') ? 'failed' : 'skipped'),
     sourceType: result.sourceType,
-    downloadSourceType: result.downloadSourceType || (assetSrc.startsWith('data:') ? 'data_url' : "src"),
+    downloadSourceType: result.downloadSourceType || (hasStoredOriginal ? 'asset' : assetSrc.startsWith('data:') ? 'data_url' : "src"),
     downloadCacheStatus,
     normalizationStatus,
     downloadStatus,
@@ -1012,7 +1060,7 @@ function buildTaskImageUpdatePayload(task: Task, images: TaskResultImage[], fail
     resultImages: mergedImages,
     resultImage: primaryResult?.src,
     resultImagePreview: primaryResult?.previewSrc,
-    resultImageOriginal: primaryResult?.originalSrc || primaryResult?.src,
+    resultImageOriginal: primaryResult?.originalSrc,
     resultImageSourceType: primaryResult?.sourceType,
     resultImageWidth: primaryResult?.assetWidth || primaryResult?.width,
     resultImageHeight: primaryResult?.assetHeight || primaryResult?.height,

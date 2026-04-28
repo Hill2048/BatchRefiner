@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, GripVertical, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentTaskResultImages } from '@/lib/taskResults';
 import type { TaskResultImage } from '@/types';
+import { getStoredImageAsset } from '@/lib/imageAssetStore';
 
 function preventNativeImageDrag(e: React.DragEvent<HTMLImageElement>) {
   e.preventDefault();
@@ -40,7 +41,13 @@ export function Lightbox() {
   const tasks = useAppStore((state) => state.tasks);
 
   const [sliderPosition, setSliderPosition] = useState(50);
-  const [isDragging, setIsDragging] = useState(false);
+  const [isCompareDragging, setIsCompareDragging] = useState(false);
+  const [compareEnabled, setCompareEnabled] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [resolvedAssetSrc, setResolvedAssetSrc] = useState<string | null>(null);
+  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
   const task = tasks.find((item) => item.id === lightboxTaskId);
@@ -48,11 +55,46 @@ export function Lightbox() {
   const resultImages = task ? getCurrentTaskResultImages(task) : [];
   const currentResultImage = resultImages[lightboxImageIndex] || resultImages[0];
   const currentResultImageSrc = getResultFullSrc(currentResultImage);
+  const displayResultImageSrc = resolvedAssetSrc || currentResultImageSrc;
   const hasResultGallery = resultImages.length > 1;
-  const hasCompareView = Boolean(task?.sourceImage && currentResultImageSrc);
-  const displayImage = currentResultImageSrc || task?.sourceImage;
+  const hasCompareSource = Boolean(task?.sourceImage && displayResultImageSrc);
+  const hasCompareView = hasCompareSource && compareEnabled;
+  const displayImage = displayResultImageSrc || task?.sourceImage;
   const canGoPrevImage = hasResultGallery ? lightboxImageIndex > 0 : taskIndex > 0;
-  const canGoNextImage = hasResultGallery ? lightboxImageIndex < resultImages.length - 1 : taskIndex !== -1 && taskIndex < tasks.length - 1;
+  const canGoNextImage = hasResultGallery
+    ? lightboxImageIndex < resultImages.length - 1
+    : taskIndex !== -1 && taskIndex < tasks.length - 1;
+
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setSliderPosition(50);
+  };
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    setResolvedAssetSrc(null);
+    if (!currentResultImage?.assetId) return undefined;
+
+    getStoredImageAsset(currentResultImage.assetId).then((asset) => {
+      if (cancelled || !asset?.blob) return;
+      objectUrl = URL.createObjectURL(asset.blob);
+      setResolvedAssetSrc(objectUrl);
+    });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [currentResultImage?.assetId, currentResultImage?.id]);
+
+  useEffect(() => {
+    setCompareEnabled(false);
+    resetView();
+    setIsPanning(false);
+  }, [lightboxTaskId, lightboxImageIndex, currentResultImage?.id]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -69,7 +111,7 @@ export function Lightbox() {
         } else if (taskIndex !== -1 && taskIndex < tasks.length - 1) {
           setLightboxTask(tasks[taskIndex + 1].id, 0);
         }
-        setSliderPosition(50);
+        resetView();
       }
 
       if (event.key === 'ArrowLeft' && canGoPrevImage) {
@@ -78,7 +120,7 @@ export function Lightbox() {
         } else if (taskIndex > 0) {
           setLightboxTask(tasks[taskIndex - 1].id, 0);
         }
-        setSliderPosition(50);
+        resetView();
       }
     };
 
@@ -87,9 +129,9 @@ export function Lightbox() {
   }, [canGoNextImage, canGoPrevImage, hasResultGallery, lightboxImageIndex, setLightboxTask, task, taskIndex, tasks]);
 
   useEffect(() => {
-    if (!isDragging) return;
+    if (!isCompareDragging) return;
 
-    const stopDragging = () => setIsDragging(false);
+    const stopDragging = () => setIsCompareDragging(false);
     window.addEventListener('mouseup', stopDragging);
     window.addEventListener('touchend', stopDragging);
 
@@ -97,7 +139,26 @@ export function Lightbox() {
       window.removeEventListener('mouseup', stopDragging);
       window.removeEventListener('touchend', stopDragging);
     };
-  }, [isDragging]);
+  }, [isCompareDragging]);
+
+  useEffect(() => {
+    if (!isPanning) return;
+
+    const handleMove = (event: MouseEvent) => {
+      setPan({
+        x: panStartRef.current.panX + event.clientX - panStartRef.current.x,
+        y: panStartRef.current.panY + event.clientY - panStartRef.current.y,
+      });
+    };
+    const handleUp = () => setIsPanning(false);
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [isPanning]);
 
   if (!task) return null;
 
@@ -108,17 +169,40 @@ export function Lightbox() {
     setSliderPosition((x / rect.width) * 100);
   };
 
-  const handlePointerMove = (event: React.MouseEvent | React.TouchEvent) => {
-    if (!isDragging || !hasCompareView) return;
+  const handleComparePointerMove = (event: React.MouseEvent | React.TouchEvent) => {
+    if (!isCompareDragging || !hasCompareView) return;
     const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
     updateSlider(clientX);
   };
 
-  const handlePointerDown = (event: React.MouseEvent | React.TouchEvent) => {
+  const handleComparePointerDown = (event: React.MouseEvent | React.TouchEvent) => {
     if (!hasCompareView) return;
-    setIsDragging(true);
+    event.stopPropagation();
+    setIsCompareDragging(true);
     const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
     updateSlider(clientX);
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const direction = event.deltaY < 0 ? 1.12 : 0.88;
+    setZoom((current) => {
+      const next = Math.max(1, Math.min(6, Number((current * direction).toFixed(3))));
+      if (next === 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const handleImageMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (zoom <= 1 || (event.target as HTMLElement).closest('button')) return;
+    event.preventDefault();
+    panStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
+    setIsPanning(true);
   };
 
   const goPrev = () => {
@@ -128,7 +212,7 @@ export function Lightbox() {
     } else if (taskIndex > 0) {
       setLightboxTask(tasks[taskIndex - 1].id, 0);
     }
-    setSliderPosition(50);
+    resetView();
   };
 
   const goNext = () => {
@@ -138,7 +222,12 @@ export function Lightbox() {
     } else if (taskIndex !== -1 && taskIndex < tasks.length - 1) {
       setLightboxTask(tasks[taskIndex + 1].id, 0);
     }
-    setSliderPosition(50);
+    resetView();
+  };
+
+  const imageLayerStyle: React.CSSProperties = {
+    transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+    transformOrigin: 'center center',
   };
 
   return (
@@ -164,6 +253,29 @@ export function Lightbox() {
             </div>
 
             <div className="flex items-center gap-2">
+              {hasCompareSource ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCompareEnabled((value) => !value);
+                    resetView();
+                  }}
+                  className={`h-10 rounded-full border px-3 text-[11.55px] font-medium transition-colors ${
+                    compareEnabled
+                      ? 'border-white/18 bg-white/14 text-white'
+                      : 'border-white/10 bg-white/6 text-white/70 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  对比
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={resetView}
+                className="h-10 rounded-full border border-white/10 bg-white/6 px-3 text-[11.55px] font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                适应
+              </button>
               <button
                 type="button"
                 disabled={!canGoPrevImage}
@@ -193,47 +305,54 @@ export function Lightbox() {
           <div className="flex flex-1 items-center justify-center px-3 py-3 md:px-4 md:py-4">
             <div
               ref={containerRef}
-              className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[24px] border border-white/8 bg-transparent"
-              onMouseMove={handlePointerMove}
-              onTouchMove={handlePointerMove}
+              className={`relative flex h-full w-full items-center justify-center overflow-hidden rounded-[24px] border border-white/8 bg-transparent ${
+                zoom > 1 ? isPanning ? 'cursor-grabbing' : 'cursor-grab' : 'cursor-zoom-in'
+              }`}
+              onMouseMove={handleComparePointerMove}
+              onTouchMove={handleComparePointerMove}
+              onWheel={handleWheel}
+              onMouseDown={handleImageMouseDown}
             >
               {!hasCompareView && displayImage ? (
-                <img
-                  src={displayImage}
-                  alt={task.title}
-                  className="h-full w-full select-none object-contain"
-                  draggable={false}
-                  onDragStart={preventNativeImageDrag}
-                />
+                <div className="absolute inset-0 flex items-center justify-center will-change-transform" style={imageLayerStyle}>
+                  <img
+                    src={displayImage}
+                    alt={task.title}
+                    className="max-h-full max-w-full select-none object-contain"
+                    draggable={false}
+                    onDragStart={preventNativeImageDrag}
+                  />
+                </div>
               ) : null}
 
               {hasCompareView && currentResultImage ? (
                 <>
-                  <img
-                    src={currentResultImageSrc || ''}
-                    className="absolute inset-0 h-full w-full select-none object-contain"
-                    alt="结果图"
-                    draggable={false}
-                    onDragStart={preventNativeImageDrag}
-                  />
-
-                  <div
-                    className="absolute inset-0 overflow-hidden"
-                    style={{ clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)` }}
-                  >
+                  <div className="absolute inset-0 will-change-transform" style={imageLayerStyle}>
                     <img
-                      src={task.sourceImage}
+                      src={displayResultImageSrc || ''}
                       className="absolute inset-0 h-full w-full select-none object-contain"
-                      alt="原图"
+                      alt="结果图"
                       draggable={false}
                       onDragStart={preventNativeImageDrag}
                     />
+                    <div
+                      className="absolute inset-0 overflow-hidden"
+                      style={{ clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)` }}
+                    >
+                      <img
+                        src={task.sourceImage}
+                        className="absolute inset-0 h-full w-full select-none object-contain"
+                        alt="原图"
+                        draggable={false}
+                        onDragStart={preventNativeImageDrag}
+                      />
+                    </div>
                   </div>
 
-                  <div className="absolute left-5 top-5 rounded-full border border-white/10 bg-[rgba(18,18,17,0.42)] px-3 py-1 text-[11.55px] font-medium text-[#F2EFEB] backdrop-blur-md">
+                  <div className="pointer-events-none absolute left-5 top-5 rounded-full border border-white/10 bg-[rgba(18,18,17,0.42)] px-3 py-1 text-[11.55px] font-medium text-[#F2EFEB] backdrop-blur-md">
                     原图
                   </div>
-                  <div className="absolute right-5 top-5 rounded-full border border-white/10 bg-[rgba(18,18,17,0.42)] px-3 py-1 text-[11.55px] font-medium text-[#F2EFEB] backdrop-blur-md">
+                  <div className="pointer-events-none absolute right-5 top-5 rounded-full border border-white/10 bg-[rgba(18,18,17,0.42)] px-3 py-1 text-[11.55px] font-medium text-[#F2EFEB] backdrop-blur-md">
                     结果图 #{lightboxImageIndex + 1}
                   </div>
 
@@ -241,9 +360,9 @@ export function Lightbox() {
                     <div className="absolute inset-y-0 w-px bg-white/90 shadow-[0_0_18px_rgba(255,255,255,0.28)]" />
                     <button
                       type="button"
-                      onMouseDown={handlePointerDown}
-                      onTouchStart={handlePointerDown}
-                      className={`relative flex h-11 w-11 cursor-ew-resize items-center justify-center rounded-full border border-white/18 bg-[rgba(245,244,240,0.92)] text-[#2C2B29] shadow-[0_10px_30px_rgba(0,0,0,0.2)] transition-transform ${isDragging ? 'scale-105' : ''}`}
+                      onMouseDown={handleComparePointerDown}
+                      onTouchStart={handleComparePointerDown}
+                      className={`relative flex h-11 w-11 cursor-ew-resize items-center justify-center rounded-full border border-white/18 bg-[rgba(245,244,240,0.92)] text-[#2C2B29] shadow-[0_10px_30px_rgba(0,0,0,0.2)] transition-transform ${isCompareDragging ? 'scale-105' : ''}`}
                     >
                       <GripVertical className="h-4 w-4 opacity-75" />
                     </button>
@@ -254,8 +373,11 @@ export function Lightbox() {
           </div>
 
           <div className="flex items-center justify-between border-t border-white/8 px-5 py-3 text-[11.55px] text-white/50 md:px-6">
-            <span>{hasCompareView ? '拖动中线查看前后差异' : '查看任务大图'}</span>
-            <span>{hasResultGallery ? 'ESC 关闭 · ← / → 切换当前任务结果图' : 'ESC 关闭 · ← / → 切换任务'}</span>
+            <span>
+              {hasCompareView ? '拖动中线对比前后差异' : '滚轮缩放，放大后拖动画面查看细节'}
+              {zoom > 1 ? ` / ${Math.round(zoom * 100)}%` : ''}
+            </span>
+            <span>{hasResultGallery ? 'ESC 关闭 / ← → 切换当前任务结果图' : 'ESC 关闭 / ← → 切换任务'}</span>
           </div>
         </div>
       </div>

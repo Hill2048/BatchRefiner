@@ -1,4 +1,4 @@
-import { get, set } from 'idb-keyval';
+import { delMany, get, keys, set } from 'idb-keyval';
 
 const RESULT_IMAGE_CACHE_PREFIX = 'batch-refiner-result-image:';
 
@@ -108,4 +108,13 @@ export async function primeResultImageCache(src?: string | null): Promise<Result
 export async function primeTaskResultImageCache(sources: Array<string | undefined | null>) {
   const uniqueSources = Array.from(new Set(sources.filter(Boolean))) as string[];
   return Promise.all(uniqueSources.map((src) => primeResultImageCache(src)));
+}
+
+export async function clearResultImageCache() {
+  const allKeys = await keys();
+  const cacheKeys = allKeys.filter((key) => typeof key === 'string' && key.startsWith(RESULT_IMAGE_CACHE_PREFIX));
+  if (cacheKeys.length > 0) {
+    await delMany(cacheKeys);
+  }
+  return cacheKeys.length;
 }

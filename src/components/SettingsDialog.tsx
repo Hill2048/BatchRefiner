@@ -5,6 +5,13 @@ import { useShallow } from 'zustand/react/shallow';
 import { PlatformApiConfigMap, PlatformPreset } from '@/types';
 import { clearDownloadDirectory, pickDownloadDirectory, supportsDirectoryDownload } from '@/lib/downloadDirectory';
 import {
+  clearCacheDirectoryHandle,
+  pickCacheDirectory,
+  supportsCacheDirectory,
+} from '@/lib/cacheDirectory';
+import { clearResultImageCache } from '@/lib/resultImageCache';
+import { saveLocalCacheSnapshot } from '@/lib/localCachePersistence';
+import {
   ApiConfigPayload,
   decryptApiConfig,
   encryptApiConfig,
@@ -357,6 +364,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const {
     apiBaseUrl: savedApiBaseUrl,
     apiKey: savedApiKey,
+    cacheDirectoryName: savedCacheDirectoryName,
     downloadDirectoryName: savedDownloadDirectoryName,
     imageApiBaseUrl: savedImageApiBaseUrl,
     imageApiKey: savedImageApiKey,
@@ -380,6 +388,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     useShallow((state) => ({
       apiBaseUrl: state.apiBaseUrl,
       apiKey: state.apiKey,
+      cacheDirectoryName: state.cacheDirectoryName,
       downloadDirectoryName: state.downloadDirectoryName,
       imageApiBaseUrl: state.imageApiBaseUrl,
       imageApiKey: state.imageApiKey,
@@ -418,10 +427,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [localTextModel, setLocalTextModel] = React.useState(savedTextModel || 'gemini-3.1-flash-lite-preview');
   const [localImageModel, setLocalImageModel] = React.useState(savedImageModel || 'gemini-3.1-flash-image-preview');
   const [downloadDirectoryName, setDownloadDirectoryName] = React.useState(savedDownloadDirectoryName || '');
+  const [cacheDirectoryName, setCacheDirectoryName] = React.useState(savedCacheDirectoryName || '');
   const [allPlatformConfigs, setAllPlatformConfigs] = React.useState<PlatformApiConfigMap>(mergedPlatformConfigs);
   const [remoteTextModels, setRemoteTextModels] = React.useState<string[]>([]);
   const [remoteImageModels, setRemoteImageModels] = React.useState<string[]>([]);
   const [isPickingDirectory, setIsPickingDirectory] = React.useState(false);
+  const [isPickingCacheDirectory, setIsPickingCacheDirectory] = React.useState(false);
+  const [isClearingCache, setIsClearingCache] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [isCheckingQuota, setIsCheckingQuota] = React.useState(false);
   const [isLoadingModels, setIsLoadingModels] = React.useState(false);
@@ -465,6 +477,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     applyPlatformConfigToForm(savedPlatformPreset || 'yunwu', nextConfigs);
     setMaxConcurrencyValue(String(savedMaxConcurrency));
     setDownloadDirectoryName(savedDownloadDirectoryName || '');
+    setCacheDirectoryName(savedCacheDirectoryName || '');
     setRemoteTextModels([]);
     setRemoteImageModels([]);
     setTestResult({ status: 'idle', msg: '' });
@@ -475,6 +488,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     open,
     platformConfigs,
     savedDownloadDirectoryName,
+    savedCacheDirectoryName,
     savedMaxConcurrency,
     savedPlatformPreset,
   ]);
@@ -786,6 +800,50 @@ const handleExportCurrentConfig = async () => {
     }
   };
 
+  const handlePickCacheDirectory = async () => {
+    if (isPickingCacheDirectory) return;
+    setIsPickingCacheDirectory(true);
+
+    try {
+      const { name } = await pickCacheDirectory();
+      setCacheDirectoryName(name);
+      setProjectFields({ cacheDirectoryName: name });
+      await saveLocalCacheSnapshot();
+      toast.success(`已设置缓存目录：${name}`);
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        toast.error(error?.message || '选择缓存目录失败');
+      }
+    } finally {
+      setIsPickingCacheDirectory(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    if (isClearingCache) return;
+    setIsClearingCache(true);
+
+    try {
+      await clearResultImageCache();
+      toast.success('已清理临时缓存，已生成图片原图会保留');
+    } catch (error: any) {
+      toast.error(error?.message || '清理缓存失败');
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
+  const handleForgetCacheDirectory = async () => {
+    try {
+      await clearCacheDirectoryHandle();
+      setCacheDirectoryName('');
+      setProjectFields({ cacheDirectoryName: '' });
+      toast.success('已清除缓存目录设置');
+    } catch {
+      toast.error('清除缓存目录失败');
+    }
+  };
+
   const handleSave = () => {
     const parsedConcurrency = parseInt(maxConcurrency, 10);
     const nextPlatformConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
@@ -804,6 +862,7 @@ const handleExportCurrentConfig = async () => {
     setProjectFields({
       platformPreset,
       downloadDirectoryName,
+      cacheDirectoryName,
       textModel: localTextModel,
       imageModel: localImageModel,
       textApiBaseUrl,
@@ -1023,6 +1082,52 @@ const handleExportCurrentConfig = async () => {
             {!supportsDirectoryDownload() ? (
               <p className="text-[11.55px] text-text-secondary">
                 当前环境不支持指定目录写入，请使用 Edge，或继续使用 ZIP 下载。
+              </p>
+            ) : null}
+          </Section>
+
+          <Section title="本地缓存">
+            <div className="rounded-2xl border border-border/60 bg-white/70 px-4 py-3">
+              <div className="text-[12.6px] font-medium text-text-primary">当前缓存目录</div>
+              <div className="mt-1 break-all text-[12.6px] text-text-secondary">
+                {cacheDirectoryName || '未设置，结果图只会保存在浏览器本地缓存'}
+              </div>
+              <p className="mt-2 text-[11.55px] text-text-secondary">
+                设置后会写入 batch-refiner-cache 子目录，并每 5 分钟保存一次项目快照。
+              </p>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handlePickCacheDirectory}
+                disabled={!supportsCacheDirectory() || isPickingCacheDirectory}
+                className="h-9 rounded-xl bg-white text-[12.6px]"
+              >
+                {isPickingCacheDirectory ? '选择中...' : cacheDirectoryName ? '重新选择缓存目录' : '选择缓存目录'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleClearCache}
+                disabled={isClearingCache}
+                className="h-9 rounded-xl bg-white text-[12.6px]"
+              >
+                {isClearingCache ? '清理中...' : '一键清理缓存'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleForgetCacheDirectory}
+                disabled={!cacheDirectoryName}
+                className="h-9 rounded-xl text-[12.6px]"
+              >
+                清除目录
+              </Button>
+            </div>
+            {!supportsCacheDirectory() ? (
+              <p className="text-[11.55px] text-text-secondary">
+                当前环境不支持指定缓存目录，请使用 Edge。
               </p>
             ) : null}
           </Section>

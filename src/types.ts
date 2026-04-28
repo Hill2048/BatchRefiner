@@ -74,7 +74,7 @@ export interface TaskResultImage {
   assetSrc?: string;
   assetStorageStatus?: 'stored' | 'skipped' | 'failed';
   sourceType?: 'preview' | 'original' | 'base64';
-  downloadSourceType?: 'original' | 'src' | 'data_url';
+  downloadSourceType?: 'original' | 'src' | 'data_url' | 'asset';
   downloadCacheStatus?: 'primed' | 'miss' | 'failed';
   normalizationStatus?: 'ok' | 'invalid_source' | 'download_unreachable';
   downloadStatus?: 'ready' | 'fetch_failed' | 'cache_failed' | 'save_failed' | 'invalid_source';
@@ -135,6 +135,7 @@ export interface ProjectData {
   projectName: string;
   platformPreset: PlatformPreset;
   downloadDirectoryName?: string;
+  cacheDirectoryName?: string;
   enablePromptOptimization?: boolean;
   globalSkillText: string;
   globalTargetText: string;

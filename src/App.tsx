@@ -15,6 +15,7 @@ import { QuotaStatus } from './components/layout/QuotaStatus';
 import { Toaster } from './components/ui/sonner';
 import { Button } from './components/ui/button';
 import { useAppStore } from './store';
+import { startLocalCacheAutoSave } from './lib/localCachePersistence';
 
 const COMPACT_BREAKPOINT = 1023;
 const NARROW_DESKTOP_BREAKPOINT = 1279;
@@ -134,6 +135,8 @@ export default function App() {
     return () =>
       window.removeEventListener('batch-refiner:persist-warning', handlePersistWarning as EventListener);
   }, []);
+
+  useEffect(() => startLocalCacheAutoSave(), []);
 
   const statusBadge = (
     <div

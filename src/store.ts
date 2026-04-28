@@ -393,6 +393,7 @@ export const useAppStore = create<AppState>()(
         projectName: state.projectName,
         platformPreset: state.platformPreset,
         downloadDirectoryName: state.downloadDirectoryName,
+        cacheDirectoryName: state.cacheDirectoryName,
         globalSkillText: state.globalSkillText,
         globalTargetText: state.globalTargetText,
         globalReferenceImages: state.globalReferenceImages,

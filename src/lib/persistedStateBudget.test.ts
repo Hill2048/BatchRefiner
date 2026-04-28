@@ -59,7 +59,7 @@ test('compactPersistedStateValue strips task image payloads when snapshot is ove
         sourceImage?: string;
         referenceImages: string[];
         resultImage?: string;
-        resultImages?: unknown[];
+        resultImages?: Array<{ id: string; src: string; assetId?: string }>;
       }>;
     };
   };
@@ -69,6 +69,7 @@ test('compactPersistedStateValue strips task image payloads when snapshot is ove
   assert.equal(parsed.state.tasks[0].sourceImage, undefined);
   assert.deepEqual(parsed.state.tasks[0].referenceImages, []);
   assert.equal(parsed.state.tasks[0].resultImage, undefined);
-  assert.deepEqual(parsed.state.tasks[0].resultImages, []);
+  assert.equal(parsed.state.tasks[0].resultImages?.[0].id, 'result-1');
+  assert.equal(parsed.state.tasks[0].resultImages?.[0].src, '');
   assert.deepEqual(parsed.state.globalReferenceImages, []);
 });

@@ -1,5 +1,6 @@
 import type { TaskResultImage } from '@/types';
 import { dataUrlToBlob } from './resultImageCache';
+import { getStoredImageAsset } from './imageAssetStore';
 
 export type DownloadFailureStage = 'normalize' | 'fetch' | 'cache' | 'save';
 export type DownloadStatus = 'ready' | 'fetch_failed' | 'cache_failed' | 'save_failed' | 'invalid_source';
@@ -38,6 +39,19 @@ export function getResultDownloadDiagnostics(
 }
 
 export async function resolveResultImageDownloadBlob(result: TaskResultImage) {
+  if (result.assetId) {
+    const storedAsset = await getStoredImageAsset(result.assetId);
+    if (storedAsset?.blob) {
+      return {
+        blob: storedAsset.blob,
+        sourceType: 'asset' as const,
+        cacheStatus: 'primed' as const,
+        assetSrc: result.assetSrc || result.originalSrc || result.src,
+        status: 'ready' as DownloadStatus,
+      };
+    }
+  }
+
   const resultSrc = (result.src || '').trim();
   const sourceType = resultSrc.startsWith('data:image/')
     ? 'data_url'

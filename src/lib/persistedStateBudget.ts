@@ -1,4 +1,4 @@
-import type { Task } from '@/types';
+import type { Task, TaskResultImage } from '@/types';
 
 export const MAX_PERSISTED_STATE_LENGTH = 12 * 1024 * 1024;
 export const OVERSIZED_PERSISTENCE_NOTICE =
@@ -19,19 +19,36 @@ type PersistCompactionResult = {
   compacted: boolean;
 };
 
+function isImageDataUrl(value?: string | null) {
+  return Boolean(value?.startsWith('data:image/'));
+}
+
+function stripResultImageBinaryPayload(image: TaskResultImage): TaskResultImage {
+  const displaySrc = isImageDataUrl(image.src) ? image.previewSrc || '' : image.src;
+  return {
+    ...image,
+    src: displaySrc,
+    previewSrc: image.previewSrc && !isImageDataUrl(image.previewSrc) ? image.previewSrc : displaySrc,
+    originalSrc: isImageDataUrl(image.originalSrc) ? undefined : image.originalSrc,
+    assetSrc: isImageDataUrl(image.assetSrc) ? undefined : image.assetSrc,
+  };
+}
+
 function stripTaskBinaryPayload(task: Task): Task {
+  const resultImages = (task.resultImages || []).map(stripResultImageBinaryPayload);
+  const primaryResult = resultImages[0];
+
   return {
     ...task,
-    sourceImage: undefined,
+    sourceImage: isImageDataUrl(task.sourceImage) ? undefined : task.sourceImage,
     referenceImages: [],
-    resultImage: undefined,
-    resultImagePreview: undefined,
-    resultImageOriginal: undefined,
-    resultImageSourceType: undefined,
-    resultImageWidth: undefined,
-    resultImageHeight: undefined,
-    resultImages: [],
-    activeResultSessionId: undefined,
+    resultImage: primaryResult?.src || undefined,
+    resultImagePreview: primaryResult?.previewSrc || undefined,
+    resultImageOriginal: primaryResult?.originalSrc,
+    resultImageSourceType: primaryResult?.sourceType,
+    resultImageWidth: primaryResult?.assetWidth || primaryResult?.width,
+    resultImageHeight: primaryResult?.assetHeight || primaryResult?.height,
+    resultImages,
   };
 }
 

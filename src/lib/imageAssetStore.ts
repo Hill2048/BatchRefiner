@@ -1,6 +1,7 @@
-import { get, set } from 'idb-keyval';
+import { delMany, get, keys, set } from 'idb-keyval';
 import { dataUrlToBlob } from './resultImageCache';
 import { inferResultImageAssetMetadata } from './resultImageAsset';
+import { writeCacheBlob } from './cacheDirectory';
 
 const IMAGE_ASSET_PREFIX = 'batch-refiner-image-asset:';
 
@@ -47,6 +48,15 @@ export async function getStoredImageAsset(assetId: string) {
   return get<StoredImageAsset>(getImageAssetKey(assetId));
 }
 
+export async function clearStoredImageAssets() {
+  const allKeys = await keys();
+  const assetKeys = allKeys.filter((key) => typeof key === 'string' && key.startsWith(IMAGE_ASSET_PREFIX));
+  if (assetKeys.length > 0) {
+    await delMany(assetKeys);
+  }
+  return assetKeys.length;
+}
+
 export async function storeImageAssetBlob(
   blob: Blob,
   options: {
@@ -72,6 +82,8 @@ export async function storeImageAssetBlob(
       metadata,
       createdAt: Date.now(),
     } satisfies StoredImageAsset);
+    const extension = metadata.extension || inferResultImageAssetMetadata('', blob).extension;
+    void writeCacheBlob(`${assetId}.${extension}`, blob);
 
     return {
       assetId,

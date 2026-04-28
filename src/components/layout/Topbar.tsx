@@ -1,9 +1,10 @@
-import { Download, Folder, Plus, Trash2, Check, PanelLeft } from 'lucide-react';
+import { Download, Folder, FolderOpen, Plus, Save, Trash2, Check, PanelLeft } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useAppStore } from '@/store';
 import * as React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { exportCurrentProjectFile, importProjectFile } from '@/lib/projectFileActions';
 import {
   getProjectIndex,
   switchProject,
@@ -69,6 +70,14 @@ export function Topbar({ isCompactLayout = false, onOpenSidebar }: TopbarProps) 
   const handleCreateNew = async () => {
     await createNewProject();
     setIsPopoverOpen(false);
+  };
+
+  const handleExportProject = () => {
+    void exportCurrentProjectFile();
+  };
+
+  const handleImportProject = () => {
+    importProjectFile();
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
@@ -150,6 +159,29 @@ export function Topbar({ isCompactLayout = false, onOpenSidebar }: TopbarProps) 
                     onClick={handleCreateNew}
                   >
                     <Plus className="w-3 h-3 mr-1" /> 新建项目
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 justify-center gap-1.5 rounded-lg border-transparent bg-[#F5F4F0] px-2 text-[11.55px] text-text-secondary shadow-none hover:border-border hover:bg-white hover:text-foreground"
+                    onClick={handleExportProject}
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    保存项目
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 justify-center gap-1.5 rounded-lg border-transparent bg-[#F5F4F0] px-2 text-[11.55px] text-text-secondary shadow-none hover:border-border hover:bg-white hover:text-foreground"
+                    onClick={handleImportProject}
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    打开项目
                   </Button>
                 </div>
 

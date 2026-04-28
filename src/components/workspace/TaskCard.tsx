@@ -2,7 +2,7 @@
 import { CSS } from '@dnd-kit/utilities';
 import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
-import { ChevronRight, Download, Eye, Fullscreen, GripVertical, History, ImageIcon, Trash2, Upload, X } from 'lucide-react';
+import { Download, Eye, Fullscreen, GripVertical, ImageIcon, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Task, TaskResultImage } from '@/types';
 import { useAppStore } from '@/store';
@@ -12,7 +12,6 @@ import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { GenerateParamsSelector } from '../GenerateParamsSelector';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useAutoSaveTextEditor } from './useAutoSaveTextEditor';
 import { getTaskBatchFileName } from '@/lib/resultImageFileName';
 import {
@@ -23,6 +22,7 @@ import {
 import { primeTaskResultImageCache } from '@/lib/resultImageCache';
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from '@/lib/resultImageDownload';
 import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from '@/lib/appLogger';
+import { getStoredImageAsset } from '@/lib/imageAssetStore';
 
 type TaskCardProps = {
   taskId: string;
@@ -101,12 +101,6 @@ function formatGenerationTime(durationMs?: number) {
   return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
 }
 
-function formatHistorySessionTime(timestamp?: number) {
-  if (!timestamp) return '较早批次';
-  const date = new Date(timestamp);
-  return `${date.getMonth() + 1}-${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
-
 function shouldShowCollapsedFade(text: string | undefined, maxLines: number) {
   const content = (text || '').trim();
   if (!content) return false;
@@ -158,7 +152,6 @@ type PlaceholderThumbnailItem = {
 
 const EMPTY_RESULT_IMAGES: TaskResultImage[] = [];
 const EMPTY_THUMBNAIL_ITEMS: ThumbnailViewerItem[] = [];
-const EMPTY_HISTORY_GROUPS: Array<{ sessionId: string; images: TaskResultImage[]; createdAt: number }> = [];
 
 export const TaskCard = React.memo(function TaskCard({
   taskId,
@@ -227,44 +220,18 @@ export const TaskCard = React.memo(function TaskCard({
     if (!isActive) {
       return {
         currentResultImages,
-        historicalResultImages: EMPTY_RESULT_IMAGES,
-        historicalResultGroups: EMPTY_HISTORY_GROUPS,
         primaryTaskResult,
         progress,
       };
     }
 
-    const historicalResultImages = activeSessionId
-      ? allResultImages.filter((result) => result.sessionId !== activeSessionId)
-      : allResultImages;
-    const historyGroups = new Map<string, TaskResultImage[]>();
-
-    historicalResultImages.forEach((image) => {
-      const sessionId = image.sessionId || `legacy-${image.id}`;
-      const existing = historyGroups.get(sessionId) || [];
-      existing.push(image);
-      historyGroups.set(sessionId, existing);
-    });
-
-    const historicalResultGroups = Array.from(historyGroups.entries())
-      .map(([sessionId, images]) => ({
-        sessionId,
-        images: [...images].sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0)),
-        createdAt: Math.max(...images.map((image) => image.createdAt || 0), 0),
-      }))
-      .sort((left, right) => right.createdAt - left.createdAt);
-
     return {
       currentResultImages,
-      historicalResultImages,
-      historicalResultGroups,
       primaryTaskResult,
       progress,
     };
   }, [effectiveBatchCount, isActive, task.activeResultSessionId, task.failedResultCount, task.requestedBatchCount, task.resultImages]);
   const resultImages = derivedResults.currentResultImages;
-  const historicalResultImages = derivedResults.historicalResultImages;
-  const historicalResultGroups = derivedResults.historicalResultGroups;
   const primaryResult = derivedResults.primaryTaskResult;
   const resultProgress = derivedResults.progress;
   const shouldReduceMotionEffects = isBatchRunning || tasksCount >= 12;
@@ -358,6 +325,7 @@ export const TaskCard = React.memo(function TaskCard({
     fileName: string;
     result?: TaskResultImage;
   } | null>(null);
+  const [previewAssetSrc, setPreviewAssetSrc] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const handleScroll = (e: CustomEvent) => {
@@ -381,6 +349,26 @@ export const TaskCard = React.memo(function TaskCard({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [previewReferenceImage]);
+
+  React.useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    setPreviewAssetSrc(null);
+    const assetId = previewReferenceImage?.result?.assetId;
+    if (!assetId) return undefined;
+
+    getStoredImageAsset(assetId).then((asset) => {
+      if (cancelled || !asset?.blob) return;
+      objectUrl = URL.createObjectURL(asset.blob);
+      setPreviewAssetSrc(objectUrl);
+    });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [previewReferenceImage?.result?.assetId, previewReferenceImage?.result?.id]);
 
   const updateReferenceImage = (index: number, value: string) => {
     const nextRefs = [...(task.referenceImages || [])];
@@ -587,7 +575,7 @@ export const TaskCard = React.memo(function TaskCard({
     task.batchCount && task.batchCount !== globalBatchCount ? task.batchCount : '',
   ].filter(Boolean);
   const showCollapsedHeaderMedia = !isActive;
-  const lowerSectionClass = 'rounded-[18px] bg-[#FCFBF8] px-3 py-2.5 transition-all duration-200 ease-out';
+  const lowerSectionClass = 'rounded-[18px] bg-[#FCFBF8] px-3.5 py-3 transition-all duration-200 ease-out';
   const textSectionClass = 'flex flex-col gap-1.5 px-0.5';
   const textLabelClass = 'px-0.5 text-[9.45px] font-bold uppercase tracking-wider text-black/42';
   const textDisplayClass = 'rounded-[14px] border border-black/[0.07] bg-white px-3 py-2.5 text-[12.3px] leading-[1.75] text-black/70 transition-all duration-200 ease-out hover:border-black/[0.12] hover:bg-white';
@@ -622,14 +610,21 @@ export const TaskCard = React.memo(function TaskCard({
   };
 
   const renderCollapsedMedia = () => (
-    <div className="relative w-full h-full">
+    <div
+      className="relative h-full w-full cursor-zoom-in"
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        setLightboxTask(task.id, 0);
+      }}
+      title="双击查看大图"
+    >
       {coverImageSrc ? (
         <img
           src={coverImageSrc}
           alt={task.title}
           loading="lazy"
           decoding="async"
-          className="w-full h-full object-contain drop-shadow-sm"
+          className="h-full w-full object-contain drop-shadow-sm"
           referrerPolicy="no-referrer"
           draggable={false}
           onDragStart={preventNativeImageDrag}
@@ -684,9 +679,14 @@ export const TaskCard = React.memo(function TaskCard({
                 src={mainImageSrc}
                 alt={task.title}
                 decoding="async"
-                className={`block h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.01] blur-[8px] saturate-[0.92]' : isRenderingVisual ? 'scale-[1.004]' : ''}`}
+                className={`block h-full w-full cursor-zoom-in object-contain transition-transform duration-500 ease-out group-hover:scale-[1.012] ${shouldAnimateViewerImage ? 'scale-[1.01] blur-[8px] saturate-[0.92]' : isRenderingVisual ? 'scale-[1.004]' : ''}`}
                 draggable={false}
                 onDragStart={preventNativeImageDrag}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxTask(task.id, viewerMode === 'source' ? 0 : selectedResultIndex);
+                }}
+                title="双击查看大图"
               />
             </div>
           ) : shouldAnimateViewerImage && task.sourceImage ? (
@@ -735,7 +735,7 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
           </div>
 
-          <div className="absolute inset-x-0 bottom-0 z-20 flex items-end justify-between gap-3 bg-gradient-to-t from-black/14 via-black/0 to-transparent px-3 pb-3 pt-10">
+          <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch gap-2 bg-gradient-to-t from-black/14 via-black/0 to-transparent px-3 pb-3 pt-10 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
             <div className="flex min-w-0 flex-1 items-end gap-2">
               {hasThumbnailStrip ? (
                 <div className="flex min-h-[52px] w-fit max-w-full items-center gap-1.5 overflow-hidden rounded-[18px] border border-white/70 bg-[rgba(255,255,255,0.88)] px-2 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.1)] backdrop-blur-md sm:min-h-[56px] sm:gap-2 sm:px-2.5">
@@ -814,88 +814,7 @@ export const TaskCard = React.memo(function TaskCard({
               ) : null}
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-              {historicalResultImages.length > 0 ? (
-                <Popover>
-                  <PopoverTrigger
-                    render={
-                      <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white/80 px-2.5 text-[10.5px] text-text-secondary shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
-                        onClick={(e) => e.stopPropagation()}
-                        title="查看历史结果"
-                      >
-                        <History className="h-3.5 w-3.5" />
-                        <span>历史 {historicalResultImages.length}</span>
-                        <ChevronRight className="h-3 w-3 opacity-60" />
-                      </button>
-                    }
-                  />
-                  <PopoverContent className="w-[min(360px,calc(100vw-2rem))] rounded-2xl border-border bg-card p-3 shadow-lg" align="end">
-                    <div className="flex flex-col gap-2">
-                      <div className="text-[12px] font-medium text-text-primary">历史结果</div>
-                      <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
-                        {historicalResultGroups.map((group, groupIndex) => (
-                          <div key={group.sessionId} className="rounded-xl border border-black/6 bg-[#FCFBF8] p-2.5">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="text-[11px] font-medium text-black/72">
-                                批次 {historicalResultGroups.length - groupIndex}
-                              </div>
-                              <div className="text-[10px] text-black/45">
-                                {formatHistorySessionTime(group.createdAt)} / {group.images.length} 张
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-4 gap-2">
-                              {group.images.map((image, index) => (
-                                <div
-                                  key={image.id}
-                                  className="group/history relative aspect-[4/3] overflow-hidden rounded-xl border border-black/8 bg-white"
-                                >
-                                  <button
-                                    type="button"
-                                    className="block h-full w-full"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setPreviewReferenceImage({
-                                        src: getResultFullSrc(image) || image.src,
-                                        title: `历史结果预览`,
-                                        fileName: getTaskBatchFileName(task.index, index, getResultImageAssetExtension(image)),
-                                        result: image,
-                                      });
-                                    }}
-                                    title={`查看历史结果 ${index + 1}`}
-                                  >
-                                    <img
-                                      src={image.previewSrc || image.src}
-                                      alt={`历史结果 ${index + 1}`}
-                                      loading="lazy"
-                                      decoding="async"
-                                      className="h-full w-full object-cover transition-transform duration-200 group-hover/history:scale-[1.03]"
-                                      draggable={false}
-                                      onDragStart={preventNativeImageDrag}
-                                    />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="absolute bottom-1 right-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/62 text-white opacity-0 transition-all hover:bg-black/76 group-hover/history:opacity-100"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      downloadResultImage(image, getTaskBatchFileName(task.index, index, getResultImageAssetExtension(image)));
-                                    }}
-                                    title="下载历史结果"
-                                  >
-                                    <Download className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              ) : null}
+            <div className="flex shrink-0 items-center justify-end gap-2 self-end">
               {viewerMode === 'result' && activeResult?.src ? (
                 <button
                   type="button"
@@ -1102,7 +1021,7 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
 
             <div className="px-3">
-              <div className={`grid grid-cols-1 xl:grid-cols-[1fr_auto] items-stretch gap-3 ${lowerSectionClass}`}>
+              <div className={`grid grid-cols-1 items-stretch gap-3 ${lowerSectionClass}`}>
               <div className="flex min-w-0 flex-wrap items-center gap-3">
                 {globalReferenceImages.length > 0 ? (
                   <div className="flex min-w-0 items-center gap-2">
@@ -1257,7 +1176,7 @@ export const TaskCard = React.memo(function TaskCard({
                 </div>
               </div>
 
-              <div className="flex min-w-0 items-center gap-2 xl:justify-end">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-black/[0.06] pt-2">
                 <span className="text-[9.45px] font-bold text-black/42 uppercase tracking-wider">参数</span>
                 <GenerateParamsSelector
                   aspectRatio={task.aspectRatio || globalAspectRatio}
@@ -1274,7 +1193,7 @@ export const TaskCard = React.memo(function TaskCard({
                   allowBatchInherit
                   onClearBatchCount={() => updateTask(task.id, { batchCount: undefined })}
                   inheritedBatchLabel={`跟随全局(${globalBatchCount || 'x1'})`}
-                  triggerClassName="h-8 min-w-[112px] justify-between border-black/10 bg-white px-3 text-[10.5px] shadow-none hover:border-black/18"
+                  triggerClassName="h-8 min-w-[132px] justify-between border-black/10 bg-white px-3 text-[10.5px] shadow-none hover:border-black/18"
                 />
               </div>
             </div>
@@ -1351,7 +1270,7 @@ export const TaskCard = React.memo(function TaskCard({
               ) : null}
             </div>
 
-            <div className="mt-0.5 flex items-center justify-between gap-2 px-3">
+            <div className="mt-0.5 flex flex-col gap-2 px-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-1.5">
                 {enablePromptOptimization ? (
                   <Button type="button" variant="ghost" className="h-7 px-2.5 rounded-md text-[11.55px] font-medium hover:bg-black/5 text-text-secondary disabled:opacity-50" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={handlePreviewPrompt} disabled={task.status === 'Prompting'}>
@@ -1359,7 +1278,7 @@ export const TaskCard = React.memo(function TaskCard({
                   </Button>
                 ) : null}
               </div>
-              <Button type="button" className="h-7 px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11.55px] font-medium disabled:opacity-50" onClick={handleRunTask} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
+              <Button type="button" className="h-7 w-full px-3.5 rounded-md shadow-sm bg-[#1A1A1A] hover:bg-[#2C2B29] text-white text-[11.55px] font-medium disabled:opacity-50 sm:w-auto" onClick={handleRunTask} disabled={task.status === 'Rendering' || task.status === 'Prompting'}>
                 执行此项 ({getBatchCountNumber(effectiveBatchCount)} 张)
               </Button>
             </div>
@@ -1418,7 +1337,7 @@ export const TaskCard = React.memo(function TaskCard({
               <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-3 md:px-4 md:py-4">
                 <div className="relative flex min-h-0 h-full w-full items-center justify-center overflow-hidden rounded-[24px] border border-white/8 bg-transparent">
                   <img
-                    src={previewReferenceImage.src}
+                    src={previewAssetSrc || previewReferenceImage.src}
                     alt={previewReferenceImage.title}
                     className="max-h-full max-w-full select-none object-contain"
                     draggable={false}

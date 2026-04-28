@@ -66,6 +66,7 @@ export const initialProjectState: ProjectData = {
   projectName: '未命名项目',
   platformPreset: 'yunwu',
   downloadDirectoryName: '',
+  cacheDirectoryName: '',
   enablePromptOptimization: true,
   globalSkillText: DEFAULT_SKILL_TEXT,
   globalTargetText: '',
@@ -181,6 +182,7 @@ export function withDefaultSkill<T extends Partial<ProjectData> & { apiBaseUrl?:
   return {
     ...state,
     enablePromptOptimization: state.enablePromptOptimization !== false,
+    cacheDirectoryName: state.cacheDirectoryName || '',
     globalSkillText: state.globalSkillText?.trim() ? state.globalSkillText : DEFAULT_SKILL_TEXT,
     skillFileName: state.skillFileName?.trim() ? state.skillFileName : DEFAULT_SKILL_FILE_NAME,
     globalImageQuality: state.globalImageQuality || 'auto',

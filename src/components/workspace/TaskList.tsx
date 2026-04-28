@@ -30,10 +30,10 @@ function hasImageFiles(dataTransfer?: DataTransfer | null) {
 
 const GRID_PLACEHOLDER_HEIGHT = 320;
 const LIST_PLACEHOLDER_HEIGHT = 180;
-const GRID_ITEM_HEIGHT = 360;
+const GRID_ITEM_HEIGHT = 410;
 const LIST_ITEM_HEIGHT = 206;
 const WINDOW_OVERSCAN_ROWS = 3;
-const GRID_MIN_COLUMN_WIDTH = 240;
+const GRID_MIN_COLUMN_WIDTH = 300;
 const GRID_GAP = 24;
 
 type DeferredTaskCardProps = {
@@ -472,7 +472,7 @@ export function TaskList() {
               style={{
                 gridTemplateColumns:
                   viewMode === 'grid'
-                    ? 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))'
+                    ? 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))'
                     : '1fr',
                 gridAutoRows: 'max-content',
               }}

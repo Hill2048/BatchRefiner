@@ -4,9 +4,9 @@ import {
   Pause,
   Upload,
   Settings,
-  Save,
   FolderOpen,
   Download,
+  History,
   Paperclip,
   ArrowUp,
   FileText,
@@ -31,20 +31,12 @@ import { AspectRatio, Resolution, Task, TaskResultImage } from "@/types";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { optimizeDataUrlForUpload, optimizeImageToDataUrl, readImageFileToDataUrl } from "@/lib/taskFileImport";
 import { ensureDownloadDirectoryPermission, getDownloadDirectoryHandle, writeBlobToDirectory } from "@/lib/downloadDirectory";
-import { buildProjectExportPayload } from "@/lib/projectSnapshot";
 import { getTaskResultImages } from "@/lib/taskResults";
-import {
-  clearProjectFileHandle,
-  ensureProjectFilePermission,
-  getProjectFileHandle,
-  pickProjectSaveFile,
-  supportsProjectFileSave,
-  writeProjectFile,
-} from "@/lib/projectFileSave";
 import { getTaskBatchFileName } from "@/lib/resultImageFileName";
 import { getResultImageAssetExtension } from "@/lib/resultImageAsset";
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from "@/lib/resultImageDownload";
 import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from "@/lib/appLogger";
+import { GenerationHistoryDialog } from "../workspace/GenerationHistoryDialog";
 
 function SidebarProgress() {
   const { tasksCount, completedCount } = useAppStore(
@@ -120,14 +112,14 @@ export function Sidebar({
   onRequestClose?: () => void,
 }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
 
   const [isSkillEditing, setIsSkillEditing] = useState(false);
   const [isMarkdownEditorOpen, setIsMarkdownEditorOpen] = useState(false);
   
-  const { loadProjectFromJson, updateTask } = useAppStore(
+  const { updateTask } = useAppStore(
     useShallow((state) => ({
-      loadProjectFromJson: state.loadProjectFromJson,
       updateTask: state.updateTask,
     })),
   );
@@ -150,7 +142,6 @@ export function Sidebar({
   const setBatchRunning = useAppStore((state) => state.setBatchRunning);
   const selectedTaskIds = useAppStore((state) => state.selectedTaskIds);
   const projectName = useAppStore((state) => state.projectName);
-  const projectId = useAppStore((state) => state.projectId);
   const tasksCount = useAppStore((state) => state.tasksCount);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
   const getLatestTaskLogSessionId = React.useCallback(
@@ -629,66 +620,6 @@ export function Sidebar({
     }
   };
 
-  const handleExportProject = async () => {
-    const payload = buildProjectExportPayload(useAppStore.getState());
-    const data = JSON.stringify(payload, null, 2);
-    const filename = `Project_${projectName}.json`;
-    const successfulPromptCount = payload.successfulPrompts.length;
-
-    if (supportsProjectFileSave()) {
-      try {
-        let handle = await getProjectFileHandle(projectId);
-        let reusedExistingFile = true;
-
-        if (!handle) {
-          handle = await pickProjectSaveFile(projectId, filename);
-          reusedExistingFile = false;
-        } else {
-          const hasPermission = await ensureProjectFilePermission(handle);
-          if (!hasPermission) {
-            await clearProjectFileHandle(projectId);
-            handle = await pickProjectSaveFile(projectId, filename);
-            reusedExistingFile = false;
-          }
-        }
-
-        await writeProjectFile(handle, data);
-        toast.success(
-          reusedExistingFile
-            ? `项目空间已覆盖保存，并写入 ${successfulPromptCount} 条成功提示词`
-            : `项目空间已保存，并写入 ${successfulPromptCount} 条成功提示词`
-        );
-        return;
-      } catch (error) {
-        console.error("Project save error", error);
-      }
-    }
-
-    const { saveAs } = await import('file-saver');
-    const blob = new Blob([data], { type: "application/json;charset=utf-8" });
-    saveAs(blob, filename);
-    toast.success(`项目空间已导出，并写入 ${successfulPromptCount} 条成功提示词`);
-  };
-
-  const handleImportProject = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-    input.onchange = (e: any) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          loadProjectFromJson(event.target.result as string);
-          toast.success("成功加载项目空间");
-        }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  };
-
   const handleGlobalImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
@@ -962,7 +893,7 @@ export function Sidebar({
         <SidebarProgress />
 
         {/* Global Controls */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <Button
             variant="outline"
             size="icon"
@@ -976,19 +907,10 @@ export function Sidebar({
             variant="outline"
             size="icon"
             className="h-10 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-2xl"
-            onClick={handleExportProject}
-            title="存储当前项目空间"
+            onClick={() => setIsHistoryOpen(true)}
+            title="历史生图"
           >
-            <Save className="w-4 h-4" strokeWidth={1.5} />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-10 w-full shadow-none bg-[#F5F4F0] border-transparent hover:border-border text-text-secondary hover:text-foreground rounded-2xl"
-            onClick={handleImportProject}
-            title="读取历史项目配置"
-          >
-            <FolderOpen className="w-4 h-4" strokeWidth={1.5} />
+            <History className="w-4 h-4" strokeWidth={1.5} />
           </Button>
           <Button
             variant="outline"
@@ -1053,6 +975,7 @@ export function Sidebar({
       </div>
 
       {isSettingsOpen ? <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} /> : null}
+      <GenerationHistoryDialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen} />
       {isMarkdownEditorOpen ? (
         <MarkdownEditorDialog
           open={isMarkdownEditorOpen}
