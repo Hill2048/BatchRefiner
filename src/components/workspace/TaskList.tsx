@@ -253,9 +253,13 @@ export function TaskList() {
       return;
     }
 
+    if (selectedTaskIds.length > 0) {
+      clearTaskSelection();
+    }
+
     setActiveTask(null);
     window.dispatchEvent(new CustomEvent('batch-refiner:new-task-mode'));
-  }, [setActiveTask]);
+  }, [clearTaskSelection, selectedTaskIds.length, setActiveTask]);
 
   const updateMarqueeSelection = React.useCallback((state: MarqueeSelectionState) => {
     const left = Math.min(state.startClientX, state.currentClientX);
