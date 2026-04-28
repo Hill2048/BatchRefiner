@@ -1,8 +1,8 @@
 import { AspectRatio, BatchCount, ImageQuality, PlatformPreset, Resolution, Task, TaskResultImage, TaskStatus } from "@/types";
 import { useAppStore } from "@/store";
-import pLimit from "p-limit";
 import { toast } from "sonner";
 import { getBatchCountNumber, getEffectiveBatchCount } from "./taskResults";
+import { normalizeTaskConcurrency, runTaskExecutionQueue } from "./taskExecutionQueue";
 import { getExecutablePromptText, getPreparedPromptText, isPromptOptimizationEnabled } from "./promptExecution";
 import { dataUrlToBlob, primeResultImageCache, primeTaskResultImageCache, storeResultImageBlob } from "./resultImageCache";
 import { getResultImageAssetSrc, inferResultImageAssetMetadata, isValidResultImageAssetSrc } from "./resultImageAsset";
@@ -83,6 +83,7 @@ interface GeneratedBatchResult {
 interface RunImageGenerationOptions {
   onImage?: (image: TaskResultImage, images: TaskResultImage[], failedCount: number) => void;
   logSessionId?: string;
+  shouldContinue?: () => boolean;
 }
 
 interface GeneratedPromptResult {
@@ -247,6 +248,10 @@ function createStageError(message: string, stage: string) {
   const error = new Error(message);
   (error as any).stage = stage;
   return error;
+}
+
+function isBatchExecutionActive() {
+  return useAppStore.getState().isBatchRunning;
 }
 
 function getNormalizedModelName(model?: string) {
@@ -1081,8 +1086,17 @@ function updateTaskWithGeneratedImages(taskId: string, images: TaskResultImage[]
   });
 }
 
+function isManuallyHaltedTask(task?: Task) {
+  if (!task || task.status !== "Error") return false;
+  const message = task.errorLog?.message || "";
+  return message.includes("手动中断") || message.includes("用户手动");
+}
+
 function updateTaskProgress(taskId: string, status: TaskStatus, progressStage: string) {
-  useAppStore.getState().updateTask(taskId, {
+  const store = useAppStore.getState();
+  if (isManuallyHaltedTask(store.taskLookup[taskId])) return;
+
+  store.updateTask(taskId, {
     status,
     progressStage,
     errorLog: undefined,
@@ -1644,31 +1658,34 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
     return;
   }
 
-  const limit = pLimit(store.maxConcurrency || 3);
-  const promises = tasksToProcess.map(task => limit(async () => {
-    if (!useAppStore.getState().isBatchRunning) return;
-    const logMode = mode === "prompts" ? "prompt-batch" : mode === "images" ? "image-batch" : "all-batch";
-    const logSessionId = createGenerationLogSession({
-      mode: logMode,
-      task,
-      triggerId,
-      summary: {
-        requestCount: getBatchCountNumber(getEffectiveTaskBatchCount(task)),
-      },
-    });
-    appendGenerationLogEvent(logSessionId, {
-      stage: "prepare",
-      event: "task.batch.started",
-      message: "批量任务开始",
-      data: buildGenerationTaskSnapshot(task, {
-        mode,
-        platformPreset: getPlatformPreset(),
-        textModel: store.textModel,
-        imageModel: store.imageModel,
-        enablePromptOptimization: promptOptimizationEnabled,
-        globalReferenceImageCount: store.globalReferenceImages.length,
-      }),
-    });
+  await runTaskExecutionQueue({
+    items: tasksToProcess,
+    concurrency: normalizeTaskConcurrency(store.maxConcurrency),
+    shouldContinue: isBatchExecutionActive,
+    worker: async (task) => {
+      if (!isBatchExecutionActive()) return;
+      const logMode = mode === "prompts" ? "prompt-batch" : mode === "images" ? "image-batch" : "all-batch";
+      const logSessionId = createGenerationLogSession({
+        mode: logMode,
+        task,
+        triggerId,
+        summary: {
+          requestCount: getBatchCountNumber(getEffectiveTaskBatchCount(task)),
+        },
+      });
+      appendGenerationLogEvent(logSessionId, {
+        stage: "prepare",
+        event: "task.batch.started",
+        message: "批量任务开始",
+        data: buildGenerationTaskSnapshot(task, {
+          mode,
+          platformPreset: getPlatformPreset(),
+          textModel: store.textModel,
+          imageModel: store.imageModel,
+          enablePromptOptimization: promptOptimizationEnabled,
+          globalReferenceImageCount: store.globalReferenceImages.length,
+        }),
+      });
 
     window.dispatchEvent(new CustomEvent("scroll-to-task", { detail: { id: task.id } }));
 
@@ -1690,7 +1707,7 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
         }
       }
 
-      if (!useAppStore.getState().isBatchRunning) return;
+      if (!isBatchExecutionActive()) return;
 
       if (mode === "all" || mode === "images") {
         const currentTask = useAppStore.getState().taskLookup[task.id];
@@ -1707,10 +1724,13 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
           });
           const generatedBatch = await runImageGeneration(task.id, {
             logSessionId,
+            shouldContinue: isBatchExecutionActive,
             onImage: (_image, images, failedCount) => {
+              if (!isBatchExecutionActive()) return;
               updateTaskWithGeneratedImages(task.id, images, failedCount, "Rendering");
             },
           });
+          if (!isBatchExecutionActive()) return;
           if (generatedBatch.images.length === 0) {
             throw createStageError("没有成功返回任何结果图。", "Image Generation");
           }
@@ -1742,12 +1762,12 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
         });
       }
     } catch (error: any) {
-      if (!useAppStore.getState().isBatchRunning) return;
+      if (!isBatchExecutionActive()) return;
       toast.error(`任务 ${task.title || task.index} 处理失败`);
-        useAppStore.getState().updateTask(task.id, {
-          status: "Error",
-          progressStage: undefined,
-          errorLog: {
+      useAppStore.getState().updateTask(task.id, {
+        status: "Error",
+        progressStage: undefined,
+        errorLog: {
           message: error.message || "Error occurred",
           time: Date.now(),
           stage: error.stage || "Unknown"
@@ -1767,11 +1787,10 @@ export async function processBatch(mode: "all" | "prompts" | "images" = "all") {
         errorMessage: error?.message || "Error occurred",
       });
     }
-  }));
+    },
+  });
 
-  await Promise.allSettled(promises);
-
-  if (useAppStore.getState().isBatchRunning) {
+  if (isBatchExecutionActive()) {
     useAppStore.getState().setBatchRunning(false);
     if ("Notification" in window && Notification.permission === "granted") {
       new Notification("BatchRefiner", { body: "批量处理完成" });
@@ -2968,6 +2987,7 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
   let failedCount = 0;
   const logSessionId = options.logSessionId;
   const imageNotifier = options.onImage ? createBufferedImageNotifier(options.onImage) : null;
+  const shouldContinue = options.shouldContinue;
 
   if (logSessionId) {
     appendGenerationLogEvent(logSessionId, {
@@ -2981,6 +3001,9 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
   }
 
   for (let index = 0; index < targetBatchCount; index += 1) {
+    if (shouldContinue && !shouldContinue()) {
+      break;
+    }
     try {
       if (logSessionId) {
         appendGenerationLogEvent(logSessionId, {
@@ -2995,6 +3018,9 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
         });
       }
       const generatedImage = await runSingleImageGeneration(taskId, { logSessionId });
+      if (shouldContinue && !shouldContinue()) {
+        break;
+      }
       const createdImage = await createTaskResultImage(generatedImage, task.activeResultSessionId);
       images.push(createdImage);
       if (logSessionId) {

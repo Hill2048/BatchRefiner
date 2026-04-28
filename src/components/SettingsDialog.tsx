@@ -11,6 +11,7 @@ import {
 } from '@/lib/cacheDirectory';
 import { clearResultImageCache } from '@/lib/resultImageCache';
 import { saveLocalCacheSnapshot } from '@/lib/localCachePersistence';
+import { normalizeTaskConcurrency } from '@/lib/taskExecutionQueue';
 import {
   ApiConfigPayload,
   decryptApiConfig,
@@ -19,6 +20,7 @@ import {
   MultiPlatformApiConfigPayload,
 } from '@/lib/secureConfig';
 import { fetchPlatformQuota, type PlatformQuotaSnapshot } from '@/lib/platformQuota';
+import { resolveImageRoute, resolveTextRoute, type ResolvedRoute } from '@/lib/modelRouting';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
@@ -293,6 +295,79 @@ function StatusBox({ tone, message }: { tone: 'success' | 'error'; message: stri
   return <div className={className}>{message}</div>;
 }
 
+function getRouteTransportLabel(transport: ResolvedRoute['transport']) {
+  switch (transport) {
+    case 'gemini-gateway':
+      return 'Gemini 网关';
+    case 'openai-chat-completions':
+      return 'Chat Completions';
+    case 'openai-images':
+      return 'Images API';
+    case 'gemini-native':
+      return 'Gemini 原生';
+    default:
+      return transport;
+  }
+}
+
+function getRouteTransportClassName(transport: ResolvedRoute['transport']) {
+  switch (transport) {
+    case 'gemini-gateway':
+      return 'border-emerald-200/70 bg-emerald-50/70 text-emerald-700';
+    case 'openai-chat-completions':
+      return 'border-sky-200/80 bg-sky-50/75 text-sky-700';
+    case 'openai-images':
+      return 'border-amber-200/80 bg-amber-50/75 text-amber-700';
+    case 'gemini-native':
+      return 'border-stone-200/80 bg-stone-100/80 text-stone-700';
+    default:
+      return 'border-border/80 bg-white text-text-secondary';
+  }
+}
+
+function RouteSummaryCard({ route }: { route: ResolvedRoute }) {
+  return (
+    <div className="rounded-2xl border border-border/70 bg-white/85 px-4 py-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[12.6px] font-medium text-text-primary">{route.title}</div>
+          <p className="mt-1 text-[11.55px] leading-5 text-text-secondary">{route.summary}</p>
+        </div>
+        <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10.5px] font-medium ${getRouteTransportClassName(route.transport)}`}>
+          {getRouteTransportLabel(route.transport)}
+        </span>
+      </div>
+
+      <div className="mt-2 space-y-1">
+        {route.detailLines.map((line, index) => (
+          <div
+            key={`${route.title}-${index}`}
+            className={`text-[11.55px] leading-5 text-text-secondary ${line.startsWith('请求：') ? 'break-all font-mono text-[11.1px]' : ''}`}
+          >
+            {line}
+          </div>
+        ))}
+      </div>
+
+      {route.notes.length ? (
+        <div className="mt-2 rounded-xl border border-black/5 bg-[#F5F1E8]/80 px-3 py-2 text-[11.55px] leading-5 text-text-secondary">
+          {route.notes.map((note, index) => (
+            <div key={`${route.title}-note-${index}`}>{note}</div>
+          ))}
+        </div>
+      ) : null}
+
+      {route.warnings.length ? (
+        <div className="mt-2 rounded-xl border border-amber-200/80 bg-amber-50/85 px-3 py-2 text-[11.55px] leading-5 text-amber-700">
+          {route.warnings.map((warning, index) => (
+            <div key={`${route.title}-warning-${index}`}>{warning}</div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const mergedInputClassName = "h-11 border-0 bg-transparent px-3 text-[13.65px] shadow-none focus-visible:ring-0";
 
 function ModelInput({
@@ -497,6 +572,40 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const imageModelOptions = uniqSorted([...BUILT_IN_IMAGE_MODELS, ...remoteImageModels]);
   const supportsQuota = platformPreset === 'yunwu' || platformPreset === 'comfly-chat';
   const isComfly = platformPreset === 'comfly-chat';
+  const routingInput = React.useMemo(
+    () => ({
+      platformPreset,
+      apiBaseUrl,
+      textApiBaseUrl,
+      imageApiBaseUrl,
+      imageApiPath,
+      apiKey: textApiKey,
+      textApiKey,
+      imageApiKey,
+      textModel: localTextModel,
+      imageModel: localImageModel,
+    }),
+    [
+      apiBaseUrl,
+      imageApiBaseUrl,
+      imageApiKey,
+      imageApiPath,
+      localImageModel,
+      localTextModel,
+      platformPreset,
+      textApiBaseUrl,
+      textApiKey,
+    ],
+  );
+  const textRoute = React.useMemo(() => resolveTextRoute(routingInput), [routingInput]);
+  const imageRouteWithoutInput = React.useMemo(
+    () => resolveImageRoute(routingInput, { hasImageInputs: false }),
+    [routingInput],
+  );
+  const imageRouteWithInput = React.useMemo(
+    () => resolveImageRoute(routingInput, { hasImageInputs: true }),
+    [routingInput],
+  );
 
   const handlePresetChange = (preset: PlatformPreset) => {
     const syncedConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
@@ -855,9 +964,9 @@ const handleExportCurrentConfig = async () => {
     setImageApiBaseUrl(imageApiBaseUrl);
     setImageApiPath(imageApiPath);
 
-    if (!Number.isNaN(parsedConcurrency) && parsedConcurrency > 0) {
-      setMaxConcurrency(parsedConcurrency);
-    }
+    const normalizedConcurrency = normalizeTaskConcurrency(parsedConcurrency);
+    setMaxConcurrency(normalizedConcurrency);
+    setMaxConcurrencyValue(String(normalizedConcurrency));
 
     setProjectFields({
       platformPreset,
@@ -1011,6 +1120,22 @@ const handleExportCurrentConfig = async () => {
                 </div>
               </div>
 
+              <div className="rounded-2xl border border-border/70 bg-[#F6F1E8]/70 p-3 shadow-inner">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[12.6px] font-medium text-text-primary">实际生效关系</div>
+                    <p className="mt-1 text-[11.55px] leading-5 text-text-secondary">
+                      这里显示的是当前设置保存后，提示词和生图请求真正会走到哪条接口。
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <RouteSummaryCard route={textRoute} />
+                  <RouteSummaryCard route={imageRouteWithoutInput} />
+                  <RouteSummaryCard route={imageRouteWithInput} />
+                </div>
+              </div>
+
               <div className="mt-1 flex flex-col gap-2 rounded-2xl border border-black/5 bg-black/[0.03] p-3 shadow-inner">
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
@@ -1142,7 +1267,7 @@ const handleExportCurrentConfig = async () => {
               className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
             />
             <p className="mt-1 text-[11.55px] text-text-secondary">
-              控制同时提交给平台的任务数量，过高可能触发中转平台限流。
+              这里只控制“同时跑多少个任务”。单个任务里如果带了多张原图或参考图，仍然会按同一次任务流程串行整理后再发请求，不会拆成多路并行。
             </p>
           </Section>
         </div>
