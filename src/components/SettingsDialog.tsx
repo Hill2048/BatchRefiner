@@ -1,8 +1,9 @@
 import * as React from 'react';
 import { toast } from 'sonner';
+import { Plus, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { useShallow } from 'zustand/react/shallow';
-import { PlatformApiConfigMap, PlatformPreset } from '@/types';
+import { ApiConfigProfile, PlatformApiConfigMap, PlatformPreset } from '@/types';
 import { clearDownloadDirectory, pickDownloadDirectory, supportsDirectoryDownload } from '@/lib/downloadDirectory';
 import {
   clearCacheDirectoryHandle,
@@ -26,6 +27,12 @@ import {
 } from '@/lib/secureConfig';
 import { fetchPlatformQuota, type PlatformQuotaSnapshot } from '@/lib/platformQuota';
 import { resolveImageRoute, resolveTextRoute, type ResolvedRoute } from '@/lib/modelRouting';
+import {
+  createApiConfigProfile,
+  DEFAULT_API_CONFIG_PROFILE_NAME,
+  mergePlatformConfigs,
+  normalizeApiConfigProfiles,
+} from '@/lib/apiConfigProfiles';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
@@ -120,138 +127,6 @@ function uniqSorted(values: string[]) {
 
 function getPresetConfig(preset: PlatformPreset) {
   return PLATFORM_PRESETS.find((item) => item.value === preset) || PLATFORM_PRESETS[0];
-}
-
-function createDefaultPlatformConfigs(): PlatformApiConfigMap {
-  return {
-    'yunwu': {
-      apiBaseUrl: '',
-      textApiBaseUrl: '',
-      imageApiBaseUrl: '',
-      imageApiPath: '',
-      textToImageApiBaseUrl: '',
-      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: '',
-      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-      apiKey: '',
-      textApiKey: '',
-      imageApiKey: '',
-      textToImageApiKey: '',
-      imageToImageApiKey: '',
-      textModel: 'gemini-3.1-flash-lite-preview',
-      imageModel: 'gemini-3.1-flash-image-preview',
-      textToImageModel: 'gemini-3.1-flash-image-preview',
-      imageToImageModel: 'gemini-3.1-flash-image-preview',
-    },
-    'comfly-chat': {
-      apiBaseUrl: '',
-      textApiBaseUrl: '',
-      imageApiBaseUrl: '',
-      imageApiPath: '',
-      textToImageApiBaseUrl: '',
-      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: '',
-      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-      apiKey: '',
-      textApiKey: '',
-      imageApiKey: '',
-      textToImageApiKey: '',
-      imageToImageApiKey: '',
-      textModel: 'gemini-3.1-flash-lite-preview',
-      imageModel: 'gemini-3.1-flash-image-preview',
-      textToImageModel: 'gemini-3.1-flash-image-preview',
-      imageToImageModel: 'gemini-3.1-flash-image-preview',
-    },
-    'openai-compatible': {
-      apiBaseUrl: '',
-      textApiBaseUrl: '',
-      imageApiBaseUrl: '',
-      imageApiPath: '',
-      textToImageApiBaseUrl: '',
-      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: '',
-      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-      apiKey: '',
-      textApiKey: '',
-      imageApiKey: '',
-      textToImageApiKey: '',
-      imageToImageApiKey: '',
-      textModel: 'gpt-4o',
-      imageModel: 'gpt-image-2',
-      textToImageModel: 'gpt-image-2',
-      imageToImageModel: 'gpt-image-2',
-    },
-    'gemini-native': {
-      apiBaseUrl: '',
-      textApiBaseUrl: '',
-      imageApiBaseUrl: '',
-      imageApiPath: '',
-      textToImageApiBaseUrl: '',
-      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: '',
-      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-      apiKey: '',
-      textApiKey: '',
-      imageApiKey: '',
-      textToImageApiKey: '',
-      imageToImageApiKey: '',
-      textModel: 'gemini-2.5-flash',
-      imageModel: 'imagen-3.0-generate-001',
-      textToImageModel: 'imagen-3.0-generate-001',
-      imageToImageModel: 'imagen-3.0-generate-001',
-    },
-    'custom': {
-      apiBaseUrl: '',
-      textApiBaseUrl: '',
-      imageApiBaseUrl: '',
-      imageApiPath: '',
-      textToImageApiBaseUrl: '',
-      textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-      imageToImageApiBaseUrl: '',
-      imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-      apiKey: '',
-      textApiKey: '',
-      imageApiKey: '',
-      textToImageApiKey: '',
-      imageToImageApiKey: '',
-      textModel: '',
-      imageModel: '',
-      textToImageModel: '',
-      imageToImageModel: '',
-    },
-  };
-}
-
-function mergePlatformConfigs(configs?: Partial<PlatformApiConfigMap> | null): PlatformApiConfigMap {
-  const defaults = createDefaultPlatformConfigs();
-  if (!configs) return defaults;
-
-  return {
-    'yunwu': normalizePlatformConfig({ ...defaults['yunwu'], ...(configs['yunwu'] || {}) }),
-    'comfly-chat': normalizePlatformConfig({ ...defaults['comfly-chat'], ...(configs['comfly-chat'] || {}) }),
-    'openai-compatible': normalizePlatformConfig({ ...defaults['openai-compatible'], ...(configs['openai-compatible'] || {}) }),
-    'gemini-native': normalizePlatformConfig({ ...defaults['gemini-native'], ...(configs['gemini-native'] || {}) }),
-    'custom': normalizePlatformConfig({ ...defaults['custom'], ...(configs['custom'] || {}) }),
-  };
-}
-
-function normalizePlatformConfig(config: PlatformApiConfigMap[PlatformPreset]): PlatformApiConfigMap[PlatformPreset] {
-  return {
-    ...config,
-    textApiBaseUrl: config.textApiBaseUrl ?? config.apiBaseUrl,
-    imageApiBaseUrl: config.imageApiBaseUrl ?? config.apiBaseUrl,
-    imageApiPath: config.imageApiPath ?? '',
-    textToImageApiBaseUrl: config.textToImageApiBaseUrl ?? '',
-    textToImageApiPath: config.textToImageApiPath || config.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
-    imageToImageApiBaseUrl: config.imageToImageApiBaseUrl ?? '',
-    imageToImageApiPath: config.imageToImageApiPath || config.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-    textApiKey: config.textApiKey ?? config.apiKey,
-    imageApiKey: config.imageApiKey ?? config.apiKey,
-    textToImageApiKey: config.textToImageApiKey ?? '',
-    imageToImageApiKey: config.imageToImageApiKey ?? '',
-    textToImageModel: config.textToImageModel ?? config.imageModel,
-    imageToImageModel: config.imageToImageModel ?? config.imageModel,
-  };
 }
 
 function normalizeOpenAIBaseUrl(baseUrl: string) {
@@ -399,6 +274,38 @@ function RouteSummaryCard({ route }: { route: ResolvedRoute }) {
   );
 }
 
+function sanitizeProfileFileName(name: string) {
+  return (name.trim() || DEFAULT_API_CONFIG_PROFILE_NAME).replace(/[\\/:*?"<>|]/g, '-');
+}
+
+function ProfileSwitch({
+  checked,
+  onClick,
+}: {
+  checked: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onClick}
+      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors ${
+        checked
+          ? 'border-button-main bg-button-main/90'
+          : 'border-border bg-[#E8E2D8]'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform ${
+          checked ? 'translate-x-[21px]' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
+
 const mergedInputClassName = "h-11 border-0 bg-transparent px-3 text-[13.65px] shadow-none focus-visible:ring-0";
 
 function ModelInput({
@@ -470,6 +377,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const {
     apiBaseUrl: savedApiBaseUrl,
     apiKey: savedApiKey,
+    apiConfigProfiles: savedApiConfigProfiles,
     cacheDirectoryName: savedCacheDirectoryName,
     downloadDirectoryName: savedDownloadDirectoryName,
     exportTemplate: savedExportTemplate,
@@ -504,6 +412,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     useShallow((state) => ({
       apiBaseUrl: state.apiBaseUrl,
       apiKey: state.apiKey,
+      apiConfigProfiles: state.apiConfigProfiles,
       cacheDirectoryName: state.cacheDirectoryName,
       downloadDirectoryName: state.downloadDirectoryName,
       exportTemplate: state.exportTemplate,
@@ -537,11 +446,53 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     })),
   );
   const generationLogs = useAppStore((state) => state.generationLogs);
-  const mergedPlatformConfigs = React.useMemo(
-    () => mergePlatformConfigs(platformConfigs),
-    [platformConfigs],
+  const legacyProfileSeed = React.useMemo(
+    () => ({
+      platformPreset: savedPlatformPreset,
+      platformConfigs,
+      apiBaseUrl: savedApiBaseUrl,
+      textApiBaseUrl: savedTextApiBaseUrl,
+      imageApiBaseUrl: savedImageApiBaseUrl,
+      imageApiPath: savedImageApiPath,
+      textToImageApiBaseUrl: savedTextToImageApiBaseUrl,
+      textToImageApiPath: savedTextToImageApiPath,
+      imageToImageApiBaseUrl: savedImageToImageApiBaseUrl,
+      imageToImageApiPath: savedImageToImageApiPath,
+      apiKey: savedApiKey,
+      textApiKey: savedTextApiKey,
+      imageApiKey: savedImageApiKey,
+      textToImageApiKey: savedTextToImageApiKey,
+      imageToImageApiKey: savedImageToImageApiKey,
+      textModel: savedTextModel,
+      imageModel: savedImageModel,
+      textToImageModel: savedTextToImageModel,
+      imageToImageModel: savedImageToImageModel,
+    }),
+    [
+      platformConfigs,
+      savedApiBaseUrl,
+      savedApiKey,
+      savedImageApiBaseUrl,
+      savedImageApiKey,
+      savedImageApiPath,
+      savedImageModel,
+      savedImageToImageApiBaseUrl,
+      savedImageToImageApiKey,
+      savedImageToImageApiPath,
+      savedImageToImageModel,
+      savedPlatformPreset,
+      savedTextApiBaseUrl,
+      savedTextApiKey,
+      savedTextModel,
+      savedTextToImageApiBaseUrl,
+      savedTextToImageApiKey,
+      savedTextToImageApiPath,
+      savedTextToImageModel,
+    ],
   );
 
+  const [selectedProfileId, setSelectedProfileId] = React.useState<string | null>(null);
+  const [profiles, setProfiles] = React.useState<ApiConfigProfile[]>([]);
   const [platformPreset, setPlatformPreset] = React.useState<PlatformPreset>(savedPlatformPreset || 'yunwu');
   const [textApiKey, setTextApiKeyValue] = React.useState(savedTextApiKey || savedApiKey);
   const [imageApiKey, setImageApiKeyValue] = React.useState(savedImageApiKey || savedApiKey);
@@ -564,7 +515,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [downloadDirectoryName, setDownloadDirectoryName] = React.useState(savedDownloadDirectoryName || '');
   const [exportTemplate, setExportTemplate] = React.useState(savedExportTemplate || '{task_id}_{title}_{batch}');
   const [cacheDirectoryName, setCacheDirectoryName] = React.useState(savedCacheDirectoryName || '');
-  const [allPlatformConfigs, setAllPlatformConfigs] = React.useState<PlatformApiConfigMap>(mergedPlatformConfigs);
+  const [allPlatformConfigs, setAllPlatformConfigs] = React.useState<PlatformApiConfigMap>(mergePlatformConfigs());
   const [remoteTextModels, setRemoteTextModels] = React.useState<string[]>([]);
   const [remoteImageModels, setRemoteImageModels] = React.useState<string[]>([]);
   const [isPickingDirectory, setIsPickingDirectory] = React.useState(false);
@@ -576,6 +527,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [testResult, setTestResult] = React.useState<ResultState>({ status: 'idle', msg: '' });
   const [quotaResult, setQuotaResult] = React.useState<ResultState>({ status: 'idle', msg: '' });
   const [isLogDialogOpen, setIsLogDialogOpen] = React.useState(false);
+
+  const resetTransientState = React.useCallback(() => {
+    setRemoteTextModels([]);
+    setRemoteImageModels([]);
+    setTestResult({ status: 'idle', msg: '' });
+    setQuotaResult({ status: 'idle', msg: '' });
+  }, []);
 
   const applyPlatformConfigToForm = React.useCallback((preset: PlatformPreset, configs: PlatformApiConfigMap) => {
     const next = configs[preset];
@@ -597,6 +555,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setLocalTextToImageModel(next.textToImageModel || next.imageModel);
     setLocalImageToImageModel(next.imageToImageModel || next.imageModel);
   }, []);
+
+  const applyProfileToForm = React.useCallback((profile: ApiConfigProfile) => {
+    const nextConfigs = mergePlatformConfigs(profile.platformConfigs);
+    setAllPlatformConfigs(nextConfigs);
+    applyPlatformConfigToForm(profile.selectedPlatformPreset, nextConfigs);
+  }, [applyPlatformConfigToForm]);
 
   const syncCurrentFormToConfigs = React.useCallback((configs: PlatformApiConfigMap): PlatformApiConfigMap => {
     return {
@@ -638,27 +602,32 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     textApiKey,
     textToImageApiBaseUrl,
     textToImageApiKey,
-    textToImageApiPath,
+      textToImageApiPath,
   ]);
 
   React.useEffect(() => {
-    const nextConfigs = mergePlatformConfigs(platformConfigs);
-    setAllPlatformConfigs(nextConfigs);
-    applyPlatformConfigToForm(savedPlatformPreset || 'yunwu', nextConfigs);
+    if (!open) return;
+
+    const nextProfiles = normalizeApiConfigProfiles(savedApiConfigProfiles, legacyProfileSeed);
+    const nextActiveProfile = nextProfiles.find((profile) => profile.isActive) || nextProfiles[0];
+    setProfiles(nextProfiles);
+    setSelectedProfileId(nextActiveProfile?.id || null);
+    if (nextActiveProfile) {
+      applyProfileToForm(nextActiveProfile);
+    }
     setMaxConcurrencyValue(String(savedMaxConcurrency));
     setSingleTaskImageConcurrencyValue(String(normalizeSingleTaskImageConcurrency(savedSingleTaskImageConcurrency)));
     setDownloadDirectoryName(savedDownloadDirectoryName || '');
     setExportTemplate(savedExportTemplate || '{task_id}_{title}_{batch}');
     setCacheDirectoryName(savedCacheDirectoryName || '');
-    setRemoteTextModels([]);
-    setRemoteImageModels([]);
-    setTestResult({ status: 'idle', msg: '' });
-    setQuotaResult({ status: 'idle', msg: '' });
+    resetTransientState();
     setIsPickingDirectory(false);
   }, [
-    applyPlatformConfigToForm,
+    applyProfileToForm,
+    legacyProfileSeed,
     open,
-    platformConfigs,
+    resetTransientState,
+    savedApiConfigProfiles,
     savedDownloadDirectoryName,
     savedExportTemplate,
     savedCacheDirectoryName,
@@ -681,6 +650,38 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       cancelled = true;
     };
   }, [cacheDirectoryName, open, setProjectFields]);
+
+  const currentProfile = React.useMemo(
+    () => profiles.find((profile) => profile.id === selectedProfileId) || profiles[0] || null,
+    [profiles, selectedProfileId],
+  );
+  const activeProfile = React.useMemo(
+    () => profiles.find((profile) => profile.isActive) || profiles[0] || null,
+    [profiles],
+  );
+
+  const syncCurrentFormToProfiles = React.useCallback((items: ApiConfigProfile[]) => {
+    if (!selectedProfileId) return items;
+
+    return items.map((profile) => {
+      if (profile.id !== selectedProfileId) return profile;
+      return {
+        ...profile,
+        selectedPlatformPreset: platformPreset,
+        platformConfigs: syncCurrentFormToConfigs(profile.platformConfigs),
+        updatedAt: Date.now(),
+      };
+    });
+  }, [platformPreset, selectedProfileId, syncCurrentFormToConfigs]);
+
+  const openProfile = React.useCallback((profileId: string, items: ApiConfigProfile[]) => {
+    const nextProfile = items.find((profile) => profile.id === profileId);
+    if (!nextProfile) return;
+    setProfiles(items);
+    setSelectedProfileId(profileId);
+    applyProfileToForm(nextProfile);
+    resetTransientState();
+  }, [applyProfileToForm, resetTransientState]);
 
   const textModelOptions = uniqSorted([...BUILT_IN_TEXT_MODELS, ...remoteTextModels]);
   const imageModelOptions = uniqSorted([...BUILT_IN_IMAGE_MODELS, ...remoteImageModels]);
@@ -741,45 +742,128 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     const syncedConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
     setAllPlatformConfigs(syncedConfigs);
     applyPlatformConfigToForm(preset, syncedConfigs);
-    setRemoteTextModels([]);
-    setRemoteImageModels([]);
-    setTestResult({ status: 'idle', msg: '' });
-    setQuotaResult({ status: 'idle', msg: '' });
+    resetTransientState();
   };
 
-  const applyImportedConfig = (data: ApiConfigPayload | MultiPlatformApiConfigPayload) => {
-    if (data.version === 2) {
-      const nextConfigs = mergePlatformConfigs(data.platformConfigs);
-      setAllPlatformConfigs(nextConfigs);
-      applyPlatformConfigToForm(data.selectedPlatformPreset, nextConfigs);
+  const handleProfileSelect = (profileId: string) => {
+    openProfile(profileId, syncCurrentFormToProfiles(profiles));
+  };
+
+  const handleCreateProfile = () => {
+    const syncedProfiles = syncCurrentFormToProfiles(profiles);
+    const baseProfile = currentProfile || activeProfile;
+    const nextProfile = createApiConfigProfile({
+      name: `配置 ${syncedProfiles.length + 1}`,
+      isActive: false,
+      selectedPlatformPreset: baseProfile?.selectedPlatformPreset || 'yunwu',
+      platformConfigs: baseProfile?.platformConfigs || mergePlatformConfigs(),
+    });
+    openProfile(nextProfile.id, [...syncedProfiles, nextProfile]);
+  };
+
+  const handleDeleteProfile = (profileId: string) => {
+    if (profiles.length <= 1) {
+      toast.error('至少保留一个配置文件');
       return;
     }
 
-    const nextConfigs = mergePlatformConfigs({
-      ...allPlatformConfigs,
-      [data.platformPreset]: {
-        apiBaseUrl: data.apiBaseUrl,
-        textApiBaseUrl: data.textApiBaseUrl || data.apiBaseUrl,
-        imageApiBaseUrl: data.imageApiBaseUrl || data.apiBaseUrl,
-        imageApiPath: data.imageApiPath || '',
-        textToImageApiBaseUrl: data.textToImageApiBaseUrl || '',
-        textToImageApiPath: data.textToImageApiPath || data.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
-        imageToImageApiBaseUrl: data.imageToImageApiBaseUrl || '',
-        imageToImageApiPath: data.imageToImageApiPath || data.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-        apiKey: data.apiKey,
-        textApiKey: data.textApiKey || data.apiKey,
-        imageApiKey: data.imageApiKey || data.apiKey,
-        textToImageApiKey: data.textToImageApiKey || '',
-        imageToImageApiKey: data.imageToImageApiKey || '',
-        textModel: data.textModel,
-        imageModel: data.imageModel,
-        textToImageModel: data.textToImageModel || data.imageModel,
-        imageToImageModel: data.imageToImageModel || data.imageModel,
-      },
+    const syncedProfiles = syncCurrentFormToProfiles(profiles);
+    const deleteIndex = syncedProfiles.findIndex((profile) => profile.id === profileId);
+    if (deleteIndex === -1) return;
+
+    const deletingProfile = syncedProfiles[deleteIndex];
+    let nextProfiles = syncedProfiles.filter((profile) => profile.id !== profileId);
+
+    if (deletingProfile.isActive) {
+      nextProfiles = nextProfiles.map((profile, index) => ({
+        ...profile,
+        isActive: index === 0,
+      }));
+    }
+
+    const fallbackProfile = nextProfiles[Math.min(deleteIndex, nextProfiles.length - 1)];
+    if (!fallbackProfile) return;
+
+    if (profileId === selectedProfileId) {
+      openProfile(fallbackProfile.id, nextProfiles);
+      return;
+    }
+
+    setProfiles(nextProfiles);
+  };
+
+  const handleToggleProfileActive = (profileId: string) => {
+    const syncedProfiles = syncCurrentFormToProfiles(profiles);
+    const nextProfiles = syncedProfiles.map((profile) => ({
+      ...profile,
+      isActive: profile.id === profileId,
+      updatedAt: profile.id === profileId ? Date.now() : profile.updatedAt,
+    }));
+    openProfile(profileId, nextProfiles);
+  };
+
+  const handleProfileNameChange = (name: string) => {
+    setProfiles((current) =>
+      current.map((profile, index) => {
+        if (profile.id !== selectedProfileId) return profile;
+        return {
+          ...profile,
+          name: name || `配置 ${index + 1}`,
+          updatedAt: Date.now(),
+        };
+      }),
+    );
+  };
+
+  const applyImportedConfig = (data: ApiConfigPayload | MultiPlatformApiConfigPayload) => {
+    const syncedProfiles = syncCurrentFormToProfiles(profiles);
+    const targetProfileId = currentProfile?.id || syncedProfiles[0]?.id;
+    if (!targetProfileId) return;
+
+    const nextProfiles = syncedProfiles.map((profile) => {
+      if (profile.id !== targetProfileId) return profile;
+
+      if (data.version === 2) {
+        return {
+          ...profile,
+          selectedPlatformPreset: data.selectedPlatformPreset,
+          platformConfigs: mergePlatformConfigs(data.platformConfigs),
+          updatedAt: Date.now(),
+        };
+      }
+
+      return {
+        ...profile,
+        selectedPlatformPreset: data.platformPreset,
+        platformConfigs: mergePlatformConfigs({
+          ...profile.platformConfigs,
+          [data.platformPreset]: {
+            apiBaseUrl: data.apiBaseUrl,
+            textApiBaseUrl: data.textApiBaseUrl || data.apiBaseUrl,
+            imageApiBaseUrl: data.imageApiBaseUrl || data.apiBaseUrl,
+            imageApiPath: data.imageApiPath || '',
+            textToImageApiBaseUrl: data.textToImageApiBaseUrl || '',
+            textToImageApiPath:
+              data.textToImageApiPath || data.imageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
+            imageToImageApiBaseUrl: data.imageToImageApiBaseUrl || '',
+            imageToImageApiPath:
+              data.imageToImageApiPath || data.imageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
+            apiKey: data.apiKey,
+            textApiKey: data.textApiKey || data.apiKey,
+            imageApiKey: data.imageApiKey || data.apiKey,
+            textToImageApiKey: data.textToImageApiKey || '',
+            imageToImageApiKey: data.imageToImageApiKey || '',
+            textModel: data.textModel,
+            imageModel: data.imageModel,
+            textToImageModel: data.textToImageModel || data.imageModel,
+            imageToImageModel: data.imageToImageModel || data.imageModel,
+          },
+        }),
+        updatedAt: Date.now(),
+      };
     });
 
-    setAllPlatformConfigs(nextConfigs);
-    applyPlatformConfigToForm(data.platformPreset, nextConfigs);
+    openProfile(targetProfileId, nextProfiles);
   };
 
   const setRemoteModels = React.useCallback((items: ModelItem[]) => {
@@ -983,14 +1067,20 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     input.click();
   };
 
-const handleExportCurrentConfig = async () => {
+  const handleExportCurrentConfig = async () => {
     try {
+      if (!currentProfile) {
+        toast.error('当前没有可导出的配置文件');
+        return;
+      }
+
       const { saveAs } = await import('file-saver');
-      const syncedConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
-      const currentConfig = syncedConfigs[platformPreset];
+      const syncedProfiles = syncCurrentFormToProfiles(profiles);
+      const exportingProfile = syncedProfiles.find((profile) => profile.id === currentProfile.id) || currentProfile;
+      const currentConfig = mergePlatformConfigs(exportingProfile.platformConfigs)[exportingProfile.selectedPlatformPreset];
       const payload: ApiConfigPayload = {
         version: 1,
-        platformPreset,
+        platformPreset: exportingProfile.selectedPlatformPreset,
         apiBaseUrl: currentConfig.apiBaseUrl,
         textApiBaseUrl: currentConfig.textApiBaseUrl,
         imageApiBaseUrl: currentConfig.imageApiBaseUrl,
@@ -1013,7 +1103,10 @@ const handleExportCurrentConfig = async () => {
 
       const encryptedConfig = await encryptApiConfig(payload);
       const blob = new Blob([encryptedConfig], { type: 'application/json;charset=utf-8' });
-      saveAs(blob, `BatchRefiner_API_Config_${platformPreset}_${new Date().toISOString().slice(0, 10)}.json`);
+      saveAs(
+        blob,
+        `BatchRefiner_API_Config_${sanitizeProfileFileName(exportingProfile.name)}_${exportingProfile.selectedPlatformPreset}_${new Date().toISOString().slice(0, 10)}.json`,
+      );
       toast.success('已导出当前平台配置');
     } catch (error: any) {
       toast.error(error?.message || '导出失败');
@@ -1022,17 +1115,27 @@ const handleExportCurrentConfig = async () => {
 
   const handleExportAllConfigs = async () => {
     try {
+      if (!currentProfile) {
+        toast.error('当前没有可导出的配置文件');
+        return;
+      }
+
       const { saveAs } = await import('file-saver');
+      const syncedProfiles = syncCurrentFormToProfiles(profiles);
+      const exportingProfile = syncedProfiles.find((profile) => profile.id === currentProfile.id) || currentProfile;
       const payload: MultiPlatformApiConfigPayload = {
         version: 2,
-        selectedPlatformPreset: platformPreset,
-        platformConfigs: syncCurrentFormToConfigs(allPlatformConfigs),
+        selectedPlatformPreset: exportingProfile.selectedPlatformPreset,
+        platformConfigs: mergePlatformConfigs(exportingProfile.platformConfigs),
         exportedAt: new Date().toISOString(),
       };
 
       const encryptedConfig = await encryptApiConfig(payload);
       const blob = new Blob([encryptedConfig], { type: 'application/json;charset=utf-8' });
-      saveAs(blob, `BatchRefiner_API_Configs_${new Date().toISOString().slice(0, 10)}.json`);
+      saveAs(
+        blob,
+        `BatchRefiner_API_Configs_${sanitizeProfileFileName(exportingProfile.name)}_${new Date().toISOString().slice(0, 10)}.json`,
+      );
       toast.success('已导出全部平台配置');
     } catch (error: any) {
       toast.error(error?.message || '导出失败');
@@ -1115,14 +1218,26 @@ const handleExportCurrentConfig = async () => {
   const handleSave = () => {
     const parsedConcurrency = parseInt(maxConcurrency, 10);
     const parsedSingleTaskImageConcurrency = parseInt(singleTaskImageConcurrency, 10);
-    const nextPlatformConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
+    const nextProfiles = normalizeApiConfigProfiles(syncCurrentFormToProfiles(profiles), legacyProfileSeed);
+    const nextActiveProfile = nextProfiles.find((profile) => profile.isActive) || nextProfiles[0];
 
-    setTextApiKey(textApiKey);
-    setImageApiKey(imageApiKey);
-    setApiBaseUrl(textApiBaseUrl || apiBaseUrl);
-    setTextApiBaseUrl(textApiBaseUrl);
-    setImageApiBaseUrl(imageApiBaseUrl);
-    setImageApiPath(imageApiPath);
+    if (!nextActiveProfile) {
+      toast.error('没有可保存的启用配置');
+      return;
+    }
+
+    const nextPlatformConfigs = mergePlatformConfigs(nextActiveProfile.platformConfigs);
+    const nextPreset = nextActiveProfile.selectedPlatformPreset;
+    const nextPlatformConfig = nextPlatformConfigs[nextPreset];
+    const nextTextApiKey = nextPlatformConfig.textApiKey || nextPlatformConfig.apiKey;
+    const nextImageApiKey = nextPlatformConfig.imageApiKey || nextPlatformConfig.apiKey;
+
+    setTextApiKey(nextTextApiKey);
+    setImageApiKey(nextImageApiKey);
+    setApiBaseUrl(nextPlatformConfig.textApiBaseUrl || nextPlatformConfig.apiBaseUrl);
+    setTextApiBaseUrl(nextPlatformConfig.textApiBaseUrl || nextPlatformConfig.apiBaseUrl);
+    setImageApiBaseUrl(nextPlatformConfig.imageApiBaseUrl || nextPlatformConfig.apiBaseUrl);
+    setImageApiPath(nextPlatformConfig.imageApiPath || '');
 
     const normalizedConcurrency = normalizeTaskConcurrency(parsedConcurrency);
     const normalizedSingleTaskImageConcurrency = normalizeSingleTaskImageConcurrency(parsedSingleTaskImageConcurrency);
@@ -1131,24 +1246,25 @@ const handleExportCurrentConfig = async () => {
     setSingleTaskImageConcurrencyValue(String(normalizedSingleTaskImageConcurrency));
 
     setProjectFields({
-      platformPreset,
+      platformPreset: nextPreset,
+      apiConfigProfiles: nextProfiles,
       singleTaskImageConcurrency: normalizedSingleTaskImageConcurrency,
       downloadDirectoryName,
       exportTemplate: exportTemplate.trim() || '{task_id}_{title}_{batch}',
       cacheDirectoryName,
-      textModel: localTextModel,
-      imageModel: localImageModel,
-      textApiBaseUrl,
-      imageApiBaseUrl,
-      imageApiPath,
-      textToImageApiBaseUrl,
-      textToImageApiPath,
-      imageToImageApiBaseUrl,
-      imageToImageApiPath,
-      textToImageApiKey,
-      imageToImageApiKey,
-      textToImageModel: localTextToImageModel,
-      imageToImageModel: localImageToImageModel,
+      textModel: nextPlatformConfig.textModel,
+      imageModel: nextPlatformConfig.imageModel,
+      textApiBaseUrl: nextPlatformConfig.textApiBaseUrl || nextPlatformConfig.apiBaseUrl,
+      imageApiBaseUrl: nextPlatformConfig.imageApiBaseUrl || nextPlatformConfig.apiBaseUrl,
+      imageApiPath: nextPlatformConfig.imageApiPath || '',
+      textToImageApiBaseUrl: nextPlatformConfig.textToImageApiBaseUrl || '',
+      textToImageApiPath: nextPlatformConfig.textToImageApiPath || DEFAULT_TEXT_TO_IMAGE_API_PATH,
+      imageToImageApiBaseUrl: nextPlatformConfig.imageToImageApiBaseUrl || '',
+      imageToImageApiPath: nextPlatformConfig.imageToImageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH,
+      textToImageApiKey: nextPlatformConfig.textToImageApiKey || '',
+      imageToImageApiKey: nextPlatformConfig.imageToImageApiKey || '',
+      textToImageModel: nextPlatformConfig.textToImageModel || nextPlatformConfig.imageModel,
+      imageToImageModel: nextPlatformConfig.imageToImageModel || nextPlatformConfig.imageModel,
       platformConfigs: nextPlatformConfigs,
     });
 
@@ -1158,11 +1274,11 @@ const handleExportCurrentConfig = async () => {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px] rounded-[24px] border-border/40 bg-[#F9F8F6] shadow-[0_12px_40px_-5px_rgba(0,0,0,0.12)]">
+      <DialogContent className="sm:max-w-[980px] rounded-[24px] border-border/40 bg-[#F9F8F6] shadow-[0_12px_40px_-5px_rgba(0,0,0,0.12)]">
         <DialogHeader>
           <div className="mt-1 mb-2 flex items-center justify-between">
             <DialogTitle className="font-serif text-[18.9px] tracking-tight">系统设置</DialogTitle>
-<div className="flex items-center gap-1.5 pr-6">
+            <div className="flex items-center gap-1.5 pr-6">
               <Button variant="ghost" size="sm" onClick={handleImportConfig} className="h-7 rounded-lg px-3 text-[12.6px] font-medium text-button-main transition-colors hover:bg-black/5">
                 导入
               </Button>
@@ -1177,11 +1293,105 @@ const handleExportCurrentConfig = async () => {
             </div>
           </div>
           <DialogDescription className="text-[13.65px] text-text-secondary">
-            每个平台的 API 地址、Key 和模型会分别保存。支持导出当前平台配置，也支持一键导出全部平台配置。
+            左边管理配置文件，右边编辑当前配置。全局只会启用一个配置文件，保存后会把启用中的配置同步到实际执行环境。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid max-h-[70vh] gap-6 overflow-y-auto py-4 pr-2 -mr-2">
+        <div className="grid max-h-[72vh] gap-5 py-4 md:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="flex min-h-0 flex-col rounded-[22px] border border-border/60 bg-white/70 p-3 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[14px] font-medium text-text-primary">配置文件</div>
+                <p className="mt-1 text-[11.55px] text-text-secondary">选择入口、切换启用、新建或删除</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCreateProfile}
+                className="h-9 rounded-xl bg-white px-3 text-[12.6px]"
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                新建
+              </Button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+              {profiles.map((profile, index) => {
+                const presetLabel = getPresetConfig(profile.selectedPlatformPreset).label;
+                const isSelected = profile.id === currentProfile?.id;
+
+                return (
+                  <div
+                    key={profile.id}
+                    className={`rounded-2xl border p-3 transition-all ${
+                      isSelected
+                        ? 'border-button-main/40 bg-[#FFF8F1] shadow-[0_10px_24px_-16px_rgba(0,0,0,0.28)]'
+                        : 'border-border/70 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleProfileSelect(profile.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="truncate text-[13.65px] font-medium text-text-primary">
+                          {profile.name || `配置 ${index + 1}`}
+                        </div>
+                        <div className="mt-1 text-[11.55px] text-text-secondary">
+                          {profile.isActive ? '已启用' : '未启用'} · {presetLabel}
+                        </div>
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <ProfileSwitch checked={profile.isActive} onClick={() => handleToggleProfileActive(profile.id)} />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => handleDeleteProfile(profile.id)}
+                          disabled={profiles.length <= 1}
+                          className="h-8 w-8 rounded-xl p-0 text-text-secondary hover:text-red-500"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="min-h-0 overflow-y-auto pr-2 -mr-2">
+            <div className="grid gap-6">
+              <Section bordered={false} title="当前配置">
+                <div className="rounded-2xl border border-border/60 bg-white/80 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <label className="text-[12.6px] font-medium text-text-secondary">配置名称</label>
+                      <Input
+                        value={currentProfile?.name || ''}
+                        onChange={(event) => handleProfileNameChange(event.target.value)}
+                        placeholder="例如：主账号配置"
+                        className="mt-2 h-10 rounded-xl border-border bg-[#F7F4EE] text-[12.6px] shadow-none"
+                      />
+                    </div>
+                    <div className={`rounded-full px-3 py-1 text-[11.55px] font-medium ${
+                      currentProfile?.isActive
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : 'bg-stone-100 text-stone-600'
+                    }`}>
+                      {currentProfile?.isActive ? '当前已启用' : '当前仅编辑未启用'}
+                    </div>
+                  </div>
+                  {!currentProfile?.isActive ? (
+                    <p className="mt-3 text-[11.55px] leading-5 text-text-secondary">
+                      保存后，只有左侧开关处于开启状态的配置文件会真正用于执行。
+                    </p>
+                  ) : null}
+                </div>
+              </Section>
+
           <Section bordered={false} title="平台预设">
             <label className="text-[12.6px] font-medium text-text-secondary">中转平台</label>
             <Select value={platformPreset} onValueChange={(value) => handlePresetChange(value as PlatformPreset)}>
@@ -1523,14 +1733,11 @@ const handleExportCurrentConfig = async () => {
               这里只控制“同时跑多少个任务”。单个任务里如果带了多张原图或参考图，仍然会按同一次任务流程串行整理后再发请求，不会拆成多路并行。
             </p>
           </Section>
+            </div>
+          </div>
         </div>
 
-        <div className="flex justify-end pt-4 pb-2">
-          <Button onClick={handleSave} className="h-auto rounded-xl bg-button-main px-6 py-2 text-[13.65px] font-medium text-white shadow-md transition-all hover:-translate-y-0.5 hover:bg-[#333230]">
-            保存设置
-          </Button>
-        </div>
-        <div className="flex justify-start pt-1">
+        <div className="flex items-center justify-between gap-3 pt-4 pb-2">
           <Button
             type="button"
             variant="outline"
@@ -1538,6 +1745,9 @@ const handleExportCurrentConfig = async () => {
             className="h-auto rounded-xl bg-white px-4 py-2 text-[12.6px] font-medium"
           >
             查看生成日志
+          </Button>
+          <Button onClick={handleSave} className="h-auto rounded-xl bg-button-main px-6 py-2 text-[13.65px] font-medium text-white shadow-md transition-all hover:-translate-y-0.5 hover:bg-[#333230]">
+            保存设置
           </Button>
         </div>
       </DialogContent>

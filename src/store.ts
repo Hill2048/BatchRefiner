@@ -463,6 +463,7 @@ export const useAppStore = create<AppState>()(
         projectId: state.projectId,
         projectName: state.projectName,
         platformPreset: state.platformPreset,
+        apiConfigProfiles: state.apiConfigProfiles,
         downloadDirectoryName: state.downloadDirectoryName,
         cacheDirectoryName: state.cacheDirectoryName,
         globalSkillText: state.globalSkillText,

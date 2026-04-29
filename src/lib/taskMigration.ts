@@ -1,113 +1,22 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DEFAULT_SKILL_FILE_NAME, DEFAULT_SKILL_TEXT } from './defaultSkillText';
-import { BatchCount, PlatformApiConfigMap, ProjectData, Task, TaskResultImage } from '@/types';
+import { BatchCount, ProjectData, Task, TaskResultImage } from '@/types';
 import { isValidResultImageAssetSrc } from './resultImageAsset';
+import {
+  createDefaultPlatformConfigs,
+  normalizeApiConfigProfiles,
+} from './apiConfigProfiles';
 
 const DEFAULT_TEXT_TO_IMAGE_API_PATH = '/v1/images/generations';
 const DEFAULT_IMAGE_TO_IMAGE_API_PATH = '/v1/images/edits';
 
-export const initialPlatformConfigs: PlatformApiConfigMap = {
-  yunwu: {
-    apiBaseUrl: '',
-    textApiBaseUrl: '',
-    imageApiBaseUrl: '',
-    imageApiPath: '',
-    textToImageApiBaseUrl: '',
-    textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-    imageToImageApiBaseUrl: '',
-    imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-    apiKey: '',
-    textApiKey: '',
-    imageApiKey: '',
-    textToImageApiKey: '',
-    imageToImageApiKey: '',
-    textModel: 'gemini-3.1-flash-lite-preview',
-    imageModel: 'gemini-3.1-flash-image-preview',
-    textToImageModel: 'gemini-3.1-flash-image-preview',
-    imageToImageModel: 'gemini-3.1-flash-image-preview',
-  },
-  'comfly-chat': {
-    apiBaseUrl: '',
-    textApiBaseUrl: '',
-    imageApiBaseUrl: '',
-    imageApiPath: '',
-    textToImageApiBaseUrl: '',
-    textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-    imageToImageApiBaseUrl: '',
-    imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-    apiKey: '',
-    textApiKey: '',
-    imageApiKey: '',
-    textToImageApiKey: '',
-    imageToImageApiKey: '',
-    textModel: 'gemini-3.1-flash-lite-preview',
-    imageModel: 'gemini-3.1-flash-image-preview',
-    textToImageModel: 'gemini-3.1-flash-image-preview',
-    imageToImageModel: 'gemini-3.1-flash-image-preview',
-  },
-  'openai-compatible': {
-    apiBaseUrl: '',
-    textApiBaseUrl: '',
-    imageApiBaseUrl: '',
-    imageApiPath: '',
-    textToImageApiBaseUrl: '',
-    textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-    imageToImageApiBaseUrl: '',
-    imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-    apiKey: '',
-    textApiKey: '',
-    imageApiKey: '',
-    textToImageApiKey: '',
-    imageToImageApiKey: '',
-    textModel: 'gpt-4o',
-    imageModel: 'gpt-image-2',
-    textToImageModel: 'gpt-image-2',
-    imageToImageModel: 'gpt-image-2',
-  },
-  'gemini-native': {
-    apiBaseUrl: '',
-    textApiBaseUrl: '',
-    imageApiBaseUrl: '',
-    imageApiPath: '',
-    textToImageApiBaseUrl: '',
-    textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-    imageToImageApiBaseUrl: '',
-    imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-    apiKey: '',
-    textApiKey: '',
-    imageApiKey: '',
-    textToImageApiKey: '',
-    imageToImageApiKey: '',
-    textModel: 'gemini-2.5-flash',
-    imageModel: 'imagen-3.0-generate-001',
-    textToImageModel: 'imagen-3.0-generate-001',
-    imageToImageModel: 'imagen-3.0-generate-001',
-  },
-  custom: {
-    apiBaseUrl: '',
-    textApiBaseUrl: '',
-    imageApiBaseUrl: '',
-    imageApiPath: '',
-    textToImageApiBaseUrl: '',
-    textToImageApiPath: DEFAULT_TEXT_TO_IMAGE_API_PATH,
-    imageToImageApiBaseUrl: '',
-    imageToImageApiPath: DEFAULT_IMAGE_TO_IMAGE_API_PATH,
-    apiKey: '',
-    textApiKey: '',
-    imageApiKey: '',
-    textToImageApiKey: '',
-    imageToImageApiKey: '',
-    textModel: '',
-    imageModel: '',
-    textToImageModel: '',
-    imageToImageModel: '',
-  },
-};
+export const initialPlatformConfigs = createDefaultPlatformConfigs();
 
 export const initialProjectState: ProjectData = {
   projectId: uuidv4(),
   projectName: '未命名项目',
   platformPreset: 'yunwu',
+  apiConfigProfiles: normalizeApiConfigProfiles(undefined),
   downloadDirectoryName: '',
   cacheDirectoryName: '',
   enablePromptOptimization: true,
@@ -232,6 +141,10 @@ export function withDefaultSkill<T extends Partial<ProjectData> & { apiBaseUrl?:
   const legacyApiKey = (state as T & { apiKey?: string }).apiKey || '';
   return {
     ...state,
+    apiConfigProfiles: normalizeApiConfigProfiles(
+      (state as T & { apiConfigProfiles?: ProjectData['apiConfigProfiles'] }).apiConfigProfiles,
+      state,
+    ),
     enablePromptOptimization: state.enablePromptOptimization !== false,
     cacheDirectoryName: state.cacheDirectoryName || '',
     globalSkillText: state.globalSkillText?.trim() ? state.globalSkillText : DEFAULT_SKILL_TEXT,

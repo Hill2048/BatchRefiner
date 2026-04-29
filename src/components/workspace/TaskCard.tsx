@@ -23,6 +23,7 @@ import { primeTaskResultImageCache } from '@/lib/resultImageCache';
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from '@/lib/resultImageDownload';
 import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from '@/lib/appLogger';
 import { getStoredImageAsset } from '@/lib/imageAssetStore';
+import { AnalyzingImage } from '@/components/loading-ui/analyzing-image';
 
 type TaskCardProps = {
   taskId: string;
@@ -698,6 +699,9 @@ export const TaskCard = React.memo(function TaskCard({
               <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.16)_0%,rgba(255,255,255,0.08)_100%)]" />
               <div className="absolute inset-0 opacity-85 bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_34%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.2),transparent_30%)]" />
               <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/58 to-transparent blur-[12px] animate-[shimmer_2.6s_linear_infinite]" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <AnalyzingImage className="h-16 w-16 text-black/22" />
+              </div>
             </div>
           ) : null}
           {mainImageSrc ? (
@@ -729,7 +733,11 @@ export const TaskCard = React.memo(function TaskCard({
             </div>
           ) : (
             <div className="flex h-full w-full items-center justify-center text-text-secondary/50">
-              <ImageIcon className="h-8 w-8 opacity-30" />
+              {isRenderingVisual ? (
+                <AnalyzingImage className="h-14 w-14 text-black/28" />
+              ) : (
+                <ImageIcon className="h-8 w-8 opacity-30" />
+              )}
             </div>
           )}
 
@@ -783,6 +791,9 @@ export const TaskCard = React.memo(function TaskCard({
                         >
                           <div className="absolute inset-0 bg-[linear-gradient(135deg,#f6f1ea_0%,#efe6da_52%,#eadfce_100%)]" />
                           <div className="absolute inset-0 opacity-70 bg-[radial-gradient(circle_at_28%_24%,rgba(255,255,255,0.62),transparent_34%),radial-gradient(circle_at_72%_72%,rgba(255,255,255,0.2),transparent_28%)]" />
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <AnalyzingImage className="h-5 w-5 text-black/26" />
+                          </div>
                           {!shouldReduceMotionEffects ? (
                             <div className="absolute inset-y-0 left-[-55%] w-[42%] rotate-[12deg] bg-gradient-to-r from-transparent via-white/72 to-transparent animate-[shimmer_2s_linear_infinite]" />
                           ) : null}
@@ -968,6 +979,9 @@ export const TaskCard = React.memo(function TaskCard({
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
               <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.18)_0%,rgba(255,255,255,0.08)_100%)]" />
               <div className="absolute inset-0 opacity-82 bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_30%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.22),transparent_28%)]" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <AnalyzingImage className="h-12 w-12 text-black/22" />
+              </div>
               {!shouldReduceMotionEffects ? (
                 <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/58 to-transparent blur-[10px] animate-[shimmer_2.4s_linear_infinite]" />
               ) : null}

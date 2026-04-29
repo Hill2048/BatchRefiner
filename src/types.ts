@@ -29,6 +29,15 @@ export interface PlatformApiConfig {
 
 export type PlatformApiConfigMap = Record<PlatformPreset, PlatformApiConfig>;
 
+export interface ApiConfigProfile {
+  id: string;
+  name: string;
+  isActive: boolean;
+  selectedPlatformPreset: PlatformPreset;
+  platformConfigs: PlatformApiConfigMap;
+  updatedAt: number;
+}
+
 export interface ErrorLog {
   message: string;
   time: number;
@@ -146,6 +155,7 @@ export interface ProjectData {
   projectId: string;
   projectName: string;
   platformPreset: PlatformPreset;
+  apiConfigProfiles: ApiConfigProfile[];
   downloadDirectoryName?: string;
   cacheDirectoryName?: string;
   enablePromptOptimization?: boolean;

@@ -10,6 +10,7 @@ import { getBatchCountNumber, getCurrentTaskResultImages, getTaskResultImages } 
 import { getResultImageAssetDimensions, getResultImageAssetExtension } from '@/lib/resultImageAsset';
 import { buildResultImageFileName } from '@/lib/resultImageFileName';
 import { resolveResultImageDownloadBlob } from '@/lib/resultImageDownload';
+import { AnalyzingImage } from '@/components/loading-ui/analyzing-image';
 import {
   DndContext,
   closestCenter,
@@ -737,8 +738,8 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
                   className={`task-showcase-placeholder relative flex shrink-0 flex-col items-center justify-center overflow-hidden rounded-[18px] border border-black/8 bg-[linear-gradient(180deg,#FFFFFF_0%,#F7F3EC_100%)] px-5 text-center ${resultCardWidthClass}`}
                   style={{ aspectRatio: '3 / 4' }}
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full border border-black/8 bg-white">
-                    <ImageIcon className="h-4.5 w-4.5 text-black/45" />
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full border border-black/8 bg-white/82">
+                    <AnalyzingImage className="h-7 w-7 text-black/32" />
                   </div>
                   {!isCollapsed ? (
                     <>
