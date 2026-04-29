@@ -197,6 +197,39 @@ function triggerDirectDownload(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
+type DownloadTaskResultImageOptions = {
+  task: Task;
+  result: TaskResultImage;
+  resultIndex: number;
+  exportTemplate: string;
+  imageModel: string;
+};
+
+async function downloadTaskResultImage({
+  task,
+  result,
+  resultIndex,
+  exportTemplate,
+  imageModel,
+}: DownloadTaskResultImageOptions) {
+  const { blob } = await resolveResultImageDownloadBlob(result);
+  const fileName = buildResultImageFileName({
+    task,
+    imageIndex: resultIndex,
+    extension: getResultImageAssetExtension(result),
+    result,
+    template: exportTemplate,
+    model: task.imageModelOverride || imageModel,
+  });
+
+  try {
+    const saveAsModule = await import('file-saver');
+    saveAsModule.saveAs(blob, fileName);
+  } catch {
+    triggerDirectDownload(blob, fileName);
+  }
+}
+
 function getShowcaseResultImage(result?: TaskResultImage | null) {
   return result?.previewSrc || result?.src || result?.assetSrc || result?.originalSrc || '';
 }
@@ -282,7 +315,7 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
   if (!task) return null;
 
   const sourceImage = getShowcaseSourceImage(task);
-  const coverImageSrc = getShowcaseResultImage(resultImages[0]) || sourceImage;
+  const coverImageSrc = sourceImage || getShowcaseResultImage(resultImages[0]);
   const referenceImages = task.referenceImages || [];
   const requestedCount = getBatchCountNumber(task.requestedBatchCount || task.batchCount || 'x1');
   const placeholderCount =
@@ -343,21 +376,13 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
   ) => {
     event.stopPropagation();
     try {
-      const { blob } = await resolveResultImageDownloadBlob(result);
-      const fileName = buildResultImageFileName({
+      await downloadTaskResultImage({
         task,
-        imageIndex: resultIndex,
-        extension: getResultImageAssetExtension(result),
         result,
-        template: exportTemplate,
-        model: task.imageModelOverride || imageModel,
+        resultIndex,
+        exportTemplate,
+        imageModel,
       });
-      try {
-        const saveAsModule = await import('file-saver');
-        saveAsModule.saveAs(blob, fileName);
-      } catch {
-        triggerDirectDownload(blob, fileName);
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '下载失败';
       toast.error(`下载失败：${message}`);
@@ -745,6 +770,8 @@ export function TaskList() {
   const updateTask = useAppStore((state) => state.updateTask);
   const importTasks = useAppStore((state) => state.importTasks);
   const setProjectFields = useAppStore((state) => state.setProjectFields);
+  const imageModel = useAppStore((state) => state.imageModel);
+  const exportTemplate = useAppStore((state) => state.exportTemplate);
   const selectAllTasks = useAppStore((state) => state.selectAllTasks);
   const clearTaskSelection = useAppStore((state) => state.clearTaskSelection);
   const reorderTasks = useAppStore((state) => state.reorderTasks);
@@ -1187,6 +1214,27 @@ export function TaskList() {
     });
   }, [activeTaskId, selectedTaskIds, updateTask]);
 
+  const handleDownloadGalleryResult = React.useCallback(async (
+    event: React.MouseEvent<HTMLButtonElement>,
+    task: Task,
+    result: TaskResultImage,
+    resultIndex: number,
+  ) => {
+    event.stopPropagation();
+    try {
+      await downloadTaskResultImage({
+        task,
+        result,
+        resultIndex,
+        exportTemplate,
+        imageModel,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '下载失败';
+      toast.error(`下载失败：${message}`);
+    }
+  }, [exportTemplate, imageModel]);
+
   return (
     <div
       ref={scrollContainerRef}
@@ -1278,12 +1326,12 @@ export function TaskList() {
             <p className="font-medium opacity-80">暂无结果图，生成后会在这里集中挑选</p>
           </div>
         ) : (
-          <div className="columns-2 gap-4 pb-[420px] sm:columns-3 lg:columns-4 2xl:columns-5">
+          <div className="grid grid-cols-2 gap-4 pb-[420px] sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
             {resultItems.map(({ task, result, resultIndex }) => {
               const src = result.previewSrc || result.src || result.assetSrc || result.originalSrc || '';
               const dimensions = getResultImageAssetDimensions(result);
               return (
-                <div key={`${task.id}-${result.id}`} className="task-result-gallery-card group/result mb-4 break-inside-avoid overflow-hidden rounded-[22px] border border-black/8 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(31,24,18,0.12)]">
+                <div key={`${task.id}-${result.id}`} className="task-result-gallery-card group/result flex h-full flex-col overflow-hidden rounded-[22px] border border-black/8 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(31,24,18,0.12)]">
                   <button
                     type="button"
                     className="block w-full bg-[#F7F4EE]"
@@ -1306,17 +1354,27 @@ export function TaskList() {
                           {dimensions ? `${dimensions.width} × ${dimensions.height}` : '尺寸未知'} / 第 {resultIndex + 1} 张
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        className="task-result-gallery-action pointer-events-none inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1F1D1A] text-white opacity-0 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100"
-                        title="作为新任务原图"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          addResultAsNewTask(result.src || src, task.title);
-                        }}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="task-result-gallery-action pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#1F1D1A] text-white opacity-0 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100"
+                          title="下载此图"
+                          onClick={(event) => void handleDownloadGalleryResult(event, task, result, resultIndex)}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          className="task-result-gallery-action pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#1F1D1A] text-white opacity-0 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100"
+                          title="作为新任务原图"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            addResultAsNewTask(result.src || src, task.title);
+                          }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <div className="flex gap-1.5">
                       <button
