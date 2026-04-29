@@ -12,7 +12,11 @@ import {
 } from '@/lib/cacheDirectory';
 import { clearResultImageCache } from '@/lib/resultImageCache';
 import { saveLocalCacheSnapshot } from '@/lib/localCachePersistence';
-import { normalizeTaskConcurrency } from '@/lib/taskExecutionQueue';
+import {
+  normalizeSingleTaskImageConcurrency,
+  normalizeTaskConcurrency,
+  SINGLE_TASK_IMAGE_CONCURRENCY_OPTIONS,
+} from '@/lib/taskExecutionQueue';
 import {
   ApiConfigPayload,
   decryptApiConfig,
@@ -482,6 +486,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     imageToImageApiPath: savedImageToImageApiPath,
     imageToImageModel: savedImageToImageModel,
     maxConcurrency: savedMaxConcurrency,
+    singleTaskImageConcurrency: savedSingleTaskImageConcurrency,
     platformConfigs,
     platformPreset: savedPlatformPreset,
     setApiBaseUrl,
@@ -515,6 +520,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       imageToImageApiPath: state.imageToImageApiPath,
       imageToImageModel: state.imageToImageModel,
       maxConcurrency: state.maxConcurrency,
+      singleTaskImageConcurrency: state.singleTaskImageConcurrency,
       platformConfigs: state.platformConfigs,
       platformPreset: state.platformPreset,
       setApiBaseUrl: state.setApiBaseUrl,
@@ -550,6 +556,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [imageToImageApiBaseUrl, setImageToImageApiBaseUrlValue] = React.useState(savedImageToImageApiBaseUrl || '');
   const [imageToImageApiPath, setImageToImageApiPathValue] = React.useState(savedImageToImageApiPath || savedImageApiPath || DEFAULT_IMAGE_TO_IMAGE_API_PATH);
   const [maxConcurrency, setMaxConcurrencyValue] = React.useState(String(savedMaxConcurrency));
+  const [singleTaskImageConcurrency, setSingleTaskImageConcurrencyValue] = React.useState(String(normalizeSingleTaskImageConcurrency(savedSingleTaskImageConcurrency)));
   const [localTextModel, setLocalTextModel] = React.useState(savedTextModel || 'gemini-3.1-flash-lite-preview');
   const [localImageModel, setLocalImageModel] = React.useState(savedImageModel || 'gemini-3.1-flash-image-preview');
   const [localTextToImageModel, setLocalTextToImageModel] = React.useState(savedTextToImageModel || savedImageModel || 'gemini-3.1-flash-image-preview');
@@ -639,6 +646,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setAllPlatformConfigs(nextConfigs);
     applyPlatformConfigToForm(savedPlatformPreset || 'yunwu', nextConfigs);
     setMaxConcurrencyValue(String(savedMaxConcurrency));
+    setSingleTaskImageConcurrencyValue(String(normalizeSingleTaskImageConcurrency(savedSingleTaskImageConcurrency)));
     setDownloadDirectoryName(savedDownloadDirectoryName || '');
     setExportTemplate(savedExportTemplate || '{task_id}_{title}_{batch}');
     setCacheDirectoryName(savedCacheDirectoryName || '');
@@ -655,6 +663,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     savedExportTemplate,
     savedCacheDirectoryName,
     savedMaxConcurrency,
+    savedSingleTaskImageConcurrency,
     savedPlatformPreset,
   ]);
 
@@ -1105,6 +1114,7 @@ const handleExportCurrentConfig = async () => {
 
   const handleSave = () => {
     const parsedConcurrency = parseInt(maxConcurrency, 10);
+    const parsedSingleTaskImageConcurrency = parseInt(singleTaskImageConcurrency, 10);
     const nextPlatformConfigs = syncCurrentFormToConfigs(allPlatformConfigs);
 
     setTextApiKey(textApiKey);
@@ -1115,11 +1125,14 @@ const handleExportCurrentConfig = async () => {
     setImageApiPath(imageApiPath);
 
     const normalizedConcurrency = normalizeTaskConcurrency(parsedConcurrency);
+    const normalizedSingleTaskImageConcurrency = normalizeSingleTaskImageConcurrency(parsedSingleTaskImageConcurrency);
     setMaxConcurrency(normalizedConcurrency);
     setMaxConcurrencyValue(String(normalizedConcurrency));
+    setSingleTaskImageConcurrencyValue(String(normalizedSingleTaskImageConcurrency));
 
     setProjectFields({
       platformPreset,
+      singleTaskImageConcurrency: normalizedSingleTaskImageConcurrency,
       downloadDirectoryName,
       exportTemplate: exportTemplate.trim() || '{task_id}_{title}_{batch}',
       cacheDirectoryName,
@@ -1481,7 +1494,32 @@ const handleExportCurrentConfig = async () => {
               onChange={(e) => setMaxConcurrencyValue(e.target.value)}
               className="rounded-xl border-border bg-white text-[13.65px] shadow-sm focus-visible:ring-button-main/30"
             />
-            <p className="mt-1 text-[11.55px] text-text-secondary">
+            <div className="mt-3 rounded-2xl border border-border/60 bg-white/70 px-4 py-3">
+              <label className="text-[12.6px] font-medium text-text-primary">{"\u5355\u4efb\u52a1\u56fe\u7247\u5e76\u53d1\u6570"}</label>
+              <Select
+                value={singleTaskImageConcurrency}
+                onValueChange={setSingleTaskImageConcurrencyValue}
+              >
+                <SelectTrigger className="mt-2 h-10 w-full rounded-xl border-border bg-white px-3 text-[13.65px] shadow-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-2xl border border-border/80 bg-white p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.18)]">
+                  {SINGLE_TASK_IMAGE_CONCURRENCY_OPTIONS.map((value) => (
+                    <SelectItem
+                      key={value}
+                      value={String(value)}
+                      className="rounded-xl px-3 py-2 text-[13.65px] text-text-primary focus:bg-[#F5F4F0] focus:text-text-primary"
+                    >
+                      {value} {"\u8def"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-2 text-[11.55px] leading-5 text-text-secondary">
+                {"\u63a7\u5236\u4e00\u4e2a\u4efb\u52a1\u5185 x2/x4 \u7ed3\u679c\u56fe\u540c\u65f6\u53d1\u51e0\u8def\u8bf7\u6c42\uff0c\u53ef\u9009 1\u30012\u30014\u3002"}
+              </p>
+            </div>
+            <p className="hidden">
               这里只控制“同时跑多少个任务”。单个任务里如果带了多张原图或参考图，仍然会按同一次任务流程串行整理后再发请求，不会拆成多路并行。
             </p>
           </Section>

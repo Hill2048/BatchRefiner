@@ -4,7 +4,7 @@ export type Resolution = '1K' | '2K' | '4K' | string;
 export type PlatformPreset = 'openai-compatible' | 'gemini-native' | 'comfly-chat' | 'yunwu' | 'custom';
 export type BatchCount = 'x1' | 'x2' | 'x3' | 'x4';
 export type ImageQuality = 'auto' | 'low' | 'medium' | 'high';
-export type WorkspaceViewMode = 'grid' | 'list' | 'results';
+export type WorkspaceViewMode = 'grid' | 'list' | 'showcase' | 'results';
 export type CardDensity = 'comfortable' | 'compact' | 'minimal';
 
 export interface PlatformApiConfig {

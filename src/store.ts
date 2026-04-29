@@ -13,6 +13,10 @@ import {
 import { extractProjectDataFromImport, mergeProjectSnapshotWithGlobalConfig, sanitizeProjectSnapshot } from './lib/projectSnapshot';
 import { compactPersistedStateValue, OVERSIZED_PERSISTENCE_NOTICE } from './lib/persistedStateBudget';
 import {
+  DEFAULT_SINGLE_TASK_IMAGE_CONCURRENCY,
+  normalizeSingleTaskImageConcurrency,
+} from './lib/taskExecutionQueue';
+import {
   initialPlatformConfigs,
   initialProjectState,
   migrateTask,
@@ -92,6 +96,7 @@ interface AppState extends ProjectData {
   lightboxTaskId: string | null;
   lightboxImageIndex: number;
   maxConcurrency: number;
+  singleTaskImageConcurrency: number;
   exportTemplate: string;
   selectedTaskIds: string[];
   selectedTaskIdLookup: Record<string, true>;
@@ -239,6 +244,7 @@ export const useAppStore = create<AppState>()(
       lightboxTaskId: null,
       lightboxImageIndex: 0,
       maxConcurrency: 3,
+      singleTaskImageConcurrency: DEFAULT_SINGLE_TASK_IMAGE_CONCURRENCY,
       exportTemplate: '{task_id}_{title}',
       selectedTaskIds: [],
       selectedTaskIdLookup: {},
@@ -446,6 +452,7 @@ export const useAppStore = create<AppState>()(
           ...withDefaultSkill(state),
           tasks: recoverInterruptedTasks(state.tasks),
           selectedTaskIds: state.selectedTaskIds,
+          singleTaskImageConcurrency: normalizeSingleTaskImageConcurrency(state.singleTaskImageConcurrency),
           activeTaskId: null,
           lightboxTaskId: null,
           lightboxImageIndex: 0,
@@ -473,6 +480,7 @@ export const useAppStore = create<AppState>()(
         viewMode: state.viewMode,
         cardDensity: state.cardDensity,
         maxConcurrency: state.maxConcurrency,
+        singleTaskImageConcurrency: state.singleTaskImageConcurrency,
         exportTemplate: state.exportTemplate,
         selectedTaskIds: state.selectedTaskIds,
         selectedTaskIdLookup: buildSelectedTaskIdLookup(state.selectedTaskIds),

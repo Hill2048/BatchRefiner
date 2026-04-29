@@ -1,6 +1,8 @@
 export const DEFAULT_TASK_CONCURRENCY = 3;
 export const MIN_TASK_CONCURRENCY = 1;
 export const MAX_TASK_CONCURRENCY = 10;
+export const DEFAULT_SINGLE_TASK_IMAGE_CONCURRENCY = 4;
+export const SINGLE_TASK_IMAGE_CONCURRENCY_OPTIONS = [1, 2, 4] as const;
 
 export function normalizeTaskConcurrency(
   value: number | null | undefined,
@@ -15,6 +17,14 @@ export function normalizeTaskConcurrency(
     MAX_TASK_CONCURRENCY,
     Math.max(MIN_TASK_CONCURRENCY, parsedValue || normalizedFallback),
   );
+}
+
+export function normalizeSingleTaskImageConcurrency(value: number | null | undefined) {
+  if (!Number.isFinite(value)) return DEFAULT_SINGLE_TASK_IMAGE_CONCURRENCY;
+  const parsedValue = Math.trunc(value);
+  return SINGLE_TASK_IMAGE_CONCURRENCY_OPTIONS.includes(parsedValue as 1 | 2 | 4)
+    ? parsedValue
+    : DEFAULT_SINGLE_TASK_IMAGE_CONCURRENCY;
 }
 
 export interface TaskExecutionQueueOptions<T> {

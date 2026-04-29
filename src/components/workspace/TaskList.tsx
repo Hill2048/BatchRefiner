@@ -1,10 +1,15 @@
 import * as React from 'react';
-import { Image as ImageIcon, Plus, Upload } from 'lucide-react';
+import { Download, Fullscreen, Image as ImageIcon, GripVertical, Plus, Trash2, Upload } from 'lucide-react';
+import { CSS } from '@dnd-kit/utilities';
+import { toast } from 'sonner';
 import { useAppStore } from '@/store';
 import { TaskCard } from './TaskCard';
+import type { CardDensity, Task, TaskResultImage, WorkspaceViewMode } from '@/types';
 import { buildImportedTasksFromFiles, buildReferenceImagesFromFiles } from '@/lib/taskFileImport';
-import { getTaskResultImages } from '@/lib/taskResults';
-import { getResultImageAssetDimensions } from '@/lib/resultImageAsset';
+import { getBatchCountNumber, getTaskResultImages } from '@/lib/taskResults';
+import { getResultImageAssetDimensions, getResultImageAssetExtension } from '@/lib/resultImageAsset';
+import { buildResultImageFileName } from '@/lib/resultImageFileName';
+import { resolveResultImageDownloadBlob } from '@/lib/resultImageDownload';
 import {
   DndContext,
   closestCenter,
@@ -21,6 +26,7 @@ import {
   sortableKeyboardCoordinates,
   rectSortingStrategy,
   verticalListSortingStrategy,
+  useSortable,
 } from '@dnd-kit/sortable';
 
 function hasImageFiles(dataTransfer?: DataTransfer | null) {
@@ -69,7 +75,7 @@ type MarqueeSelectionState = {
 
 type DeferredTaskCardProps = {
   taskId: string;
-  viewMode: 'grid' | 'list' | 'results';
+  viewMode: Exclude<WorkspaceViewMode, 'results'>;
   scrollRoot: HTMLDivElement | null;
   forceRender: boolean;
   isFileDropTarget: boolean;
@@ -90,6 +96,7 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
 }: DeferredTaskCardProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [shouldRender, setShouldRender] = React.useState(false);
+  const cardDensity = useAppStore((state) => state.cardDensity);
 
   React.useEffect(() => {
     if (forceRender) return;
@@ -127,27 +134,593 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
   return (
     <div ref={containerRef} className="min-h-0">
       {forceRender || shouldRender ? (
-        <TaskCard
-          taskId={taskId}
-          isFileDropTarget={isFileDropTarget}
-          onFileDragEnter={onFileDragEnter}
-          onFileDragLeave={onFileDragLeave}
-          onFileDrop={onFileDrop}
-        />
+        viewMode === 'list' || viewMode === 'showcase' ? (
+          <TaskShowcaseRow
+            taskId={taskId}
+            isFileDropTarget={isFileDropTarget}
+            onFileDragEnter={onFileDragEnter}
+            onFileDragLeave={onFileDragLeave}
+            onFileDrop={onFileDrop}
+          />
+        ) : (
+          <TaskCard
+            taskId={taskId}
+            isFileDropTarget={isFileDropTarget}
+            onFileDragEnter={onFileDragEnter}
+            onFileDragLeave={onFileDragLeave}
+            onFileDrop={onFileDrop}
+          />
+        )
       ) : (
         <div
           className={`overflow-hidden rounded-2xl border border-black/8 bg-white shadow-sm ${
-            viewMode === 'list' ? 'min-h-[180px]' : 'min-h-[320px]'
+            viewMode === 'grid'
+              ? 'min-h-[320px]'
+              : viewMode === 'list' || viewMode === 'showcase'
+                ? 'min-h-[296px]'
+                : 'min-h-[180px]'
           }`}
           style={{
             contentVisibility: 'auto',
-            containIntrinsicSize: `${viewMode === 'list' ? LIST_PLACEHOLDER_HEIGHT : GRID_PLACEHOLDER_HEIGHT}px`,
+            containIntrinsicSize: `${
+              viewMode === 'grid'
+                ? GRID_PLACEHOLDER_HEIGHT
+                : viewMode === 'list' || viewMode === 'showcase'
+                  ? getShowcaseItemHeight(cardDensity)
+                  : LIST_PLACEHOLDER_HEIGHT
+            }px`,
           }}
           aria-hidden="true"
         >
           <div className="h-full w-full bg-[linear-gradient(180deg,#fbfaf7_0%,#f4f0e8_100%)]" />
         </div>
       )}
+    </div>
+  );
+});
+
+function getShowcaseSourceImage(task: Task) {
+  return task.sourceImagePreview || task.sourceImage || task.referenceImages[0] || '';
+}
+
+function triggerDirectDownload(blob: Blob, fileName: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = fileName;
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+function getShowcaseResultImage(result?: TaskResultImage | null) {
+  return result?.previewSrc || result?.src || result?.assetSrc || result?.originalSrc || '';
+}
+
+function getShowcaseStatusTone(status: Task['status']) {
+  switch (status) {
+    case 'Success':
+      return 'border-[#CFE6D7] bg-[#F3FAF6] text-[#2C6A4C]';
+    case 'Error':
+      return 'border-[#F1C7C0] bg-[#FFF4F1] text-[#B04A37]';
+    case 'Rendering':
+    case 'Running':
+      return 'border-[#F0D7BF] bg-[#FFF8EE] text-[#A56A35]';
+    case 'Prompting':
+    case 'Waiting':
+      return 'border-[#DDD7CD] bg-[#F7F3EC] text-[#756B5C]';
+    default:
+      return 'border-black/8 bg-[#F7F4EE] text-text-secondary';
+  }
+}
+
+function getShowcaseStatusLabel(status: Task['status']) {
+  switch (status) {
+    case 'Waiting':
+    case 'Idle':
+      return '待处理';
+    case 'Prompting':
+      return '提示词中';
+    case 'Rendering':
+    case 'Running':
+      return '生成中';
+    case 'Success':
+      return '已完成';
+    case 'Error':
+      return '失败';
+    default:
+      return status;
+  }
+}
+
+function getShowcaseItemHeight(cardDensity: CardDensity) {
+  if (cardDensity === 'minimal') return 168;
+  if (cardDensity === 'compact') return 348;
+  return 456;
+}
+
+type TaskShowcaseRowProps = {
+  taskId: string;
+  isFileDropTarget?: boolean;
+  onFileDragEnter?: (taskId: string) => void;
+  onFileDragLeave?: (taskId: string) => void;
+  onFileDrop?: (taskId: string, files: File[]) => void;
+};
+
+const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
+  taskId,
+  isFileDropTarget = false,
+  onFileDragEnter,
+  onFileDragLeave,
+  onFileDrop,
+}: TaskShowcaseRowProps) {
+  const task = useAppStore((state) => state.taskLookup[taskId]);
+  const isActive = useAppStore((state) => state.activeTaskId === taskId);
+  const isSelected = useAppStore((state) => Boolean(state.selectedTaskIdLookup[taskId]));
+  const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const toggleTaskSelection = useAppStore((state) => state.toggleTaskSelection);
+  const removeTask = useAppStore((state) => state.removeTask);
+  const cardDensity = useAppStore((state) => state.cardDensity);
+  const imageModel = useAppStore((state) => state.imageModel);
+  const exportTemplate = useAppStore((state) => state.exportTemplate);
+  const [hoveredResultId, setHoveredResultId] = React.useState<string | null>(null);
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: taskId });
+
+  const resultImages = React.useMemo(() => {
+    if (!task) return [];
+    const images = getTaskResultImages(task);
+    if (!task.activeResultSessionId) return images;
+    const currentSessionImages = images.filter((result) => result.sessionId === task.activeResultSessionId);
+    return currentSessionImages.length > 0 ? currentSessionImages : images;
+  }, [task]);
+
+  if (!task) return null;
+
+  const sourceImage = getShowcaseSourceImage(task);
+  const coverImageSrc = getShowcaseResultImage(resultImages[0]) || sourceImage;
+  const referenceImages = task.referenceImages || [];
+  const requestedCount = getBatchCountNumber(task.requestedBatchCount || task.batchCount || 'x1');
+  const placeholderCount =
+    task.status === 'Rendering' || task.status === 'Running'
+      ? Math.max(0, requestedCount - resultImages.length - (task.failedResultCount || 0))
+      : 0;
+  const paramChips = [
+    task.aspectRatio,
+    task.resolution,
+    task.batchCount || task.requestedBatchCount,
+  ].filter(Boolean) as string[];
+  const paramSummary = paramChips.join(' / ');
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const isExpanded = isActive || isSelected;
+  const isCollapsed = cardDensity === 'minimal' || !isExpanded;
+  const isCompact = cardDensity === 'compact';
+  const showcaseItemHeight = getShowcaseItemHeight(cardDensity);
+  const rowGridClass = isCollapsed
+    ? 'md:grid-cols-[188px_minmax(0,1fr)] xl:grid-cols-[204px_minmax(0,1fr)]'
+    : isCompact
+      ? 'md:grid-cols-[292px_minmax(0,1fr)] xl:grid-cols-[308px_minmax(0,1fr)]'
+      : 'md:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[336px_minmax(0,1fr)]';
+  const mediaHeightClass = isCollapsed
+    ? 'h-[52px]'
+    : isCompact
+      ? 'aspect-[16/10]'
+      : 'aspect-[4/3]';
+  const resultCardWidthClass = isCollapsed
+    ? 'w-[82px] md:w-[92px] xl:w-[100px]'
+    : isCompact
+      ? 'w-[170px] md:w-[188px] xl:w-[204px]'
+      : 'w-[220px] md:w-[240px] xl:w-[258px]';
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.42 : 1,
+    zIndex: isDragging ? 50 : 1,
+    contentVisibility: 'auto',
+    containIntrinsicSize: `${showcaseItemHeight}px`,
+  };
+
+  const handleActivate = () => {
+    setActiveTask(task.id);
+  };
+
+  const handleOpenResult = (result: TaskResultImage, fallbackIndex: number) => {
+    const resultIndex = getTaskResultImages(task).findIndex((item) => item.id === result.id);
+    setActiveTask(task.id);
+    useAppStore.getState().setLightboxTask(task.id, resultIndex >= 0 ? resultIndex : fallbackIndex);
+  };
+
+  const handleDownloadResult = async (
+    event: React.MouseEvent<HTMLButtonElement>,
+    result: TaskResultImage,
+    resultIndex: number,
+  ) => {
+    event.stopPropagation();
+    try {
+      const { blob } = await resolveResultImageDownloadBlob(result);
+      const fileName = buildResultImageFileName({
+        task,
+        imageIndex: resultIndex,
+        extension: getResultImageAssetExtension(result),
+        result,
+        template: exportTemplate,
+        model: task.imageModelOverride || imageModel,
+      });
+      try {
+        const saveAsModule = await import('file-saver');
+        saveAsModule.saveAs(blob, fileName);
+      } catch {
+        triggerDirectDownload(blob, fileName);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '下载失败';
+      toast.error(`下载失败：${message}`);
+    }
+  };
+
+  const handleDownloadAllResults = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (resultImages.length === 0) return;
+
+    try {
+      const saveAsModule = await import('file-saver');
+      for (let index = 0; index < resultImages.length; index += 1) {
+        const result = resultImages[index];
+        const { blob } = await resolveResultImageDownloadBlob(result);
+        const fileName = buildResultImageFileName({
+          task,
+          imageIndex: index,
+          extension: getResultImageAssetExtension(result),
+          result,
+          template: exportTemplate,
+          model: task.imageModelOverride || imageModel,
+        });
+        saveAsModule.saveAs(blob, fileName);
+      }
+      toast.success('已开始下载全部结果图');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '下载全部失败';
+      try {
+        for (let index = 0; index < resultImages.length; index += 1) {
+          const result = resultImages[index];
+          const { blob } = await resolveResultImageDownloadBlob(result);
+          const fileName = buildResultImageFileName({
+            task,
+            imageIndex: index,
+            extension: getResultImageAssetExtension(result),
+            result,
+            template: exportTemplate,
+            model: task.imageModelOverride || imageModel,
+          });
+          triggerDirectDownload(blob, fileName);
+        }
+        toast.success('已开始下载全部结果图');
+      } catch {
+        toast.error(`下载全部失败：${message}`);
+      }
+    }
+  };
+
+  const handleRowDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onFileDragEnter?.(task.id);
+  };
+
+  const handleRowDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleRowDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onFileDragLeave?.(task.id);
+  };
+
+  const handleRowDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasImageFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const files = (Array.from(event.dataTransfer.files || []) as File[]).filter((file) =>
+      file.type.startsWith('image/'),
+    );
+    await onFileDrop?.(task.id, files);
+  };
+
+  const handlePickReferenceImages = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files ? (Array.from(event.target.files) as File[]) : [];
+    event.target.value = '';
+    if (files.length === 0) return;
+    await onFileDrop?.(task.id, files);
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      data-task-card
+      data-task-id={task.id}
+      onClick={handleActivate}
+      onDragEnter={handleRowDragEnter}
+      onDragOver={handleRowDragOver}
+      onDragLeave={handleRowDragLeave}
+      onDrop={handleRowDrop}
+      className={`task-showcase-row group relative grid gap-0 md:p-1 ${rowGridClass}`}
+    >
+      {isFileDropTarget ? (
+        <div className="pointer-events-none absolute inset-0 z-20 rounded-[30px] border-2 border-dashed border-button-main/45 bg-white/72 backdrop-blur-[1px]" />
+      ) : null}
+
+      <section
+        className={`task-showcase-card relative flex flex-col overflow-hidden rounded-[22px] border-[1.5px] bg-white md:rounded-r-none md:border-r-0 ${
+          isActive
+            ? 'border-black/16'
+            : 'border-black/12'
+        }`}
+      >
+        <div className="task-showcase-media relative flex min-h-0 w-full flex-col overflow-hidden bg-[#FBFAF7]">
+          <div className={`relative flex w-full flex-1 items-center justify-center overflow-hidden border-b border-black/6 ${mediaHeightClass}`}>
+            {coverImageSrc ? (
+              <img
+                src={coverImageSrc}
+                alt={task.title}
+                loading="lazy"
+                decoding="async"
+                draggable={false}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-text-secondary/50">
+                <ImageIcon className="h-5 w-5 opacity-25" strokeWidth={1} />
+              </div>
+            )}
+          </div>
+
+          <div className={`flex items-center justify-between gap-2 bg-white ${isCollapsed ? 'px-2.5 py-1' : 'px-4 py-3'}`}>
+            <div className="min-w-0">
+              <div className="text-[10.5px] text-black/48">#{task.index.toString().padStart(3, '0')}</div>
+              {!isCollapsed ? (
+                <div className="mt-1 truncate text-[13.6px] font-serif font-medium leading-tight text-foreground">
+                  {task.title}
+                </div>
+              ) : null}
+            </div>
+            <div className={`shrink-0 rounded-full border font-medium ${isCollapsed ? 'px-1.5 py-0.5 text-[9.5px]' : 'px-2.5 py-1 text-[10.5px]'} ${getShowcaseStatusTone(task.status)}`}>
+              {getShowcaseStatusLabel(task.status)}
+            </div>
+          </div>
+        </div>
+
+        <div className="absolute left-3 top-3 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            className="task-showcase-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/78 text-text-secondary backdrop-blur-sm transition-colors hover:bg-white"
+            onClick={(event) => event.stopPropagation()}
+            {...attributes}
+            {...listeners}
+            aria-label="拖拽排序"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          <input
+            type="checkbox"
+            className="task-showcase-action h-5 w-5 rounded-[6px] border border-black/14 bg-white/80 accent-[#D97757] backdrop-blur-sm"
+            checked={isSelected}
+            onClick={(event) => event.stopPropagation()}
+            onChange={() => toggleTaskSelection(task.id)}
+            aria-label={`选择任务 ${task.title}`}
+          />
+        </div>
+
+        <div className="absolute right-3 top-3 z-20">
+          <button
+            type="button"
+            className="task-showcase-action inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/72 text-text-secondary backdrop-blur-sm opacity-0 transition-all hover:bg-red-500/90 hover:text-white group-hover:opacity-100"
+            onClick={(event) => {
+              event.stopPropagation();
+              removeTask(task.id);
+            }}
+            title="删除任务"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+
+        {!isCollapsed ? (
+        <div className={`flex flex-col gap-3 bg-white ${isCompact ? 'px-3 py-2.5' : 'px-4 py-3'}`}>
+          {isCompact ? (
+            <div className="flex min-w-0 items-center justify-between gap-3 text-[10.5px] text-black/58">
+              <span className="truncate font-medium text-black/70">{task.title}</span>
+              <span className="shrink-0 text-black/45">{paramSummary || '默认参数'}</span>
+            </div>
+          ) : (
+          <>
+          <div className="rounded-[18px] border border-black/6 bg-[#FCFBF8] px-3.5 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-[9.45px] font-bold uppercase tracking-wider text-black/42">参考图</span>
+              <div className="flex min-w-0 items-center gap-2">
+                {referenceImages.slice(0, 3).map((image, index) => (
+                  <div key={`${task.id}-reference-${index}`} className="h-10 w-10 overflow-hidden rounded-[12px] bg-white ring-1 ring-black/6">
+                    <img src={image} alt={`参考图 ${index + 1}`} draggable={false} className="h-full w-full object-cover" />
+                  </div>
+                ))}
+                {referenceImages.length > 3 ? (
+                  <div className="flex h-10 min-w-[40px] items-center justify-center rounded-[12px] border border-dashed border-black/12 bg-white px-2 text-[11px] text-text-secondary">
+                    +{referenceImages.length - 3}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-dashed border-black/16 bg-white/80 text-black/45 transition-colors hover:bg-white"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
+                  title="添加参考图"
+                >
+                  <Upload className="h-3.5 w-3.5 opacity-70" strokeWidth={2} />
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handlePickReferenceImages}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex min-w-0 items-center gap-2 rounded-[16px] border border-black/8 bg-white px-3 py-2 text-[10.5px] text-black/58">
+            <span className="text-[9.45px] font-bold uppercase tracking-wider text-black/42">参数</span>
+            <span className="truncate font-medium text-black/70">{paramSummary || '跟随默认设置'}</span>
+          </div>
+          </>
+          )}
+        </div>
+        ) : null}
+      </section>
+
+      <section
+        className={`task-showcase-card min-w-0 overflow-hidden rounded-[22px] border bg-white md:rounded-l-none ${
+          isActive ? 'border-black/12' : 'border-black/8'
+        } ${isCollapsed ? 'bg-[#fdfdfc] px-2 pb-2 pt-2.5' : isCompact ? 'bg-[#fdfdfc] p-3' : 'bg-[#fdfdfc] p-3 md:p-4'}`}
+      >
+        <div className={`flex items-center justify-between gap-3 ${isCollapsed ? 'mb-1.5' : 'mb-3'}`}>
+          <div>
+            <div className={`font-medium text-foreground ${isCollapsed ? 'text-[11.5px]' : 'text-[13px]'}`}>结果图</div>
+          </div>
+          {resultImages.length > 0 ? (
+            <button
+              type="button"
+              className="task-showcase-action shrink-0 rounded-full border border-black/8 bg-[#F8F6F1] px-3 py-1.5 text-[11px] font-medium text-text-secondary transition-colors hover:bg-[#F1EADF] hover:text-foreground"
+              onClick={handleDownloadAllResults}
+            >
+              下载全部
+            </button>
+          ) : null}
+        </div>
+
+        <div className={`flex overflow-x-auto pb-1 ${isCollapsed ? 'gap-2' : 'gap-3'}`}>
+          {resultImages.length > 0
+            ? resultImages.map((result, resultIndex) => {
+                const src = getShowcaseResultImage(result);
+                const dimensions = getResultImageAssetDimensions(result);
+                const resultAspectRatio = dimensions ? `${dimensions.width} / ${dimensions.height}` : '3 / 4';
+                const isResultHovered = hoveredResultId === result.id;
+                return (
+                  <div
+                    key={result.id}
+                    onMouseEnter={() => setHoveredResultId(result.id)}
+                    onMouseMove={() => setHoveredResultId(result.id)}
+                    onPointerEnter={() => setHoveredResultId(result.id)}
+                    onPointerMove={() => setHoveredResultId(result.id)}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      setHoveredResultId(result.id);
+                    }}
+                    onPointerLeave={() => {
+                      setHoveredResultId((currentResultId) => (currentResultId === result.id ? null : currentResultId));
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredResultId((currentResultId) => (currentResultId === result.id ? null : currentResultId));
+                    }}
+                    onPointerCancel={() => {
+                      setHoveredResultId((currentResultId) => (currentResultId === result.id ? null : currentResultId));
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation();
+                      handleOpenResult(result, resultIndex);
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setActiveTask(task.id);
+                      setHoveredResultId(result.id);
+                    }}
+                    className={`task-showcase-result-card group/result relative isolate shrink-0 cursor-zoom-in overflow-hidden rounded-[18px] border border-black/8 bg-white ${resultCardWidthClass}`}
+                    style={{ aspectRatio: resultAspectRatio }}
+                    title="双击查看大图"
+                  >
+                    {src ? (
+                      <img
+                        src={src}
+                        alt={`${task.title} 结果图 ${resultIndex + 1}`}
+                        draggable={false}
+                        className="pointer-events-none h-full w-full object-cover"
+                        onDoubleClick={(event) => {
+                          event.stopPropagation();
+                          handleOpenResult(result, resultIndex);
+                        }}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[12px] text-text-secondary/70">加载中</div>
+                    )}
+                    <div
+                      className={`task-showcase-result-tint pointer-events-none absolute inset-0 transition-colors duration-200 ${
+                        isResultHovered ? 'bg-black/14' : 'bg-black/0'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      className={`task-showcase-action absolute right-2 top-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(255,255,255,0.82)] text-black/62 backdrop-blur-sm transition-all duration-200 hover:bg-white hover:text-foreground ${
+                        isResultHovered ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+                      }`}
+                      onClick={(event) => void handleDownloadResult(event, result, resultIndex)}
+                      title="下载此图"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`task-showcase-action absolute left-1/2 top-1/2 z-20 inline-flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-[rgba(24,22,19,0.72)] text-white backdrop-blur-sm transition-all duration-200 ${
+                        isResultHovered ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+                      }`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleOpenResult(result, resultIndex);
+                      }}
+                      title="查看大图"
+                    >
+                      <Fullscreen className="h-4.5 w-4.5" />
+                    </button>
+                    <div className={`absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/50 via-black/12 to-transparent px-3 pb-3 pt-8 text-white ${isCollapsed ? 'hidden' : ''}`}>
+                      <div className="text-[12px] font-medium">第 {resultIndex + 1} 张</div>
+                      <div className="text-[10px] text-white/80">
+                        {dimensions ? `${dimensions.width} × ${dimensions.height}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            : Array.from({ length: placeholderCount }).map((_, index) => (
+                <div
+                  key={`${task.id}-placeholder-${index}`}
+                  className={`task-showcase-placeholder relative flex shrink-0 flex-col items-center justify-center overflow-hidden rounded-[18px] border border-black/8 bg-[linear-gradient(180deg,#FFFFFF_0%,#F7F3EC_100%)] px-5 text-center ${resultCardWidthClass}`}
+                  style={{ aspectRatio: '3 / 4' }}
+                >
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full border border-black/8 bg-white">
+                    <ImageIcon className="h-4.5 w-4.5 text-black/45" />
+                  </div>
+                  {!isCollapsed ? (
+                    <>
+                      <div className="mt-4 text-[13px] font-medium text-foreground">正在生成第 {index + 1} 张</div>
+                      <div className="mt-1 text-[11px] text-text-secondary">生成完成后会显示在这里</div>
+                    </>
+                  ) : null}
+                </div>
+              ))}
+        </div>
+      </section>
     </div>
   );
 });
@@ -328,6 +901,7 @@ export function TaskList() {
       return;
     }
 
+    event.preventDefault();
     const node = scrollContainerRef.current;
     if (!node) return;
 
@@ -431,7 +1005,12 @@ export function TaskList() {
         viewMode === 'grid'
           ? Math.max(1, Math.floor((scrollMetrics.width + GRID_GAP) / (GRID_MIN_COLUMN_WIDTH + GRID_GAP)))
           : 1;
-      const rowHeight = viewMode === 'grid' ? GRID_ITEM_HEIGHT : LIST_ITEM_HEIGHT;
+      const rowHeight =
+        viewMode === 'grid'
+          ? GRID_ITEM_HEIGHT
+          : viewMode === 'list' || viewMode === 'showcase'
+            ? getShowcaseItemHeight(cardDensity)
+            : LIST_ITEM_HEIGHT;
       const targetRow = Math.floor(index / columnCount);
       node.scrollTo({
         top: Math.max(0, targetRow * rowHeight - rowHeight),
@@ -554,7 +1133,12 @@ export function TaskList() {
         ? Math.max(1, Math.floor((scrollMetrics.width + GRID_GAP) / (GRID_MIN_COLUMN_WIDTH + GRID_GAP)))
         : 1;
     const densityScale = cardDensity === 'minimal' ? 0.72 : cardDensity === 'compact' ? 0.84 : 1;
-    const rowHeight = viewMode === 'grid' ? GRID_ITEM_HEIGHT * densityScale : LIST_ITEM_HEIGHT * densityScale;
+    const rowHeight =
+      viewMode === 'grid'
+        ? GRID_ITEM_HEIGHT * densityScale
+        : viewMode === 'list' || viewMode === 'showcase'
+          ? getShowcaseItemHeight(cardDensity)
+          : LIST_ITEM_HEIGHT * densityScale;
     const rowCount = Math.ceil(taskIds.length / columnCount);
     const firstRow = Math.max(0, Math.floor(scrollMetrics.top / rowHeight) - WINDOW_OVERSCAN_ROWS);
     const visibleRows = Math.ceil(scrollMetrics.height / rowHeight) + WINDOW_OVERSCAN_ROWS * 2;
@@ -614,7 +1198,7 @@ export function TaskList() {
       onPointerMove={handleWorkspacePointerMove}
       onPointerUp={finishMarqueeSelection}
       onPointerCancel={finishMarqueeSelection}
-      className="relative mx-auto flex w-full max-w-[1600px] flex-1 flex-col overflow-y-auto p-4 outline-none custom-scrollbar md:p-6 xl:p-8"
+      className="relative mx-auto flex w-full max-w-[1600px] flex-1 select-none flex-col overflow-y-auto p-4 outline-none custom-scrollbar md:p-6 xl:p-8"
     >
       {marqueeRect ? (
         <div
@@ -697,7 +1281,7 @@ export function TaskList() {
               const src = result.previewSrc || result.src || result.assetSrc || result.originalSrc || '';
               const dimensions = getResultImageAssetDimensions(result);
               return (
-                <div key={`${task.id}-${result.id}`} className="group/result mb-4 break-inside-avoid overflow-hidden rounded-[22px] border border-black/8 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(31,24,18,0.12)]">
+                <div key={`${task.id}-${result.id}`} className="task-result-gallery-card group/result mb-4 break-inside-avoid overflow-hidden rounded-[22px] border border-black/8 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(31,24,18,0.12)]">
                   <button
                     type="button"
                     className="block w-full bg-[#F7F4EE]"
@@ -722,9 +1306,12 @@ export function TaskList() {
                       </div>
                       <button
                         type="button"
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1F1D1A] text-white opacity-0 transition-opacity group-hover/result:opacity-100"
+                        className="task-result-gallery-action pointer-events-none inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1F1D1A] text-white opacity-0 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100"
                         title="作为新任务原图"
-                        onClick={() => addResultAsNewTask(result.src || src, task.title)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          addResultAsNewTask(result.src || src, task.title);
+                        }}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </button>
@@ -733,14 +1320,20 @@ export function TaskList() {
                       <button
                         type="button"
                         className="rounded-full bg-[#F4EFE7] px-2.5 py-1 text-[10px] text-text-secondary hover:bg-white"
-                        onClick={() => addResultToSelectedTasks(result.src || src)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          addResultToSelectedTasks(result.src || src);
+                        }}
                       >
                         加到选中
                       </button>
                       <button
                         type="button"
                         className="rounded-full bg-[#F4EFE7] px-2.5 py-1 text-[10px] text-text-secondary hover:bg-white"
-                        onClick={() => setProjectFields({ globalReferenceImages: [...useAppStore.getState().globalReferenceImages, result.src || src] })}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setProjectFields({ globalReferenceImages: [...useAppStore.getState().globalReferenceImages, result.src || src] });
+                        }}
                       >
                         全局参考
                       </button>

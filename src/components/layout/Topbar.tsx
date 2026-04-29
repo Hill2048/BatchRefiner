@@ -352,7 +352,7 @@ export function Topbar({ isCompactLayout = false }: TopbarProps) {
             type="button"
             onClick={() => setProjectFields({ viewMode: 'list' })}
             className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-all duration-300 ${
-              viewMode === 'list'
+              viewMode === 'list' || viewMode === 'showcase'
                 ? 'bg-white text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
                 : 'text-text-secondary hover:bg-white/55 hover:text-foreground'
             }`}

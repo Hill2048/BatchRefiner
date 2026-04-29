@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeTaskConcurrency, runTaskExecutionQueue } from './taskExecutionQueue';
+import { normalizeSingleTaskImageConcurrency, normalizeTaskConcurrency, runTaskExecutionQueue } from './taskExecutionQueue';
 
 test('normalizeTaskConcurrency clamps invalid values to the task pool range', () => {
   assert.equal(normalizeTaskConcurrency(undefined), 3);
@@ -8,6 +8,15 @@ test('normalizeTaskConcurrency clamps invalid values to the task pool range', ()
   assert.equal(normalizeTaskConcurrency(-2), 1);
   assert.equal(normalizeTaskConcurrency(99), 10);
   assert.equal(normalizeTaskConcurrency(4.8), 4);
+});
+
+test('normalizeSingleTaskImageConcurrency only allows supported image pool sizes', () => {
+  assert.equal(normalizeSingleTaskImageConcurrency(undefined), 4);
+  assert.equal(normalizeSingleTaskImageConcurrency(1), 1);
+  assert.equal(normalizeSingleTaskImageConcurrency(2), 2);
+  assert.equal(normalizeSingleTaskImageConcurrency(4), 4);
+  assert.equal(normalizeSingleTaskImageConcurrency(3), 4);
+  assert.equal(normalizeSingleTaskImageConcurrency(99), 4);
 });
 
 test('runTaskExecutionQueue respects the normalized concurrency limit', async () => {

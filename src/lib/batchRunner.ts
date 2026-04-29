@@ -2,7 +2,11 @@ import { AspectRatio, BatchCount, ImageQuality, PlatformPreset, Resolution, Task
 import { useAppStore } from "@/store";
 import { toast } from "sonner";
 import { getBatchCountNumber, getEffectiveBatchCount } from "./taskResults";
-import { normalizeTaskConcurrency, runTaskExecutionQueue } from "./taskExecutionQueue";
+import {
+  normalizeSingleTaskImageConcurrency,
+  normalizeTaskConcurrency,
+  runTaskExecutionQueue,
+} from "./taskExecutionQueue";
 import { getExecutablePromptText, getPreparedPromptText, isPromptOptimizationEnabled } from "./promptExecution";
 import { dataUrlToBlob, primeResultImageCache, primeTaskResultImageCache, storeResultImageBlob } from "./resultImageCache";
 import { getResultImageAssetSrc, inferResultImageAssetMetadata, isValidResultImageAssetSrc } from "./resultImageAsset";
@@ -3047,6 +3051,7 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
   const logSessionId = options.logSessionId;
   const imageNotifier = options.onImage ? createBufferedImageNotifier(options.onImage) : null;
   const shouldContinue = options.shouldContinue;
+  const singleTaskImageConcurrency = normalizeSingleTaskImageConcurrency(store.singleTaskImageConcurrency);
 
   if (logSessionId) {
     appendGenerationLogEvent(logSessionId, {
@@ -3055,13 +3060,14 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
       message: "开始执行生图批次",
       data: {
         targetBatchCount,
+        singleTaskImageConcurrency,
       },
     });
   }
 
-  for (let index = 0; index < targetBatchCount; index += 1) {
+  const runAttempt = async (index: number) => {
     if (shouldContinue && !shouldContinue()) {
-      break;
+      return;
     }
     try {
       if (logSessionId) {
@@ -3078,7 +3084,7 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
       }
       const generatedImage = await runSingleImageGeneration(taskId, { logSessionId });
       if (shouldContinue && !shouldContinue()) {
-        break;
+        return;
       }
       const createdImage = await createTaskResultImage(generatedImage, task.activeResultSessionId);
       images.push(createdImage);
@@ -3116,7 +3122,23 @@ async function runImageGeneration(taskId: string, options: RunImageGenerationOpt
         throw error;
       }
     }
-  }
+  };
+
+  let nextAttemptIndex = 0;
+  const workerCount = Math.min(singleTaskImageConcurrency, targetBatchCount);
+  const runAttemptWorker = async () => {
+    while (true) {
+      if (shouldContinue && !shouldContinue()) return;
+      const index = nextAttemptIndex;
+      nextAttemptIndex += 1;
+      if (index >= targetBatchCount) return;
+      await runAttempt(index);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => runAttemptWorker()),
+  );
 
   if (logSessionId) {
     updateGenerationLogSummary(logSessionId, {
