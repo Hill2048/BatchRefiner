@@ -1136,6 +1136,7 @@ export function FloatingTaskDock() {
 
       <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 flex justify-center px-4">
         <div
+          data-floating-task-dock
           className="pointer-events-auto w-full max-w-[952px]"
           onDragEnter={mode === 'global' ? handleGlobalReferenceDragEnter : handleTaskReferenceDragEnter}
           onDragOver={mode === 'global' ? handleGlobalReferenceDragOver : handleTaskReferenceDragOver}

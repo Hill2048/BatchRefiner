@@ -759,6 +759,22 @@ function areStringArraysEqual(first: string[], second: string[]) {
   return first.every((item, index) => item === second[index]);
 }
 
+function isWorkspaceInteractiveTarget(target: HTMLElement) {
+  return Boolean(
+    target.closest('button') ||
+    target.closest('input') ||
+    target.closest('textarea') ||
+    target.closest('[role="button"]'),
+  );
+}
+
+function isWorkspaceBlankAreaExcludedTarget(target: HTMLElement) {
+  return Boolean(
+    target.closest('[data-task-card]') ||
+    target.closest('[data-floating-task-dock]'),
+  );
+}
+
 export function TaskList() {
   const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
   const taskIds = useAppStore((state) => state.taskIds);
@@ -853,14 +869,7 @@ export function TaskList() {
     }
 
     const target = event.target as HTMLElement;
-    if (
-      target.closest('[data-task-card]') ||
-      target.closest('[data-task-toolbar]') ||
-      target.closest('button') ||
-      target.closest('input') ||
-      target.closest('textarea') ||
-      target.closest('[role="button"]')
-    ) {
+    if (isWorkspaceBlankAreaExcludedTarget(target) || isWorkspaceInteractiveTarget(target)) {
       return;
     }
 
@@ -921,14 +930,7 @@ export function TaskList() {
     if (event.button !== 0 || event.pointerType === 'touch') return;
 
     const target = event.target as HTMLElement;
-    if (
-      target.closest('[data-task-card]') ||
-      target.closest('[data-task-toolbar]') ||
-      target.closest('button') ||
-      target.closest('input') ||
-      target.closest('textarea') ||
-      target.closest('[role="button"]')
-    ) {
+    if (isWorkspaceBlankAreaExcludedTarget(target) || isWorkspaceInteractiveTarget(target)) {
       return;
     }
 
@@ -1333,7 +1335,7 @@ export function TaskList() {
               const src = result.previewSrc || result.src || result.assetSrc || result.originalSrc || '';
               const dimensions = getResultImageAssetDimensions(result);
               return (
-                <div key={`${task.id}-${result.id}`} className="task-result-gallery-card group/result flex h-full flex-col overflow-hidden rounded-[22px] border border-black/8 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(31,24,18,0.12)]">
+                <div data-task-card key={`${task.id}-${result.id}`} className="task-result-gallery-card group/result flex h-full flex-col overflow-hidden rounded-[22px] border border-black/8 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(31,24,18,0.12)]">
                   <button
                     type="button"
                     className="block w-full bg-[#F7F4EE]"
