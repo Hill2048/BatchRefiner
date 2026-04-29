@@ -44,6 +44,18 @@ function hasImageFiles(dataTransfer?: DataTransfer | null) {
   return Array.from(dataTransfer.items || []).some((item) => item.kind === 'file' && item.type.startsWith('image/'));
 }
 
+function getClipboardImageFiles(dataTransfer?: DataTransfer | null) {
+  if (!dataTransfer) return [];
+
+  const itemFiles = Array.from(dataTransfer.items || [])
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+
+  if (itemFiles.length > 0) return itemFiles;
+  return Array.from(dataTransfer.files || []).filter((file) => file.type.startsWith('image/'));
+}
+
 function waitForNextPaint() {
   return new Promise<void>((resolve) => {
     requestAnimationFrame(() => resolve());
@@ -713,6 +725,15 @@ export function FloatingTaskDock() {
     void appendTaskReferences(files);
   }, [appendTaskReferences]);
 
+  const handleEditorImagePaste = React.useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = getClipboardImageFiles(event.clipboardData);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    void (mode === 'global' ? importGlobalReferenceFiles(files) : appendTaskReferences(files));
+  }, [appendTaskReferences, importGlobalReferenceFiles, mode]);
+
   const handleExportResults = React.useCallback(async () => {
     const currentTasks = useAppStore.getState().tasks;
     const useSelected = selectedTaskIds.length > 0;
@@ -1214,6 +1235,7 @@ export function FloatingTaskDock() {
                     <Textarea
                       value={globalTargetText}
                       onChange={(event) => setProjectFields({ globalTargetText: event.target.value })}
+                      onPaste={handleEditorImagePaste}
                       placeholder={enablePromptOptimization ? '写全局指令：例如统一风格、构图、质感或品牌要求。' : '写可直接执行的全局提示词…'}
                       className="h-[124px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                     />
@@ -1223,12 +1245,14 @@ export function FloatingTaskDock() {
                         <Textarea
                           value={activeTask.description}
                           onChange={(event) => updateTask(activeTask.id, { description: event.target.value })}
+                          onPaste={handleEditorImagePaste}
                           placeholder="目标指令…"
                           className="h-full resize-none border-transparent bg-transparent px-1 py-1 pr-4 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                         />
                         <Textarea
                           value={activeTask.promptText || ''}
                           onChange={(event) => handleActiveTaskPromptChange(event.target.value)}
+                          onPaste={handleEditorImagePaste}
                           placeholder="提示词预览…"
                           className="h-full resize-none border-transparent bg-transparent px-1 py-1 pl-4 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                         />
@@ -1237,6 +1261,7 @@ export function FloatingTaskDock() {
                       <Textarea
                         value={activeTask.promptText || ''}
                         onChange={(event) => handleActiveTaskPromptChange(event.target.value)}
+                        onPaste={handleEditorImagePaste}
                         placeholder="提示词…"
                         className="h-[124px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                       />
@@ -1245,6 +1270,7 @@ export function FloatingTaskDock() {
                     <Textarea
                       value={quickTaskInput}
                       onChange={(event) => setQuickTaskInput(event.target.value)}
+                      onPaste={handleEditorImagePaste}
                       placeholder="写一句可直接执行的新任务内容…"
                       className="h-[124px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                     />
