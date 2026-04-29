@@ -1,7 +1,7 @@
 import { useAppStore } from '@/store';
 import { ChevronLeft, ChevronRight, GripVertical, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getCurrentTaskResultImages } from '@/lib/taskResults';
+import { getCurrentTaskResultImages, getTaskResultImages } from '@/lib/taskResults';
 import type { TaskResultImage } from '@/types';
 import { getStoredImageAsset } from '@/lib/imageAssetStore';
 
@@ -59,7 +59,12 @@ export function Lightbox() {
 
   const task = tasks.find((item) => item.id === lightboxTaskId);
   const taskIndex = useMemo(() => tasks.findIndex((item) => item.id === lightboxTaskId), [tasks, lightboxTaskId]);
-  const resultImages = task ? getCurrentTaskResultImages(task) : [];
+  const resultImages = task
+    ? (() => {
+        const currentImages = getCurrentTaskResultImages(task);
+        return currentImages.length > 0 ? currentImages : getTaskResultImages(task);
+      })()
+    : [];
   const currentResultImage = resultImages[lightboxImageIndex] || resultImages[0];
   const currentResultImageSrc = getResultFullSrc(currentResultImage);
   const displayResultImageSrc = resolvedAssetSrc || currentResultImageSrc;

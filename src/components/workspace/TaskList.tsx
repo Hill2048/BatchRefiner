@@ -6,7 +6,7 @@ import { useAppStore } from '@/store';
 import { TaskCard } from './TaskCard';
 import type { CardDensity, Task, TaskResultImage, WorkspaceViewMode } from '@/types';
 import { buildImportedTasksFromFiles, buildReferenceImagesFromFiles } from '@/lib/taskFileImport';
-import { getBatchCountNumber, getTaskResultImages } from '@/lib/taskResults';
+import { getBatchCountNumber, getCurrentTaskResultImages, getTaskResultImages } from '@/lib/taskResults';
 import { getResultImageAssetDimensions, getResultImageAssetExtension } from '@/lib/resultImageAsset';
 import { buildResultImageFileName } from '@/lib/resultImageFileName';
 import { resolveResultImageDownloadBlob } from '@/lib/resultImageDownload';
@@ -234,6 +234,11 @@ function getShowcaseResultImage(result?: TaskResultImage | null) {
   return result?.previewSrc || result?.src || result?.assetSrc || result?.originalSrc || '';
 }
 
+function getPreferredTaskResultImages(task: Task) {
+  const currentImages = getCurrentTaskResultImages(task);
+  return currentImages.length > 0 ? currentImages : getTaskResultImages(task);
+}
+
 function getShowcaseStatusTone(status: Task['status']) {
   switch (status) {
     case 'Success':
@@ -306,16 +311,13 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
 
   const resultImages = React.useMemo(() => {
     if (!task) return [];
-    const images = getTaskResultImages(task);
-    if (!task.activeResultSessionId) return images;
-    const currentSessionImages = images.filter((result) => result.sessionId === task.activeResultSessionId);
-    return currentSessionImages.length > 0 ? currentSessionImages : images;
+    return getPreferredTaskResultImages(task);
   }, [task]);
 
   if (!task) return null;
 
   const sourceImage = getShowcaseSourceImage(task);
-  const coverImageSrc = sourceImage || getShowcaseResultImage(resultImages[0]);
+  const coverImageSrc = getShowcaseResultImage(resultImages[0]) || sourceImage;
   const referenceImages = task.referenceImages || [];
   const requestedCount = getBatchCountNumber(task.requestedBatchCount || task.batchCount || 'x1');
   const placeholderCount =
@@ -364,7 +366,7 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
   };
 
   const handleOpenResult = (result: TaskResultImage, fallbackIndex: number) => {
-    const resultIndex = getTaskResultImages(task).findIndex((item) => item.id === result.id);
+    const resultIndex = resultImages.findIndex((item) => item.id === result.id);
     setActiveTask(task.id);
     useAppStore.getState().setLightboxTask(task.id, resultIndex >= 0 ? resultIndex : fallbackIndex);
   };
@@ -1183,7 +1185,7 @@ export function TaskList() {
   }, [cardDensity, scrollMetrics.height, scrollMetrics.top, scrollMetrics.width, taskIds, viewMode]);
 
   const resultItems = React.useMemo(() => tasks.flatMap((task) =>
-    getTaskResultImages(task).map((result, resultIndex) => ({ task, result, resultIndex })),
+    getPreferredTaskResultImages(task).map((result, resultIndex) => ({ task, result, resultIndex })),
   ), [tasks]);
 
   const addResultAsNewTask = React.useCallback((src: string, title: string) => {
