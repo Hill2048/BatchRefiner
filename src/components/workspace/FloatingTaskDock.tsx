@@ -136,7 +136,7 @@ function IconAction({
       className={
         subtle
           ? 'h-9 w-9 rounded-2xl border-transparent bg-transparent text-text-secondary shadow-none hover:border-black/8 hover:bg-white/70 hover:text-foreground'
-          : 'h-9 w-9 rounded-2xl border-border/60 bg-[#F7F4EE] text-text-secondary shadow-none hover:bg-white hover:text-foreground'
+          : 'h-9 w-9 rounded-2xl border-border/60 bg-[#fdfdfc] text-text-secondary shadow-none hover:bg-white hover:text-foreground'
       }
       onClick={onClick}
       title={title}
@@ -269,14 +269,14 @@ function FloatingReferenceStack({
 }) {
   const previewImages = images.slice(0, 5);
   const hasImages = previewImages.length > 0;
-  const expandedWidth = hasImages ? Math.max(150, 160 + (previewImages.length - 1) * 92) : 150;
+  const expandedWidth = hasImages ? Math.max(142, 152 + (previewImages.length - 1) * 88) : 142;
 
   return (
     <div
-      className={`group/reference flex h-[162px] w-[150px] shrink-0 flex-col rounded-[24px] p-3 transition-[width,background-color,box-shadow,ring-color] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] hover:w-[var(--expanded-reference-width)] ${
+      className={`group/reference flex h-full w-[142px] shrink-0 flex-col overflow-hidden rounded-[24px] p-3 transition-[width,background-color,box-shadow,ring-color] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] hover:w-[var(--expanded-reference-width)] ${
         isDragging
           ? 'w-[var(--expanded-reference-width)] bg-button-main/[0.06] ring-1 ring-button-main/30'
-          : 'bg-transparent hover:bg-black/[0.018]'
+          : 'bg-[#fdfdfc] hover:bg-[#fdfdfc]'
       }`}
       style={{ '--expanded-reference-width': `${expandedWidth}px` } as React.CSSProperties}
     >
@@ -285,11 +285,11 @@ function FloatingReferenceStack({
           previewImages.map((image, index) => {
             const stackOffset = Math.min(index, 3);
             const stackTransform = `translateX(${stackOffset * 11}px) rotate(${[-12, -4, 5, 12][stackOffset]}deg)`;
-            const spreadTransform = `translateX(${index * 92}px) rotate(${[-8, -4, 2, 7, -5][index] || 0}deg)`;
+            const spreadTransform = `translateX(${index * 88}px) rotate(${[-8, -4, 2, 7, -5][index] || 0}deg)`;
             return (
               <div
                 key={`${image.slice(0, 32)}-${index}`}
-                className="group/card absolute left-3 top-5 h-[112px] w-[82px] overflow-hidden rounded-[18px] border border-white/90 bg-[#EEE6D7] shadow-[0_12px_28px_rgba(31,24,18,0.15)] transition-[transform,box-shadow] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] [transform:var(--stack-transform)] hover:shadow-[0_16px_32px_rgba(31,24,18,0.18)] group-hover/reference:[transform:var(--spread-transform)]"
+                className="group/card absolute left-[14px] top-[6px] h-[122px] w-[90px] overflow-hidden rounded-[18px] border border-white/90 bg-[#fdfdfc] shadow-[0_8px_18px_rgba(31,24,18,0.10)] transition-[transform,box-shadow] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] [transform:var(--stack-transform)] hover:shadow-[0_10px_22px_rgba(31,24,18,0.12)] group-hover/reference:[transform:var(--spread-transform)]"
                 style={{
                   '--stack-transform': stackTransform,
                   '--spread-transform': spreadTransform,
@@ -317,7 +317,7 @@ function FloatingReferenceStack({
             type="button"
             disabled={disabled}
             onClick={onAdd}
-            className="absolute left-6 top-5 flex h-[112px] w-[82px] rotate-[-6deg] items-center justify-center rounded-[18px] border border-dashed border-black/14 bg-transparent text-black/32 transition-all hover:rotate-[-2deg] hover:border-black/22 hover:bg-white/45 disabled:cursor-not-allowed disabled:opacity-60"
+            className="absolute left-[14px] top-[6px] flex h-[122px] w-[90px] rotate-[-6deg] items-center justify-center rounded-[18px] border border-dashed border-black/14 bg-transparent text-black/32 transition-all hover:rotate-[-2deg] hover:border-black/22 hover:bg-white/45 disabled:cursor-not-allowed disabled:opacity-60"
             title="添加参考图"
           >
             <ImageIcon className="h-6 w-6" strokeWidth={1.8} />
@@ -328,7 +328,7 @@ function FloatingReferenceStack({
           {previewImages.map((image, index) => (
             <div
               key={`expanded-${image.slice(0, 32)}-${index}`}
-              className="group/card relative h-[112px] w-[82px] translate-y-2 overflow-hidden rounded-[18px] border border-white/90 bg-[#EEE6D7] shadow-[0_12px_28px_rgba(31,24,18,0.15)] transition-all duration-300 ease-out hover:-translate-y-1 group-hover/reference:translate-y-0"
+              className="group/card relative h-[122px] w-[90px] translate-y-2 overflow-hidden rounded-[18px] border border-white/90 bg-[#fdfdfc] shadow-[0_8px_18px_rgba(31,24,18,0.10)] transition-all duration-300 ease-out hover:-translate-y-1 group-hover/reference:translate-y-0"
               style={{ transitionDelay: `${index * 35}ms` }}
             >
               <img src={image} alt="" className="h-full w-full object-cover" />
@@ -1136,9 +1136,9 @@ export function FloatingTaskDock() {
           onDragLeave={mode === 'global' ? handleGlobalReferenceDragLeave : handleTaskReferenceDragLeave}
           onDrop={mode === 'global' ? handleGlobalReferenceDrop : handleTaskReferenceDrop}
         >
-          <div className="h-[300px] animate-in fade-in slide-in-from-bottom-2 rounded-[40px] border border-black/[0.07] bg-white/92 p-4 shadow-[0_18px_50px_rgba(31,24,18,0.13)] backdrop-blur-xl duration-300">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="relative flex w-[128px] rounded-full bg-[#F4EFE7] p-1">
+          <div className="flex h-[300px] flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-2 rounded-[40px] border border-black/[0.07] bg-white/92 p-4 shadow-[0_18px_50px_rgba(31,24,18,0.13)] backdrop-blur-xl duration-300">
+            <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
+              <div className="relative flex w-[128px] rounded-full bg-[#f3f3f2] p-1">
                 <span
                   className={`pointer-events-none absolute top-1 h-9 w-[84px] rounded-full bg-white shadow-sm transition-transform duration-[350ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
                     isGlobalMode ? 'translate-x-0' : 'translate-x-9'
@@ -1163,8 +1163,8 @@ export function FloatingTaskDock() {
               </div>
             </div>
 
-            <div key={mode} className="animate-in fade-in duration-200">
-              <div className="flex min-h-[150px] gap-4">
+            <div key={mode} className="flex min-h-0 flex-1 flex-col justify-between animate-in fade-in duration-200">
+              <div className="flex h-[158px] shrink-0 gap-4">
                 <FloatingReferenceStack
                   images={currentReferenceImages}
                   isDragging={currentReferenceDragging}
@@ -1197,7 +1197,7 @@ export function FloatingTaskDock() {
                   }}
                 />
 
-                <div className="min-w-0 flex-1 rounded-[24px] border border-black/[0.04] bg-[#FFFDF9]/80 px-4 py-3">
+                <div className="min-w-0 flex-1 rounded-[24px] border border-black/[0.04] bg-[#fdfdfc] px-4 py-2">
                   <div className="mb-1 flex items-center justify-between gap-3 px-1 text-[11px] text-text-secondary">
                     <span className="font-medium text-foreground/70">
                       {isGlobalMode ? (enablePromptOptimization ? '全局指令' : '全局提示词') : activeTask ? `任务 #${activeTask.index}` : '新建任务'}
@@ -1208,22 +1208,22 @@ export function FloatingTaskDock() {
                       value={globalTargetText}
                       onChange={(event) => setProjectFields({ globalTargetText: event.target.value })}
                       placeholder={enablePromptOptimization ? '写全局指令：例如统一风格、构图、质感或品牌要求。' : '写可直接执行的全局提示词…'}
-                      className="h-[136px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                      className="h-[124px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                     />
                   ) : activeTask ? (
                     enablePromptOptimization ? (
-                      <div className="grid h-[136px] grid-cols-2 gap-4">
+                      <div className="grid h-[124px] grid-cols-2 gap-4 divide-x divide-dashed divide-black/10">
                         <Textarea
                           value={activeTask.description}
                           onChange={(event) => updateTask(activeTask.id, { description: event.target.value })}
                           placeholder="目标指令…"
-                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 pr-4 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                         />
                         <Textarea
                           value={activeTask.promptText || ''}
                           onChange={(event) => handleActiveTaskPromptChange(event.target.value)}
                           placeholder="提示词预览…"
-                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 pl-4 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                         />
                       </div>
                     ) : (
@@ -1231,7 +1231,7 @@ export function FloatingTaskDock() {
                         value={activeTask.promptText || ''}
                         onChange={(event) => handleActiveTaskPromptChange(event.target.value)}
                         placeholder="提示词…"
-                        className="h-[136px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                        className="h-[124px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                       />
                     )
                   ) : (
@@ -1239,13 +1239,13 @@ export function FloatingTaskDock() {
                       value={quickTaskInput}
                       onChange={(event) => setQuickTaskInput(event.target.value)}
                       placeholder="写一句可直接执行的新任务内容…"
-                      className="h-[136px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                      className="h-[124px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                     />
                   )}
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <ModelSwitch
                   value={modelSwitchValue}
@@ -1296,7 +1296,7 @@ export function FloatingTaskDock() {
                       <button
                         type="button"
                         onDoubleClick={() => setIsMarkdownEditorOpen(true)}
-                        className="mb-3 flex aspect-[1/1.414] w-[104px] rotate-[-3deg] flex-col rounded-[16px] border border-black/10 bg-[#FFFDF8] p-3 text-left shadow-sm transition-all duration-300 hover:-translate-y-1 hover:rotate-[-1deg] hover:shadow-[0_14px_32px_rgba(31,24,18,0.12)]"
+                        className="mb-3 flex aspect-[1/1.414] w-[104px] rotate-[-3deg] flex-col rounded-[16px] border border-black/10 bg-[#fdfdfc] p-3 text-left shadow-sm transition-all duration-300 hover:-translate-y-1 hover:rotate-[-1deg] hover:shadow-[0_14px_32px_rgba(31,24,18,0.12)]"
                         title="双击打开编辑器"
                       >
                         <span className="text-[9px] uppercase tracking-[0.18em] text-text-secondary/75">A4 Skills</span>
@@ -1304,10 +1304,10 @@ export function FloatingTaskDock() {
                         <span className="mt-auto truncate text-[11px] font-semibold">{skillFileName?.trim() || '提示词优化.md'}</span>
                       </button>
                       <div className="flex gap-2">
-                        <Button type="button" variant="outline" size="sm" className="rounded-full bg-[#F7F4EE] shadow-none" onClick={() => setIsMarkdownEditorOpen(true)}>
+                        <Button type="button" variant="outline" size="sm" className="rounded-full bg-[#fdfdfc] shadow-none" onClick={() => setIsMarkdownEditorOpen(true)}>
                           编辑
                         </Button>
-                        <Button type="button" variant="outline" size="sm" className="rounded-full bg-[#F7F4EE] shadow-none" onClick={() => markdownInputRef.current?.click()}>
+                        <Button type="button" variant="outline" size="sm" className="rounded-full bg-[#fdfdfc] shadow-none" onClick={() => markdownInputRef.current?.click()}>
                           上传
                         </Button>
                         <Button type="button" variant="ghost" size="sm" className="rounded-full text-text-secondary" onClick={() => setProjectFields({ skillFileName: '', globalSkillText: '' })}>
@@ -1348,7 +1348,7 @@ export function FloatingTaskDock() {
               </div>
 
               <div className="flex items-center gap-2">
-                  <div className="flex items-center rounded-full bg-[#F1EEE8] p-1">
+                  <div className="flex items-center rounded-full bg-[#fdfdfc] p-1">
                     <Button
                       type="button"
                       onClick={() => handleRunBatch('all')}
@@ -1391,17 +1391,17 @@ export function FloatingTaskDock() {
                     ) : null}
                   </div>
                   {isGlobalMode ? (
-                    <Button type="button" className="h-12 rounded-full bg-[#1F1D1A] px-5 text-[13px] text-white hover:bg-[#2B2925]" onClick={handleGlobalTargetApply} title="应用全局指令">
+                    <Button type="button" className="h-10 rounded-full bg-[#1F1D1A] px-4 text-[13px] text-white hover:bg-[#2B2925]" onClick={handleGlobalTargetApply} title="应用全局指令">
                       应用
                       <ArrowUp className="ml-2 h-[18px] w-[18px]" />
                     </Button>
                   ) : activeTask ? (
-                    <Button type="button" className="h-12 rounded-full bg-[#1F1D1A] px-5 text-[13px] text-white hover:bg-[#2B2925]" onClick={handleRunActiveTask} disabled={isBatchRunning} title="执行生图">
+                    <Button type="button" className="h-10 rounded-full bg-[#1F1D1A] px-4 text-[13px] text-white hover:bg-[#2B2925]" onClick={handleRunActiveTask} disabled={isBatchRunning} title="执行生图">
                       生图
                       <ArrowUp className="ml-2 h-[18px] w-[18px]" />
                     </Button>
                   ) : (
-                    <Button type="button" className="h-12 rounded-full bg-[#1F1D1A] px-5 text-[13px] text-white hover:bg-[#2B2925]" onClick={handleCreateTask} title="新建任务">
+                    <Button type="button" className="h-10 rounded-full bg-[#1F1D1A] px-4 text-[13px] text-white hover:bg-[#2B2925]" onClick={handleCreateTask} title="新建任务">
                       新建任务
                       <ArrowUp className="ml-2 h-[18px] w-[18px]" />
                     </Button>
