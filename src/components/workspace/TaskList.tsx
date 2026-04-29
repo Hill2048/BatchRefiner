@@ -40,6 +40,7 @@ const GRID_PLACEHOLDER_HEIGHT = 320;
 const LIST_PLACEHOLDER_HEIGHT = 180;
 const GRID_ITEM_HEIGHT = 410;
 const LIST_ITEM_HEIGHT = 206;
+const COLLAPSED_SHOWCASE_ITEM_HEIGHT = 200;
 const WINDOW_OVERSCAN_ROWS = 3;
 const GRID_MIN_COLUMN_WIDTH = 300;
 const GRID_GAP = 24;
@@ -153,23 +154,23 @@ const DeferredTaskCard = React.memo(function DeferredTaskCard({
         )
       ) : (
         <div
-          className={`overflow-hidden rounded-2xl border border-black/8 bg-white shadow-sm ${
-            viewMode === 'grid'
-              ? 'min-h-[320px]'
-              : viewMode === 'list' || viewMode === 'showcase'
-                ? 'min-h-[296px]'
-                : 'min-h-[180px]'
-          }`}
-          style={{
-            contentVisibility: 'auto',
-            containIntrinsicSize: `${
+            className={`overflow-hidden rounded-2xl border border-black/8 bg-white shadow-sm ${
               viewMode === 'grid'
-                ? GRID_PLACEHOLDER_HEIGHT
+                ? 'min-h-[320px]'
                 : viewMode === 'list' || viewMode === 'showcase'
-                  ? getShowcaseItemHeight(cardDensity)
-                  : LIST_PLACEHOLDER_HEIGHT
-            }px`,
-          }}
+                  ? 'min-h-[200px]'
+                  : 'min-h-[180px]'
+            }`}
+            style={{
+              contentVisibility: 'auto',
+              containIntrinsicSize: `${
+                viewMode === 'grid'
+                  ? GRID_PLACEHOLDER_HEIGHT
+                  : viewMode === 'list' || viewMode === 'showcase'
+                    ? getShowcaseItemHeight(cardDensity, true)
+                    : LIST_PLACEHOLDER_HEIGHT
+              }px`,
+            }}
           aria-hidden="true"
         >
           <div className="h-full w-full bg-[linear-gradient(180deg,#fbfaf7_0%,#f4f0e8_100%)]" />
@@ -236,8 +237,8 @@ function getShowcaseStatusLabel(status: Task['status']) {
   }
 }
 
-function getShowcaseItemHeight(cardDensity: CardDensity) {
-  if (cardDensity === 'minimal') return 168;
+function getShowcaseItemHeight(cardDensity: CardDensity, isCollapsed = false) {
+  if (isCollapsed || cardDensity === 'minimal') return COLLAPSED_SHOWCASE_ITEM_HEIGHT;
   if (cardDensity === 'compact') return 348;
   return 456;
 }
@@ -298,22 +299,22 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
   const isExpanded = isActive || isSelected;
   const isCollapsed = cardDensity === 'minimal' || !isExpanded;
   const isCompact = cardDensity === 'compact';
-  const showcaseItemHeight = getShowcaseItemHeight(cardDensity);
+  const showcaseItemHeight = getShowcaseItemHeight(cardDensity, isCollapsed);
   const rowGridClass = isCollapsed
     ? 'md:grid-cols-[188px_minmax(0,1fr)] xl:grid-cols-[204px_minmax(0,1fr)]'
     : isCompact
       ? 'md:grid-cols-[292px_minmax(0,1fr)] xl:grid-cols-[308px_minmax(0,1fr)]'
       : 'md:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[336px_minmax(0,1fr)]';
   const mediaHeightClass = isCollapsed
-    ? 'h-[52px]'
-    : isCompact
-      ? 'aspect-[16/10]'
-      : 'aspect-[4/3]';
+      ? 'h-[52px]'
+      : isCompact
+        ? 'aspect-[16/10]'
+        : 'aspect-[4/3]';
   const resultCardWidthClass = isCollapsed
-    ? 'w-[82px] md:w-[92px] xl:w-[100px]'
-    : isCompact
-      ? 'w-[170px] md:w-[188px] xl:w-[204px]'
-      : 'w-[220px] md:w-[240px] xl:w-[258px]';
+      ? 'w-[56px] md:w-[64px] xl:w-[72px]'
+      : isCompact
+        ? 'w-[170px] md:w-[188px] xl:w-[204px]'
+        : 'w-[220px] md:w-[240px] xl:w-[258px]';
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -322,6 +323,7 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
     zIndex: isDragging ? 50 : 1,
     contentVisibility: 'auto',
     containIntrinsicSize: `${showcaseItemHeight}px`,
+    ...(isCollapsed ? { minHeight: `${showcaseItemHeight}px`, height: `${showcaseItemHeight}px` } : {}),
   };
 
   const handleActivate = () => {
@@ -1005,12 +1007,12 @@ export function TaskList() {
         viewMode === 'grid'
           ? Math.max(1, Math.floor((scrollMetrics.width + GRID_GAP) / (GRID_MIN_COLUMN_WIDTH + GRID_GAP)))
           : 1;
-      const rowHeight =
-        viewMode === 'grid'
-          ? GRID_ITEM_HEIGHT
-          : viewMode === 'list' || viewMode === 'showcase'
-            ? getShowcaseItemHeight(cardDensity)
-            : LIST_ITEM_HEIGHT;
+        const rowHeight =
+          viewMode === 'grid'
+            ? GRID_ITEM_HEIGHT
+            : viewMode === 'list' || viewMode === 'showcase'
+              ? getShowcaseItemHeight(cardDensity, true)
+              : LIST_ITEM_HEIGHT;
       const targetRow = Math.floor(index / columnCount);
       node.scrollTo({
         top: Math.max(0, targetRow * rowHeight - rowHeight),
@@ -1137,7 +1139,7 @@ export function TaskList() {
       viewMode === 'grid'
         ? GRID_ITEM_HEIGHT * densityScale
         : viewMode === 'list' || viewMode === 'showcase'
-          ? getShowcaseItemHeight(cardDensity)
+          ? getShowcaseItemHeight(cardDensity, true)
           : LIST_ITEM_HEIGHT * densityScale;
     const rowCount = Math.ceil(taskIds.length / columnCount);
     const firstRow = Math.max(0, Math.floor(scrollMetrics.top / rowHeight) - WINDOW_OVERSCAN_ROWS);
