@@ -269,11 +269,11 @@ function FloatingReferenceStack({
 }) {
   const previewImages = images.slice(0, 5);
   const hasImages = previewImages.length > 0;
-  const expandedWidth = hasImages ? Math.max(174, 184 + (previewImages.length - 1) * 108) : 174;
+  const expandedWidth = hasImages ? Math.max(150, 160 + (previewImages.length - 1) * 92) : 150;
 
   return (
     <div
-      className={`group/reference flex h-[210px] w-[174px] shrink-0 flex-col rounded-[26px] p-4 transition-[width,background-color,box-shadow,ring-color] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] hover:w-[var(--expanded-reference-width)] ${
+      className={`group/reference flex h-[162px] w-[150px] shrink-0 flex-col rounded-[24px] p-3 transition-[width,background-color,box-shadow,ring-color] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] hover:w-[var(--expanded-reference-width)] ${
         isDragging
           ? 'w-[var(--expanded-reference-width)] bg-button-main/[0.06] ring-1 ring-button-main/30'
           : 'bg-transparent hover:bg-black/[0.018]'
@@ -284,12 +284,12 @@ function FloatingReferenceStack({
         {hasImages ? (
           previewImages.map((image, index) => {
             const stackOffset = Math.min(index, 3);
-            const stackTransform = `translateX(${stackOffset * 13}px) rotate(${[-12, -4, 5, 12][stackOffset]}deg)`;
-            const spreadTransform = `translateX(${index * 108}px) rotate(${[-8, -4, 2, 7, -5][index] || 0}deg)`;
+            const stackTransform = `translateX(${stackOffset * 11}px) rotate(${[-12, -4, 5, 12][stackOffset]}deg)`;
+            const spreadTransform = `translateX(${index * 92}px) rotate(${[-8, -4, 2, 7, -5][index] || 0}deg)`;
             return (
               <div
                 key={`${image.slice(0, 32)}-${index}`}
-                className="group/card absolute left-4 top-6 h-[142px] w-[104px] overflow-hidden rounded-[20px] border border-white/90 bg-[#EEE6D7] shadow-[0_14px_34px_rgba(31,24,18,0.16)] transition-[transform,box-shadow] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] [transform:var(--stack-transform)] hover:shadow-[0_18px_38px_rgba(31,24,18,0.18)] group-hover/reference:[transform:var(--spread-transform)]"
+                className="group/card absolute left-3 top-5 h-[112px] w-[82px] overflow-hidden rounded-[18px] border border-white/90 bg-[#EEE6D7] shadow-[0_12px_28px_rgba(31,24,18,0.15)] transition-[transform,box-shadow] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] [transform:var(--stack-transform)] hover:shadow-[0_16px_32px_rgba(31,24,18,0.18)] group-hover/reference:[transform:var(--spread-transform)]"
                 style={{
                   '--stack-transform': stackTransform,
                   '--spread-transform': spreadTransform,
@@ -317,7 +317,7 @@ function FloatingReferenceStack({
             type="button"
             disabled={disabled}
             onClick={onAdd}
-            className="absolute left-8 top-6 flex h-[142px] w-[104px] rotate-[-6deg] items-center justify-center rounded-[20px] border border-dashed border-black/14 bg-transparent text-black/32 transition-all hover:rotate-[-2deg] hover:border-black/22 hover:bg-white/45 disabled:cursor-not-allowed disabled:opacity-60"
+            className="absolute left-6 top-5 flex h-[112px] w-[82px] rotate-[-6deg] items-center justify-center rounded-[18px] border border-dashed border-black/14 bg-transparent text-black/32 transition-all hover:rotate-[-2deg] hover:border-black/22 hover:bg-white/45 disabled:cursor-not-allowed disabled:opacity-60"
             title="添加参考图"
           >
             <ImageIcon className="h-6 w-6" strokeWidth={1.8} />
@@ -328,7 +328,7 @@ function FloatingReferenceStack({
           {previewImages.map((image, index) => (
             <div
               key={`expanded-${image.slice(0, 32)}-${index}`}
-              className="group/card relative h-[142px] w-[104px] translate-y-2 overflow-hidden rounded-[20px] border border-white/90 bg-[#EEE6D7] shadow-[0_14px_34px_rgba(31,24,18,0.16)] transition-all duration-300 ease-out hover:-translate-y-1 group-hover/reference:translate-y-0"
+              className="group/card relative h-[112px] w-[82px] translate-y-2 overflow-hidden rounded-[18px] border border-white/90 bg-[#EEE6D7] shadow-[0_12px_28px_rgba(31,24,18,0.15)] transition-all duration-300 ease-out hover:-translate-y-1 group-hover/reference:translate-y-0"
               style={{ transitionDelay: `${index * 35}ms` }}
             >
               <img src={image} alt="" className="h-full w-full object-cover" />
@@ -351,7 +351,7 @@ function FloatingReferenceStack({
           type="button"
           disabled={disabled}
           onClick={onAdd}
-          className="absolute bottom-4 left-4 z-50 flex h-9 w-9 items-center justify-center rounded-full border border-black/8 bg-white/82 text-foreground shadow-[0_10px_22px_rgba(35,29,20,0.14)] transition-transform hover:scale-105 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="absolute bottom-3 left-3 z-50 flex h-8 w-8 items-center justify-center rounded-full border border-black/8 bg-white/82 text-foreground shadow-[0_10px_22px_rgba(35,29,20,0.14)] transition-transform hover:scale-105 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
           title="添加参考图"
         >
           {importing ? (
@@ -1136,7 +1136,7 @@ export function FloatingTaskDock() {
           onDragLeave={mode === 'global' ? handleGlobalReferenceDragLeave : handleTaskReferenceDragLeave}
           onDrop={mode === 'global' ? handleGlobalReferenceDrop : handleTaskReferenceDrop}
         >
-          <div className="min-h-[306px] animate-in fade-in slide-in-from-bottom-2 rounded-[40px] border border-black/[0.07] bg-white/92 p-4 shadow-[0_18px_50px_rgba(31,24,18,0.13)] backdrop-blur-xl duration-300">
+          <div className="h-[300px] animate-in fade-in slide-in-from-bottom-2 rounded-[40px] border border-black/[0.07] bg-white/92 p-4 shadow-[0_18px_50px_rgba(31,24,18,0.13)] backdrop-blur-xl duration-300">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="relative flex w-[128px] rounded-full bg-[#F4EFE7] p-1">
                 <span
@@ -1164,7 +1164,7 @@ export function FloatingTaskDock() {
             </div>
 
             <div key={mode} className="animate-in fade-in duration-200">
-              <div className="flex min-h-[187px] gap-4">
+              <div className="flex min-h-[150px] gap-4">
                 <FloatingReferenceStack
                   images={currentReferenceImages}
                   isDragging={currentReferenceDragging}
@@ -1208,22 +1208,22 @@ export function FloatingTaskDock() {
                       value={globalTargetText}
                       onChange={(event) => setProjectFields({ globalTargetText: event.target.value })}
                       placeholder={enablePromptOptimization ? '写全局指令：例如统一风格、构图、质感或品牌要求。' : '写可直接执行的全局提示词…'}
-                      className="h-[172px] resize-none border-transparent bg-transparent px-1 py-1 text-[15px] leading-7 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                      className="h-[136px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                     />
                   ) : activeTask ? (
                     enablePromptOptimization ? (
-                      <div className="grid h-[172px] grid-cols-2 gap-4">
+                      <div className="grid h-[136px] grid-cols-2 gap-4">
                         <Textarea
                           value={activeTask.description}
                           onChange={(event) => updateTask(activeTask.id, { description: event.target.value })}
                           placeholder="目标指令…"
-                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 text-[15px] leading-7 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                         />
                         <Textarea
                           value={activeTask.promptText || ''}
                           onChange={(event) => handleActiveTaskPromptChange(event.target.value)}
                           placeholder="提示词预览…"
-                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 text-[15px] leading-7 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                          className="h-full resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                         />
                       </div>
                     ) : (
@@ -1231,7 +1231,7 @@ export function FloatingTaskDock() {
                         value={activeTask.promptText || ''}
                         onChange={(event) => handleActiveTaskPromptChange(event.target.value)}
                         placeholder="提示词…"
-                        className="h-[172px] resize-none border-transparent bg-transparent px-1 py-1 text-[15px] leading-7 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                        className="h-[136px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                       />
                     )
                   ) : (
@@ -1239,7 +1239,7 @@ export function FloatingTaskDock() {
                       value={quickTaskInput}
                       onChange={(event) => setQuickTaskInput(event.target.value)}
                       placeholder="写一句可直接执行的新任务内容…"
-                      className="h-[172px] resize-none border-transparent bg-transparent px-1 py-1 text-[15px] leading-7 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
+                      className="h-[136px] resize-none border-transparent bg-transparent px-1 py-1 text-[14px] leading-6 text-foreground shadow-none placeholder:text-text-secondary/72 focus-visible:ring-0"
                     />
                   )}
                 </div>
