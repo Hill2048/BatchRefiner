@@ -417,7 +417,6 @@ export function FloatingTaskDock() {
   );
 
   const activeTask = activeTaskId ? taskLookup[activeTaskId] || null : null;
-  const effectiveImageModel = activeTask?.imageModelOverride || imageModel;
 
   const [mode, setMode] = React.useState<DockMode>(activeTask ? 'task' : 'global');
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
@@ -425,6 +424,7 @@ export function FloatingTaskDock() {
   const [isMarkdownEditorOpen, setIsMarkdownEditorOpen] = React.useState(false);
   const [isPreviewingPrompt, setIsPreviewingPrompt] = React.useState(false);
   const [quickTaskInput, setQuickTaskInput] = React.useState('');
+  const [quickTaskImageModelOverride, setQuickTaskImageModelOverride] = React.useState<string | undefined>(undefined);
   const [quickTaskReferenceImages, setQuickTaskReferenceImages] = React.useState<string[]>([]);
   const [isGlobalReferenceDragging, setIsGlobalReferenceDragging] = React.useState(false);
   const [isTaskReferenceDragging, setIsTaskReferenceDragging] = React.useState(false);
@@ -980,6 +980,7 @@ export function FloatingTaskDock() {
       index: nextIndex,
       title,
       description: enablePromptOptimization ? text : '',
+      imageModelOverride: quickTaskImageModelOverride,
       promptText: enablePromptOptimization ? undefined : text,
       promptInputSignature: enablePromptOptimization
         ? undefined
@@ -1002,9 +1003,10 @@ export function FloatingTaskDock() {
       window.dispatchEvent(new CustomEvent('scroll-to-task', { detail: { id: newestTask.id } }));
     }
     setQuickTaskInput('');
+    setQuickTaskImageModelOverride(undefined);
     setQuickTaskReferenceImages([]);
     toast.success(`已新建任务 #${nextIndex}`);
-  }, [addTask, enablePromptOptimization, quickTaskInput, quickTaskReferenceImages, setActiveTask, setProjectFields]);
+  }, [addTask, enablePromptOptimization, quickTaskImageModelOverride, quickTaskInput, quickTaskReferenceImages, setActiveTask, setProjectFields]);
 
   const handleActiveTaskPromptChange = React.useCallback((nextPromptText: string) => {
     if (!activeTask) return;
@@ -1026,8 +1028,11 @@ export function FloatingTaskDock() {
   }, [setProjectFields]);
 
   const handleTaskModelChange = React.useCallback((nextModel: string) => {
-    if (!activeTask) return;
-    updateTask(activeTask.id, { imageModelOverride: nextModel });
+    if (activeTask) {
+      updateTask(activeTask.id, { imageModelOverride: nextModel });
+      return;
+    }
+    setQuickTaskImageModelOverride(nextModel);
   }, [activeTask, updateTask]);
 
   const handleGlobalReferenceDragEnter = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -1107,7 +1112,8 @@ export function FloatingTaskDock() {
   const currentReferenceDragging = mode === 'global' ? isGlobalReferenceDragging : isTaskReferenceDragging;
   const isGlobalMode = mode === 'global';
   const canRunQueue = tasksCount > 0;
-  const modelSwitchValue = isGlobalMode ? imageModel : activeTask?.imageModelOverride;
+  const effectiveImageModel = activeTask?.imageModelOverride || quickTaskImageModelOverride || imageModel;
+  const modelSwitchValue = isGlobalMode ? imageModel : activeTask?.imageModelOverride || quickTaskImageModelOverride;
   const modelSwitchInheritedValue = isGlobalMode ? undefined : imageModel;
   const toolbarButtonClass =
     'h-9 rounded-full border-transparent bg-transparent px-3 text-[12px] text-text-secondary shadow-none hover:border-black/8 hover:bg-white/70 hover:text-foreground';
@@ -1251,7 +1257,13 @@ export function FloatingTaskDock() {
                   value={modelSwitchValue}
                   inheritedValue={modelSwitchInheritedValue}
                   onChange={isGlobalMode ? handleGlobalModelChange : handleTaskModelChange}
-                  onClear={!isGlobalMode && activeTask ? () => updateTask(activeTask.id, { imageModelOverride: undefined }) : undefined}
+                  onClear={!isGlobalMode ? () => {
+                    if (activeTask) {
+                      updateTask(activeTask.id, { imageModelOverride: undefined });
+                      return;
+                    }
+                    setQuickTaskImageModelOverride(undefined);
+                  } : undefined}
                 />
                 <GenerateParamsSelector
                   aspectRatio={!isGlobalMode && activeTask ? activeTask.aspectRatio || globalAspectRatio : globalAspectRatio}
