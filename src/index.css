@@ -155,10 +155,9 @@
 
 @layer components {
   .task-showcase-row {
-    transform-style: preserve-3d;
+    transform-style: flat;
   }
 
-  .task-showcase-card,
   .task-showcase-result-card,
   .task-showcase-action {
     will-change: transform;
@@ -169,12 +168,10 @@
       opacity 180ms ease;
   }
 
-  .task-showcase-row:hover .task-showcase-card {
-    transform: perspective(900px) rotateX(0.35deg) rotateY(-0.45deg) translateY(-1px);
-  }
-
-  .task-showcase-row:active .task-showcase-card {
-    transform: perspective(900px) rotateX(0deg) rotateY(0deg) translateY(0) scale(0.998);
+  .task-showcase-card {
+    transition:
+      border-color 180ms ease,
+      background-color 180ms ease;
   }
 
   .task-showcase-media img {
@@ -236,8 +233,6 @@
       transition: none;
     }
 
-    .task-showcase-row:hover .task-showcase-card,
-    .task-showcase-row:active .task-showcase-card,
     .task-showcase-row:hover .task-showcase-media img,
     .task-showcase-action:hover,
     .task-showcase-result-card:hover {
