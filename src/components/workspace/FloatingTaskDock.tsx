@@ -430,7 +430,7 @@ export function FloatingTaskDock() {
 
   const activeTask = activeTaskId ? taskLookup[activeTaskId] || null : null;
 
-  const [mode, setMode] = React.useState<DockMode>(activeTask ? 'task' : 'global');
+  const [mode, setMode] = React.useState<DockMode>('task');
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
   const [isMarkdownEditorOpen, setIsMarkdownEditorOpen] = React.useState(false);
