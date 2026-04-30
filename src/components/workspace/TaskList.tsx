@@ -303,6 +303,7 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const toggleTaskSelection = useAppStore((state) => state.toggleTaskSelection);
   const removeTask = useAppStore((state) => state.removeTask);
+  const globalReferenceImages = useAppStore((state) => state.globalReferenceImages);
   const cardDensity = useAppStore((state) => state.cardDensity);
   const imageModel = useAppStore((state) => state.imageModel);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
@@ -574,6 +575,26 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
             </div>
           ) : (
           <>
+          {globalReferenceImages.length > 0 ? (
+            <div className="rounded-[18px] border border-black/6 bg-[#FCFBF8] px-3.5 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-[9.45px] font-bold uppercase tracking-wider text-black/42">全局参考</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  {globalReferenceImages.slice(0, 3).map((image, index) => (
+                    <div key={`${task.id}-global-reference-${index}`} className="h-10 w-10 overflow-hidden rounded-[12px] bg-white ring-1 ring-black/6">
+                      <img src={image} alt={`全局参考图 ${index + 1}`} draggable={false} className="h-full w-full object-cover" />
+                    </div>
+                  ))}
+                  {globalReferenceImages.length > 3 ? (
+                    <div className="flex h-10 min-w-[40px] items-center justify-center rounded-[12px] border border-dashed border-black/12 bg-white px-2 text-[11px] text-text-secondary">
+                      +{globalReferenceImages.length - 3}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="rounded-[18px] border border-black/6 bg-[#FCFBF8] px-3.5 py-3">
             <div className="flex min-w-0 items-center gap-2">
               <span className="text-[9.45px] font-bold uppercase tracking-wider text-black/42">参考图</span>
