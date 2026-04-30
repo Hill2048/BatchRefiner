@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Download, Fullscreen, Image as ImageIcon, GripVertical, Plus, Trash2, Upload } from 'lucide-react';
+import { Copy, Download, Fullscreen, Image as ImageIcon, GripVertical, Plus, Trash2, Upload } from 'lucide-react';
 import { CSS } from '@dnd-kit/utilities';
 import { toast } from 'sonner';
 import { useAppStore } from '@/store';
@@ -10,6 +10,7 @@ import { getBatchCountNumber, getCurrentTaskResultImages, getTaskResultImages } 
 import { getResultImageAssetDimensions, getResultImageAssetExtension } from '@/lib/resultImageAsset';
 import { buildResultImageFileName } from '@/lib/resultImageFileName';
 import { resolveResultImageDownloadBlob } from '@/lib/resultImageDownload';
+import { buildDuplicatedTask } from '@/lib/taskDuplication';
 import { AnalyzingImage } from '@/components/loading-ui/analyzing-image';
 import {
   DndContext,
@@ -303,6 +304,8 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const toggleTaskSelection = useAppStore((state) => state.toggleTaskSelection);
   const removeTask = useAppStore((state) => state.removeTask);
+  const addTask = useAppStore((state) => state.addTask);
+  const setProjectFields = useAppStore((state) => state.setProjectFields);
   const globalReferenceImages = useAppStore((state) => state.globalReferenceImages);
   const cardDensity = useAppStore((state) => state.cardDensity);
   const imageModel = useAppStore((state) => state.imageModel);
@@ -365,6 +368,16 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
 
   const handleActivate = () => {
     setActiveTask(task.id);
+  };
+
+  const handleDuplicateTask = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    addTask(buildDuplicatedTask(task, useAppStore.getState().tasks.length + 1));
+    const newestTask = useAppStore.getState().tasks.at(-1);
+    if (!newestTask) return;
+    setActiveTask(newestTask.id);
+    setProjectFields({ selectedTaskIds: [newestTask.id] });
+    window.dispatchEvent(new CustomEvent('scroll-to-task', { detail: { id: newestTask.id } }));
   };
 
   const handleOpenResult = (result: TaskResultImage, fallbackIndex: number) => {
@@ -552,7 +565,15 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
           />
         </div>
 
-        <div className="absolute right-3 top-3 z-20">
+        <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            className="task-showcase-action inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/72 text-text-secondary backdrop-blur-sm opacity-0 transition-all hover:bg-white group-hover:opacity-100"
+            onClick={handleDuplicateTask}
+            title="复制任务"
+          >
+            <Copy className="h-4 w-4" />
+          </button>
           <button
             type="button"
             className="task-showcase-action inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/72 text-text-secondary backdrop-blur-sm opacity-0 transition-all hover:bg-red-500/90 hover:text-white group-hover:opacity-100"

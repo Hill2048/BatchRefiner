@@ -2,7 +2,7 @@
 import { CSS } from '@dnd-kit/utilities';
 import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
-import { Download, Eye, Fullscreen, GripVertical, ImageIcon, Trash2, Upload, X } from 'lucide-react';
+import { Copy, Download, Eye, Fullscreen, GripVertical, ImageIcon, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Task, TaskResultImage } from '@/types';
 import { useAppStore } from '@/store';
@@ -23,6 +23,7 @@ import { primeTaskResultImageCache } from '@/lib/resultImageCache';
 import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultImageDownloadError } from '@/lib/resultImageDownload';
 import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from '@/lib/appLogger';
 import { getStoredImageAsset } from '@/lib/imageAssetStore';
+import { buildDuplicatedTask } from '@/lib/taskDuplication';
 import { AnalyzingImage } from '@/components/loading-ui/analyzing-image';
 
 type TaskCardProps = {
@@ -164,6 +165,8 @@ export const TaskCard = React.memo(function TaskCard({
   const task = useAppStore(state => state.taskLookup[taskId]);
   const isActive = useAppStore(state => state.activeTaskId === taskId);
   const setActiveTask = useAppStore(state => state.setActiveTask);
+  const setProjectFields = useAppStore(state => state.setProjectFields);
+  const addTask = useAppStore(state => state.addTask);
   const updateTask = useAppStore(state => state.updateTask);
   const removeTask = useAppStore(state => state.removeTask);
   const setLightboxTask = useAppStore(state => state.setLightboxTask);
@@ -189,6 +192,16 @@ export const TaskCard = React.memo(function TaskCard({
   const isListMode = viewMode === 'list';
   const isMinimalDensity = cardDensity === 'minimal';
   const isCompactDensity = cardDensity === 'compact' || isMinimalDensity;
+
+  const handleDuplicateTask = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    addTask(buildDuplicatedTask(task, tasksCount + 1));
+    const newestTask = useAppStore.getState().tasks.at(-1);
+    if (!newestTask) return;
+    setActiveTask(newestTask.id);
+    setProjectFields({ selectedTaskIds: [newestTask.id] });
+    window.dispatchEvent(new CustomEvent('scroll-to-task', { detail: { id: newestTask.id } }));
+  };
   const [selectedResultIndex, setSelectedResultIndex] = React.useState(0);
   const [viewerMode, setViewerMode] = React.useState<ViewerMode>('result');
   const descriptionEditor = useAutoSaveTextEditor({
@@ -758,6 +771,14 @@ export const TaskCard = React.memo(function TaskCard({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/68 text-text-secondary backdrop-blur-sm transition-colors hover:bg-white"
+                onClick={handleDuplicateTask}
+                title="复制任务"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/68 text-text-secondary backdrop-blur-sm transition-colors hover:bg-red-500/90 hover:text-white"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1012,6 +1033,13 @@ export const TaskCard = React.memo(function TaskCard({
           </div>
 
           <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+            <button
+              onClick={handleDuplicateTask}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/68 text-text-secondary shadow-sm backdrop-blur-sm opacity-0 transition-all hover:bg-white group-hover:opacity-100"
+              title="复制任务"
+            >
+              <Copy className="h-4 w-4" />
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();

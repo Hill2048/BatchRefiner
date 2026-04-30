@@ -1,8 +1,8 @@
 {
   "name": "batch-refiner",
   "private": true,
-  "version": "3.9.22",
-  "appVersion": "3.9.22",
+  "version": "3.9.23",
+  "appVersion": "3.9.23",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
