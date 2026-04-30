@@ -11,7 +11,7 @@ import { getResultImageAssetDimensions, getResultImageAssetExtension } from '@/l
 import { buildResultImageFileName } from '@/lib/resultImageFileName';
 import { resolveResultImageDownloadBlob } from '@/lib/resultImageDownload';
 import { buildDuplicatedTask } from '@/lib/taskDuplication';
-import { AnalyzingImage } from '@/components/loading-ui/analyzing-image';
+import { DotMatrixPulse } from '@/components/loading-ui/dot-matrix-pulse';
 import {
   DndContext,
   closestCenter,
@@ -199,6 +199,15 @@ function triggerDirectDownload(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
+function getCssAspectRatio(value?: string) {
+  if (!value || value === 'auto') return '3 / 4';
+  const parts = value.split(':').map((item) => Number(item.trim()));
+  if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1]) || parts[0] <= 0 || parts[1] <= 0) {
+    return '3 / 4';
+  }
+  return `${parts[0]} / ${parts[1]}`;
+}
+
 type DownloadTaskResultImageOptions = {
   task: Task;
   result: TaskResultImage;
@@ -307,6 +316,7 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
   const addTask = useAppStore((state) => state.addTask);
   const setProjectFields = useAppStore((state) => state.setProjectFields);
   const globalReferenceImages = useAppStore((state) => state.globalReferenceImages);
+  const globalAspectRatio = useAppStore((state) => state.globalAspectRatio);
   const cardDensity = useAppStore((state) => state.cardDensity);
   const imageModel = useAppStore((state) => state.imageModel);
   const exportTemplate = useAppStore((state) => state.exportTemplate);
@@ -329,6 +339,7 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
     task.status === 'Rendering' || task.status === 'Running'
       ? Math.max(0, requestedCount - resultImages.length - (task.failedResultCount || 0))
       : 0;
+  const placeholderAspectRatio = getCssAspectRatio(task.aspectRatio || globalAspectRatio);
   const paramChips = [
     task.aspectRatio,
     task.resolution,
@@ -684,6 +695,25 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
         </div>
 
         <div className={`flex overflow-x-auto pb-1 ${isCollapsed ? 'gap-2' : 'gap-3'}`}>
+          {placeholderCount > 0 && resultImages.length > 0
+            ? Array.from({ length: placeholderCount }).map((_, index) => (
+                <div
+                  key={`${task.id}-leading-placeholder-${index}`}
+                  className={`task-showcase-placeholder task-showcase-placeholder--dot relative flex shrink-0 flex-col items-center justify-center overflow-hidden rounded-[18px] border border-black/8 bg-[linear-gradient(180deg,#FFFFFF_0%,#F7F3EC_100%)] px-5 text-center ${resultCardWidthClass}`}
+                  style={{ aspectRatio: placeholderAspectRatio }}
+                >
+                  <div className="absolute inset-[10%] overflow-hidden rounded-[16px] border border-black/6 bg-white/54 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+                    <DotMatrixPulse className="absolute inset-0 text-black/30" gridSizePercent={12.5} insetPercent={12} />
+                  </div>
+                  {!isCollapsed ? (
+                    <div className="relative z-10 mt-auto pb-5">
+                      <div className="mt-4 text-[13px] font-medium text-foreground">正在生成第 {index + 1} 张</div>
+                      <div className="mt-1 text-[11px] text-text-secondary">生成完成后会显示在这里</div>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            : null}
           {resultImages.length > 0
             ? resultImages.map((result, resultIndex) => {
                 const src = getShowcaseResultImage(result);
@@ -777,17 +807,17 @@ const TaskShowcaseRow = React.memo(function TaskShowcaseRow({
             : Array.from({ length: placeholderCount }).map((_, index) => (
                 <div
                   key={`${task.id}-placeholder-${index}`}
-                  className={`task-showcase-placeholder relative flex shrink-0 flex-col items-center justify-center overflow-hidden rounded-[18px] border border-black/8 bg-[linear-gradient(180deg,#FFFFFF_0%,#F7F3EC_100%)] px-5 text-center ${resultCardWidthClass}`}
-                  style={{ aspectRatio: '3 / 4' }}
+                  className={`task-showcase-placeholder task-showcase-placeholder--dot relative flex shrink-0 flex-col items-center justify-center overflow-hidden rounded-[18px] border border-black/8 bg-[linear-gradient(180deg,#FFFFFF_0%,#F7F3EC_100%)] px-5 text-center ${resultCardWidthClass}`}
+                  style={{ aspectRatio: placeholderAspectRatio }}
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full border border-black/8 bg-white/82">
-                    <AnalyzingImage className="h-7 w-7 text-black/32" />
+                  <div className="absolute inset-[10%] overflow-hidden rounded-[16px] border border-black/6 bg-white/54 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+                    <DotMatrixPulse className="absolute inset-0 text-black/30" gridSizePercent={12.5} insetPercent={12} />
                   </div>
                   {!isCollapsed ? (
-                    <>
+                    <div className="relative z-10 mt-auto pb-5">
                       <div className="mt-4 text-[13px] font-medium text-foreground">正在生成第 {index + 1} 张</div>
                       <div className="mt-1 text-[11px] text-text-secondary">生成完成后会显示在这里</div>
-                    </>
+                    </div>
                   ) : null}
                 </div>
               ))}

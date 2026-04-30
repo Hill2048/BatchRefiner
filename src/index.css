@@ -153,6 +153,21 @@
   }
 }
 
+@keyframes dot-matrix-breathe {
+  0% {
+    opacity: 0.16;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.54;
+    transform: scale(1.035);
+  }
+  100% {
+    opacity: 0.16;
+    transform: scale(0.94);
+  }
+}
+
 @keyframes analyzing-image-scan {
   0% {
     transform: translateY(-220%);
@@ -228,7 +243,7 @@
     opacity: 1;
   }
 
-  .task-showcase-placeholder::after {
+  .task-showcase-placeholder:not(.task-showcase-placeholder--dot)::after {
     content: "";
     position: absolute;
     inset: 0;
@@ -240,6 +255,50 @@
 
   .loading-analyzing-image {
     color: rgb(31 29 26 / 0.34);
+  }
+
+  .loading-dot-matrix {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    contain: paint;
+    color: rgb(34 31 27 / 0.28);
+  }
+
+  .loading-dot-matrix__base,
+  .loading-dot-matrix__pulse {
+    position: absolute;
+    inset: var(--dot-matrix-inset, 12%);
+    background-image: radial-gradient(circle, currentColor 0 1.2px, transparent 1.9px);
+    background-size: var(--dot-grid-size, 12.5%) var(--dot-grid-size, 12.5%);
+    background-position: center;
+    background-repeat: repeat;
+    transform-origin: center;
+  }
+
+  .loading-dot-matrix__base {
+    opacity: 0.12;
+  }
+
+  .loading-dot-matrix__glow {
+    position: absolute;
+    inset: 10%;
+    border-radius: inherit;
+    background: radial-gradient(circle at center, rgb(255 255 255 / 0.56) 0%, rgb(255 255 255 / 0.22) 28%, transparent 72%);
+    pointer-events: none;
+  }
+
+  .loading-dot-matrix__pulse {
+    opacity: 0.22;
+    will-change: transform, opacity;
+    mask-image: radial-gradient(circle at center, rgb(0 0 0 / 1) 0%, rgb(0 0 0 / 0.92) 32%, rgb(0 0 0 / 0.52) 60%, transparent 82%);
+    animation: dot-matrix-breathe 2.35s ease-in-out infinite;
+  }
+
+  .loading-dot-matrix--static .loading-dot-matrix__pulse {
+    animation: none;
+    opacity: 0.28;
+    transform: scale(1);
   }
 
   .loading-analyzing-image__scan {
@@ -261,6 +320,7 @@
     .task-showcase-action,
     .task-showcase-media img,
     .task-showcase-placeholder::after,
+    .loading-dot-matrix__pulse,
     .loading-analyzing-image__scan {
       animation: none;
       transition: none;

@@ -24,7 +24,7 @@ import { getResultDownloadDiagnostics, resolveResultImageDownloadBlob, ResultIma
 import { appendGenerationLogEvent, getLatestGenerationLogSessionForTask } from '@/lib/appLogger';
 import { getStoredImageAsset } from '@/lib/imageAssetStore';
 import { buildDuplicatedTask } from '@/lib/taskDuplication';
-import { AnalyzingImage } from '@/components/loading-ui/analyzing-image';
+import { DotMatrixPulse } from '@/components/loading-ui/dot-matrix-pulse';
 
 type TaskCardProps = {
   taskId: string;
@@ -696,10 +696,13 @@ export const TaskCard = React.memo(function TaskCard({
       src: '',
       placeholder: true,
     }));
-    const visibleThumbnailItems = [...thumbnailItems, ...placeholderItems];
+    const sourceThumbnailItems = thumbnailItems.filter((item) => item.type === 'source');
+    const resultThumbnailItems = thumbnailItems.filter((item) => item.type === 'result');
+    const visibleThumbnailItems = [...sourceThumbnailItems, ...placeholderItems, ...resultThumbnailItems];
     const hasThumbnailStrip = visibleThumbnailItems.length > 1;
     const hasResolvedActiveResult = viewerMode === 'result' && Boolean(activeResult?.src) && selectedResultIndex < resultImages.length;
-    const shouldAnimateViewerImage = !shouldReduceMotionEffects && isRenderingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
+    const shouldShowViewerPlaceholder = isRenderingVisual && viewerMode === 'result' && !hasResolvedActiveResult;
+    const shouldAnimateViewerImage = !shouldReduceMotionEffects && shouldShowViewerPlaceholder;
 
     return (
       <div className="overflow-hidden rounded-t-[22px] rounded-b-none bg-[#FBFAF7] p-0 transition-all duration-300 ease-out">
@@ -707,13 +710,16 @@ export const TaskCard = React.memo(function TaskCard({
           className="relative aspect-[3/2] w-full overflow-hidden bg-[#F7F5F1]"
           style={{ contain: 'paint' }}
         >
-          {shouldAnimateViewerImage ? (
+          {shouldShowViewerPlaceholder ? (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
               <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.16)_0%,rgba(255,255,255,0.08)_100%)]" />
-              <div className="absolute inset-0 opacity-85 bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_34%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.2),transparent_30%)]" />
-              <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/58 to-transparent blur-[12px] animate-[shimmer_2.6s_linear_infinite]" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <AnalyzingImage className="h-16 w-16 text-black/22" />
+              <div className="absolute inset-[9%] overflow-hidden rounded-[20px] border border-black/6 bg-white/16">
+                <DotMatrixPulse
+                  className="absolute inset-0 text-black/24"
+                  animated={!shouldReduceMotionEffects}
+                  gridSizePercent={12.5}
+                  insetPercent={12}
+                />
               </div>
             </div>
           ) : null}
@@ -733,13 +739,13 @@ export const TaskCard = React.memo(function TaskCard({
                 title="双击查看大图"
               />
             </div>
-          ) : shouldAnimateViewerImage && displaySourceImage ? (
+          ) : shouldShowViewerPlaceholder && displaySourceImage ? (
             <div className="relative z-0 flex h-full w-full items-center justify-center">
               <img
                 src={displaySourceImage}
                 alt={task.title}
                 decoding="async"
-                className="block h-full w-full scale-[1.03] object-cover blur-[12px] saturate-[0.9] opacity-92"
+                className={`block h-full w-full object-cover saturate-[0.9] opacity-92 ${shouldAnimateViewerImage ? 'scale-[1.03] blur-[12px]' : 'scale-[1.01] blur-[8px]'}`}
                 draggable={false}
                 onDragStart={preventNativeImageDrag}
               />
@@ -747,7 +753,14 @@ export const TaskCard = React.memo(function TaskCard({
           ) : (
             <div className="flex h-full w-full items-center justify-center text-text-secondary/50">
               {isRenderingVisual ? (
-                <AnalyzingImage className="h-14 w-14 text-black/28" />
+                <div className="relative h-[62%] w-[62%] max-h-[220px] max-w-[220px] overflow-hidden rounded-[24px] border border-black/6 bg-white/48">
+                  <DotMatrixPulse
+                    className="absolute inset-0 text-black/28"
+                    animated={!shouldReduceMotionEffects}
+                    gridSizePercent={12.5}
+                    insetPercent={13}
+                  />
+                </div>
               ) : (
                 <ImageIcon className="h-8 w-8 opacity-30" />
               )}
@@ -810,14 +823,14 @@ export const TaskCard = React.memo(function TaskCard({
                           className="relative h-9 min-w-0 flex-1 basis-10 overflow-hidden rounded-[12px] border border-black/10 bg-[#f3efe8] sm:h-10 sm:basis-[46px]"
                           aria-hidden="true"
                         >
-                          <div className="absolute inset-0 bg-[linear-gradient(135deg,#f6f1ea_0%,#efe6da_52%,#eadfce_100%)]" />
-                          <div className="absolute inset-0 opacity-70 bg-[radial-gradient(circle_at_28%_24%,rgba(255,255,255,0.62),transparent_34%),radial-gradient(circle_at_72%_72%,rgba(255,255,255,0.2),transparent_28%)]" />
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <AnalyzingImage className="h-5 w-5 text-black/26" />
+                          <div className="absolute inset-[10%] overflow-hidden rounded-[10px] bg-white/42">
+                            <DotMatrixPulse
+                              className="absolute inset-0 text-black/24"
+                              animated={!shouldReduceMotionEffects}
+                              gridSizePercent={20}
+                              insetPercent={18}
+                            />
                           </div>
-                          {!shouldReduceMotionEffects ? (
-                            <div className="absolute inset-y-0 left-[-55%] w-[42%] rotate-[12deg] bg-gradient-to-r from-transparent via-white/72 to-transparent animate-[shimmer_2s_linear_infinite]" />
-                          ) : null}
                         </div>
                       );
                     }
@@ -999,13 +1012,14 @@ export const TaskCard = React.memo(function TaskCard({
           {isRenderingVisual && !primaryResult?.src && (
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
               <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.18)_0%,rgba(255,255,255,0.08)_100%)]" />
-              <div className="absolute inset-0 opacity-82 bg-[radial-gradient(circle_at_24%_20%,rgba(255,255,255,0.34),transparent_30%),radial-gradient(circle_at_74%_76%,rgba(255,255,255,0.22),transparent_28%)]" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <AnalyzingImage className="h-12 w-12 text-black/22" />
+              <div className="absolute inset-[10%] overflow-hidden rounded-[18px] border border-black/6 bg-white/18">
+                <DotMatrixPulse
+                  className="absolute inset-0 text-black/24"
+                  animated={!shouldReduceMotionEffects}
+                  gridSizePercent={12.5}
+                  insetPercent={13}
+                />
               </div>
-              {!shouldReduceMotionEffects ? (
-                <div className="absolute inset-y-[-12%] left-[-30%] w-[42%] rotate-[10deg] bg-gradient-to-r from-transparent via-white/58 to-transparent blur-[10px] animate-[shimmer_2.4s_linear_infinite]" />
-              ) : null}
             </div>
           )}
 
